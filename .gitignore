@@ -1,0 +1,40 @@
+# ==============================
+# StarCam .gitignore
+# ==============================
+
+# --- 用户隐私与本地测试数据（绝不入库） ---
+testdata/
+*.gray
+
+# --- 构建产物与打包输出 ---
+apk/
+**/build/
+.gradle/
+*.apk
+*.aab
+
+# --- 本机环境与密钥 ---
+local.properties
+*.keystore
+*.jks
+*.key
+*.txt
+*.zip
+*.bak
+
+# --- 冗余二进制副本（code/assets 已含） ---
+indexes/
+
+# --- IDE 与系统文件 ---
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- 临时文件与日志 ---
+*.log
+*.tmp
+tmp_*/
+__pycache__/
+*.py[cod]
+*$py.class

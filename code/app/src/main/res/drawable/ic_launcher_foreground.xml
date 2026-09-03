@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动图标前景：五角星（星辉金色） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#E3C567"
+        android:pathData="M54,28 L60.9,43.3 L77.6,45.2 L65.5,56.3 L69.4,72.7 L54,63.9 L38.6,72.7 L42.5,56.3 L30.4,45.2 L47.1,43.3 Z" />
+    <!-- 小星星点缀 -->
+    <path
+        android:fillColor="#7FB3E8"
+        android:pathData="M24,26 L25.8,29.6 L29.6,30 L26.8,32.5 L27.6,36.2 L24,34 L20.4,36.2 L21.2,32.5 L18.4,30 L22.2,29.6 Z" />
+    <path
+        android:fillColor="#7FB3E8"
+        android:pathData="M82,66 L83.6,69.2 L87,69.6 L84.5,71.8 L85.2,75.2 L82,73.1 L78.8,75.2 L79.5,71.8 L77,69.6 L80.4,69.2 Z" />
+    <path
+        android:fillColor="#7FB3E8"
+        android:pathData="M80,22 L81.2,24.4 L83.8,24.7 L81.9,26.4 L82.4,29 L80,27.4 L77.6,29 L78.1,26.4 L76.2,24.7 L78.8,24.4 Z" />
+</vector>

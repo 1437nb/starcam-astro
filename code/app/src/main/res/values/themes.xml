@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用主题：深色（配合 Compose Material3 深色方案） -->
+    <style name="Theme.StarCam" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/night_blue</item>
+        <item name="android:statusBarColor">@color/night_blue</item>
+        <item name="android:navigationBarColor">@color/night_blue</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <color name="night_blue">#0B1026</color>
+    <color name="ic_launcher_background">#0B1026</color>
+</resources>

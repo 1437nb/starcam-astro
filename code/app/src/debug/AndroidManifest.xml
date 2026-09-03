@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 仅 debug 构建合并：真机自动化测试入口（adb 拉起） -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".AutoTestActivity"
+            android:exported="true"
+            android:label="识别效率测试"
+            android:screenOrientation="portrait" />
+    </application>
+</manifest>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">星空识星</string>
+    <string name="app_desc">拍照认星 · 识别照片中的星座与亮星</string>
+</resources>
