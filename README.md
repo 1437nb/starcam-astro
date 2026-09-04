@@ -1,5 +1,7 @@
 # StarCam / 星空识星
 
+[**简体中文**](README.md) | [**English**](README_en.md)
+
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
 [![Android](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com)
 
@@ -41,7 +43,8 @@
 ├── docs/                   # 完整工程文档与 36 份验证增补报告（§0.10 ~ §0.43c）
 ├── tools/                  # Python 星表生成器与离线工具集
 ├── LICENSE                 # GNU General Public License v2.0
-├── README.md
+├── README.md               # 中文说明文档
+├── README_en.md            # 英文说明文档
 └── .gitignore
 ```
 
