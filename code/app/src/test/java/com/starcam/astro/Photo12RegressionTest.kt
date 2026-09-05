@@ -26,7 +26,13 @@ import kotlin.math.min
 class Photo12RegressionTest {
 
     private val photoDir: String =
-        System.getenv("PHOTO12_DIR") ?: "testdata/gray12"
+        System.getenv("PHOTO12_DIR")
+            ?: listOf(
+                "../../testdata/gray12",
+                "../testdata/gray12",
+                "testdata/gray12",
+                "C:/starcam-bundle/testdata/gray12",
+            ).firstOrNull { File(it).isDirectory } ?: "testdata/gray12"
 
     /** 照片号 → 真值（中心 RA/Dec、长边视场度） */
     private data class Truth(val ra: Double, val dec: Double, val fovDeg: Double)

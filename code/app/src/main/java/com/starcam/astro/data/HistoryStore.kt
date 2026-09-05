@@ -160,8 +160,8 @@ object HistoryStore {
         return acos(s.coerceIn(-1.0, 1.0)) / r
     }
 
-    /** 天区中心最近的星座（中文名）：取 5° 内最近星表星的所属星座（跳过无星座的增补星 §0.42） */
-    fun nearestConstellationZh(raDeg: Double, decDeg: Double): String {
+    /** 天区中心最近的星座：取 5° 内最近星表星的所属星座（支持中英双语，跳过无星座的增补星 §0.42） */
+    fun nearestConstellation(raDeg: Double, decDeg: Double, isEnglish: Boolean = false): String {
         var best: Pair<Double, String>? = null
         for (star in StarCatalogData.stars) {
             if (star.con.isEmpty()) continue
@@ -169,6 +169,10 @@ object HistoryStore {
             if (best == null || d < best.first) best = d to star.con
         }
         val con = best?.second ?: return ""
-        return Constellations.zhName(con)
+        return Constellations.name(con, isEnglish)
     }
+
+    /** 天区中心最近的星座（中文名，兼容旧接口）：取 5° 内最近星表星的所属星座 */
+    fun nearestConstellationZh(raDeg: Double, decDeg: Double): String =
+        nearestConstellation(raDeg, decDeg, isEnglish = false)
 }

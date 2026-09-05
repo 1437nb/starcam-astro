@@ -8,6 +8,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import com.starcam.astro.data.AppLanguage
+import java.util.Locale
 
 /** 主题模式（§0.33）：夜视红为天文暗适应专用——红光对夜间视力影响最小 */
 enum class AppThemeMode(val key: String, val label: String) {
@@ -18,6 +20,18 @@ enum class AppThemeMode(val key: String, val label: String) {
 /** 主题运行时状态：设置页修改即时生效（无需重建 Activity） */
 object ThemeState {
     var mode by mutableStateOf(AppThemeMode.DEEP_SKY)
+}
+
+/** 语言运行时状态：设置页修改即时生效（无需重建 Activity） */
+object LocaleState {
+    var language by mutableStateOf(AppLanguage.FOLLOW_SYSTEM)
+
+    val isEnglish: Boolean
+        get() = when (language) {
+            AppLanguage.EN -> true
+            AppLanguage.ZH -> false
+            AppLanguage.FOLLOW_SYSTEM -> Locale.getDefault().language.lowercase().startsWith("en")
+        }
 }
 
 // 深色夜空主题配色（星空蓝底 + 星辉金强调）

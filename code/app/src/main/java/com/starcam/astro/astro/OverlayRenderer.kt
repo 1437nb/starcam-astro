@@ -28,7 +28,7 @@ object OverlayRenderer {
     }
 
     /** 识别成功 → 叠加星座的位图；缺 WCS 或渲染失败返回 null */
-    fun render(bitmap: Bitmap, solve: SolveResult): Bitmap? {
+    fun render(bitmap: Bitmap, solve: SolveResult, isEnglish: Boolean = false): Bitmap? {
         val rawWcs = solve.wcs ?: return null
         val w = bitmap.width
         val h = bitmap.height
@@ -65,11 +65,11 @@ object OverlayRenderer {
         }
         for (s in stars) {
             if (!s.visible || s.entry.mag > 3.2) continue
-            val name = StarNames.displayName(s.entry.hip, s.entry.name)
+            val name = StarNames.displayName(s.entry.hip, s.entry.name, isEnglish)
             if (name.isEmpty()) continue
             canvas.drawText(name, s.x + 7f, s.y - 7f, namePaint)
         }
-        // §0.43c：梅西耶深空天体标注（小圆圈 + M 编号与中文名，颜色按类型）
+        // §0.43c：梅西耶深空天体标注（小圆圈 + M 编号与名称，颜色按类型）
         val messierRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 1.4f * density
@@ -84,7 +84,7 @@ object OverlayRenderer {
             if (!m.visible) continue
             messierRing.color = MessierCatalog.typeColor(m.obj.type)
             canvas.drawCircle(m.x, m.y, 7f * density, messierRing)
-            canvas.drawText("M${m.obj.number} ${m.obj.zh}", m.x + 10f * density, m.y - 6f * density, messierPaint)
+            canvas.drawText(m.obj.label(isEnglish), m.x + 10f * density, m.y - 6f * density, messierPaint)
         }
         return out
     }

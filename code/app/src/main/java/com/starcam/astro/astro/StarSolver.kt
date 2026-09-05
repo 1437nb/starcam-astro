@@ -28,30 +28,49 @@ import kotlinx.coroutines.withContext
  * 窄场（<8°，望远镜等）亮星表自动跳过直接官方引擎；最后在线兜底。
  * NATIVE_FIRST 模式保留官方引擎优先的旧策略。
  */
-enum class SolveEngine(val label: String) {
-    ASTROMETRY_NATIVE("astrometry.net 本地引擎"),
-    LOCAL_MATCHER("内置星表匹配"),
-    ONLINE_NOVA("在线 nova.astrometry.net"),
+enum class SolveEngine(val labelZh: String, val labelEn: String) {
+    ASTROMETRY_NATIVE("astrometry.net 本地引擎", "astrometry.net Native"),
+    LOCAL_MATCHER("内置星表匹配", "Local Catalog Matcher"),
+    ONLINE_NOVA("在线 nova.astrometry.net", "Online nova.astrometry.net");
+
+    val label: String get() = labelZh
+    fun label(isEnglish: Boolean = false): String = if (isEnglish) labelEn else labelZh
 }
 
 /** 识别引擎模式（设置页可切换） */
-enum class EngineMode(val key: String, val label: String, val description: String) {
+enum class EngineMode(
+    val key: String,
+    val labelZh: String,
+    val labelEn: String,
+    val descriptionZh: String,
+    val descriptionEn: String,
+) {
     AUTO(
-        "auto", "自动（推荐）",
+        "auto", "自动（推荐）", "Auto (Recommended)",
         "广角照片先 Hipparcos 亮星表秒级匹配，失败后用 astrometry.net 官方引擎精解，最后在线兜底",
+        "Fast wide-field catalog matching first, official engine next, online fallback last",
     ),
     NATIVE_FIRST(
-        "native_first", "官方引擎优先",
+        "native_first", "官方引擎优先", "Official Engine First",
         "始终先试 astrometry.net 官方引擎（0.1°~35°），再内置星表，最后在线",
+        "Always try official astrometry.net engine first, then local catalog, online last",
     ),
     OFFLINE_ONLY(
-        "offline_only", "仅离线",
+        "offline_only", "仅离线", "Offline Only",
         "只用本地引擎（官方 + 内置星表），不上传照片",
+        "Use local engines only (official + local catalog), never upload photos",
     ),
     ONLINE_ONLY(
-        "online_only", "仅在线",
+        "online_only", "仅在线", "Online Only",
         "只用 astrometry.net 在线服务求解（需 API Key）",
-    ),
+        "Only use online astrometry.net service (requires API Key)",
+    );
+
+    val label: String get() = labelZh
+    val description: String get() = descriptionZh
+
+    fun label(isEnglish: Boolean = false): String = if (isEnglish) labelEn else labelZh
+    fun description(isEnglish: Boolean = false): String = if (isEnglish) descriptionEn else descriptionZh
 }
 
 /** 一次成功识别的结果（含引擎标识与详情） */
@@ -337,9 +356,46 @@ object StarSolver {
                     // （§0.33.3：避免复核不一致后再走 12s+16s 盲解两段）
                     val effFov = fovOverride ?: fov
 
-                    // 1) 天区先验轮（GPS+时间齐全时）：天顶为中心 ± 半径，先试快解
+                    // 1) 传感器粗定标先验轮（若开启且有姿态缓存）：以相机指向为中心 ±25° 快速求解
+                    val sensorHint = if (settings.sensorAssistedPointing) {
+                        PointingHintStore.get(imagePath)
+                    } else null
+
+                    if (sensorHint != null) {
+                        val (lo, hi) = if (effFov != null) {
+                            FovEstimate.fovRange(effFov)
+                        } else {
+                            0.1 to 180.0
+                        }
+                        val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
+                        onProgress(
+                            if (isEn) {
+                                "Astrometry engine solving (Sensor prior: within %.0f°)…".format(sensorHint.radiusDeg)
+                            } else {
+                                "官方引擎求解中（传感器粗定标：%.0f° 范围内）…".format(sensorHint.radiusDeg)
+                            }
+                        )
+                        nativeSolve = try {
+                            StellarSolverNative.solveBitmapPriors(
+                                context, currentDisplay, lo, hi,
+                                sensorHint.raDeg, sensorHint.decDeg, sensorHint.radiusDeg,
+                                NATIVE_TIME_LIMIT_KNOWN_FOV * 0.7,
+                            )
+                        } catch (e: Throwable) {
+                            null
+                        }
+                        if (nativeSolve != null) {
+                            nativeDetail = if (isEn) {
+                                "Sensor Prior (within %.0f°) · FOV %.1f°–%.1f°".format(sensorHint.radiusDeg, lo, hi)
+                            } else {
+                                "传感器粗定标（%.0f° 内）· 视场 %.1f°–%.1f°".format(sensorHint.radiusDeg, lo, hi)
+                            }
+                        }
+                    }
+
+                    // 2) 天区先验轮（无传感器先验但 GPS+时间齐全时）：天顶为中心 ± 半径，先试快解
                     val zenith = priors.zenith
-                    if (zenith != null) {
+                    if (nativeSolve == null && zenith != null) {
                         val zenithRa = zenith.first
                         val zenithDec = zenith.second
                         val radius = ExifPriorsReader.skyPriorRadiusDeg(effFov)
@@ -368,7 +424,7 @@ object StarSolver {
                         }
                     }
 
-                    // 2) 原有计划（scale 直传 / 分段盲解），保证成功率不降
+                    // 3) 原有计划（scale 直传 / 分段盲解），保证成功率不降
                     if (nativeSolve == null) {
                         val nativePlan = if (effFov != null) {
                             val (lo, hi) = FovEstimate.fovRange(effFov)
@@ -493,7 +549,10 @@ object StarSolver {
                     }
                     val matched = if (stars != null && stars.size >= 5) {
                         try {
-                            LocalStarMatcher.match(stars, currentDisplay.width, currentDisplay.height)
+                            val hint = if (settings.sensorAssistedPointing) {
+                                PointingHintStore.get(imagePath)
+                            } else null
+                            LocalStarMatcher.match(stars, currentDisplay.width, currentDisplay.height, hint)
                         } catch (e: Throwable) {
                             null
                         }

@@ -56,8 +56,8 @@ object StarChartOverlay {
         return res
     }
 
-    /** 按星座分组的可见星屏幕坐标质心 → 星座名标签（跳过无星座的增补星 §0.42） */
-    fun constellationLabels(stars: List<Star2D>): List<Label2D> {
+    /** 按星座分组的可见星屏幕坐标质心 → 星座名标签（支持中英双语，跳过无星座的增补星 §0.42） */
+    fun constellationLabels(stars: List<Star2D>, isEnglish: Boolean = false): List<Label2D> {
         val groups = HashMap<String, MutableList<Star2D>>()
         for (s in stars) {
             if (s.visible && s.entry.con.isNotEmpty()) {
@@ -69,7 +69,7 @@ object StarChartOverlay {
             if (list.size < 2) continue
             val cx = list.sumOf { it.x.toDouble() }.toFloat() / list.size
             val cy = list.sumOf { it.y.toDouble() }.toFloat() / list.size
-            labels.add(Label2D(Constellations.zhName(con), cx, cy))
+            labels.add(Label2D(Constellations.name(con, isEnglish), cx, cy))
         }
         return labels
     }

@@ -25,7 +25,14 @@ import kotlin.math.abs
  */
 class RealPhotoMatchTest {
 
-    private val photoDir: String = System.getenv("PHOTO_DIR") ?: "/opt/realphotos"
+    private val photoDir: String = System.getenv("PHOTO_DIR")
+        ?: listOf(
+            "../../testdata/realphotos",
+            "../testdata/realphotos",
+            "testdata/realphotos",
+            "C:/starcam-bundle/testdata/realphotos",
+            "/opt/realphotos",
+        ).firstOrNull { File(it).isDirectory } ?: "/opt/realphotos"
 
     private fun loadGray(file: File): Triple<Int, Int, FloatArray> {
         val bytes = file.readBytes()

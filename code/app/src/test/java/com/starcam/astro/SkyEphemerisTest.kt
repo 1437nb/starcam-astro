@@ -72,4 +72,54 @@ class SkyEphemerisTest {
         // fov 未知按 45° 估算：45/2+45 = 67.5°
         assertEquals(67.5, ExifPriorsReader.skyPriorRadiusDeg(null), 1e-9)
     }
+
+    @Test
+    fun altAzZenithMatchesZenithRaDec() {
+        val lat = 39.9042
+        val lon = 116.4074
+        val time = 1700000000L
+        val (expectedRa, expectedDec) = SkyEphemeris.zenithRaDec(lat, lon, time)
+
+        // 任意方位角的高度角 90° 均为天顶
+        for (az in listOf(0.0, 90.0, 180.0, 270.0)) {
+            val (ra, dec) = SkyEphemeris.altAzToRaDec(90.0, az, lat, lon, time)
+            assertEquals("天顶赤纬等于纬度", expectedDec, dec, 1e-6)
+            assertEquals("天顶赤经等于LST", expectedRa, ra, 1e-6)
+        }
+    }
+
+    @Test
+    fun altAzNorthCelestialPole() {
+        // 在北纬 45°，朝正北仰角 45° 即为天北极（Dec = +90°）
+        val lat = 45.0
+        val lon = 120.0
+        val time = 1700000000L
+        val (_, dec) = SkyEphemeris.altAzToRaDec(45.0, 0.0, lat, lon, time)
+        assertEquals("指向北天极赤纬应为90°", 90.0, dec, 1e-6)
+    }
+
+    @Test
+    fun altAzSouthMeridianTransit() {
+        // 在北纬 30°，朝正南仰角 50° 过中天：Dec = 50 + 30 - 90 = -10°，时角 H=0 故 RA=LST
+        val lat = 30.0
+        val lon = 100.0
+        val time = 1700000000L
+        val (zenithRa, _) = SkyEphemeris.zenithRaDec(lat, lon, time)
+        val (ra, dec) = SkyEphemeris.altAzToRaDec(50.0, 180.0, lat, lon, time)
+        assertEquals("正南中天赤纬", -10.0, dec, 1e-6)
+        assertEquals("正南中天赤经等于LST", zenithRa, ra, 1e-6)
+    }
+
+    @Test
+    fun altAzEastHorizonOnEquator() {
+        // 赤道上（Lat=0°），正东地平线（Alt=0°, Az=90°）：Dec=0°，H=270°（-90°）故 RA=(LST+90°) mod 360
+        val lat = 0.0
+        val lon = 0.0
+        val time = 1700000000L
+        val (zenithRa, _) = SkyEphemeris.zenithRaDec(lat, lon, time)
+        val (ra, dec) = SkyEphemeris.altAzToRaDec(0.0, 90.0, lat, lon, time)
+        assertEquals("赤道正东地平线赤纬为0°", 0.0, dec, 1e-6)
+        val expectedRa = (zenithRa + 90.0) % 360.0
+        assertEquals("正东地平线赤经", expectedRa, ra, 1e-6)
+    }
 }

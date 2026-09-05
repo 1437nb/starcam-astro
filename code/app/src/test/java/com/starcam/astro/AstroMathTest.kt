@@ -53,7 +53,56 @@ class AstroMathTest {
             assertTrue("Dec 应在 -90..90: M$n", o.dec in -90.0..90.0)
             assertTrue("中文名不应为空: M$n", o.zh.isNotBlank())
             assertTrue("类型应合法: M$n", o.type in setOf("G", "N", "PN", "GC", "OC"))
+            // §0.43d：防止出现 M38 M38 这类重复标签
+            assertFalse("标签不应重复 M 编号: ${o.label}", o.label.matches(Regex("""^M\d+\s+M\d+.*""")))
         }
+        assertEquals("M38 标签规范", "M38", objs.getValue(38).label)
+        assertEquals("M45 标签规范", "M45 昴星团", objs.getValue(45).label)
+    }
+
+    @Test
+    fun constellationsEnglishNames() {
+        // 测试 88 个星座在英文模式下均返回标准英文/拉丁名称
+        val latins = com.starcam.astro.astro.Constellations.LATIN
+        assertEquals("全天应有 88 个星座英文名", 88, latins.size)
+        assertEquals("Andromeda", com.starcam.astro.astro.Constellations.enName("And"))
+        assertEquals("Orion", com.starcam.astro.astro.Constellations.enName("Ori"))
+        assertEquals("Ursa Major", com.starcam.astro.astro.Constellations.enName("UMa"))
+        assertEquals("Cassiopeia", com.starcam.astro.astro.Constellations.enName("Cas"))
+        for ((abbr, en) in latins) {
+            assertEquals("缩写 $abbr 英文解析一致", en, com.starcam.astro.astro.Constellations.name(abbr, isEnglish = true))
+            assertFalse("英文名不应含中文字符: $en", en.any { it.code in 0x4e00..0x9fff })
+        }
+    }
+
+    @Test
+    fun starNamesEnglish() {
+        // 天狼星、织女一、参宿四等亮星在英文模式下应解析出标准英文专名
+        assertEquals("Sirius", com.starcam.astro.astro.StarNames.displayName(32349, "", isEnglish = true))
+        assertEquals("Vega", com.starcam.astro.astro.StarNames.displayName(91262, "", isEnglish = true))
+        assertEquals("Betelgeuse", com.starcam.astro.astro.StarNames.displayName(27989, "", isEnglish = true))
+        assertEquals("Polaris", com.starcam.astro.astro.StarNames.displayName(11767, "", isEnglish = true))
+        // 中文模式应保留原有中文名
+        assertEquals("天狼", com.starcam.astro.astro.StarNames.displayName(32349, "", isEnglish = false))
+        assertEquals("织女一", com.starcam.astro.astro.StarNames.displayName(91262, "", isEnglish = false))
+        // 英文模式下任何返回均不应含汉字
+        val enName = com.starcam.astro.astro.StarNames.displayName(677, "", isEnglish = true)
+        assertTrue("应返回英文专名或拜耳标号: $enName", enName == "Alpheratz" || enName == "α And")
+        assertFalse("英文模式绝不应包含汉字", enName.any { it.code in 0x4e00..0x9fff })
+    }
+
+    @Test
+    fun messierEnglishLabels() {
+        val objs = com.starcam.astro.astro.MessierCatalog.byNumber
+        val m31 = objs.getValue(31)
+        assertEquals("M31 英文名", "M31 Andromeda Galaxy", m31.label(isEnglish = true))
+        assertEquals("M31 中文名", "M31 仙女座星系", m31.label(isEnglish = false))
+        val m45 = objs.getValue(45)
+        assertEquals("M45 英文名", "M45 Pleiades", m45.label(isEnglish = true))
+        assertEquals("M45 中文名", "M45 昴星团", m45.label(isEnglish = false))
+        val m38 = objs.getValue(38)
+        assertEquals("M38 无专名时仅显示编号", "M38", m38.label(isEnglish = true))
+        assertEquals("M38 无专名时仅显示编号", "M38", m38.label(isEnglish = false))
     }
 
     @Test

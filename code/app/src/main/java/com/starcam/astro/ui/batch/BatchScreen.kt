@@ -115,10 +115,10 @@ fun BatchScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("批量识别") },
+                title = { Text(com.starcam.astro.ui.I18n.Batch.title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = com.starcam.astro.ui.I18n.back)
                     }
                 },
             )
@@ -130,8 +130,7 @@ fun BatchScreen(
                 .padding(padding),
         ) {
             Text(
-                "已选 ${paths.size} 张 · 成功并导出 $doneCount 张" +
-                    if (finished) " · 完成" else " · 处理中…",
+                com.starcam.astro.ui.I18n.Batch.summary(paths.size, doneCount, finished),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -173,9 +172,9 @@ fun BatchScreen(
                             }
                             Text(
                                 when (status) {
-                                    0 -> "排队"
-                                    1 -> "识别中…"
-                                    2 -> "✓ 已导出"
+                                    0 -> com.starcam.astro.ui.I18n.Batch.queued
+                                    1 -> com.starcam.astro.ui.I18n.Batch.processing
+                                    2 -> com.starcam.astro.ui.I18n.Batch.exported
                                     else -> "✗"
                                 },
                                 color = when (status) {
@@ -191,8 +190,7 @@ fun BatchScreen(
                     if (finished) {
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            "导出的叠加图在相册 Pictures/StarCam/ 目录；" +
-                                "识别记录已写入「识别历史」。",
+                            com.starcam.astro.ui.I18n.Batch.exportNotice,
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 4.dp),

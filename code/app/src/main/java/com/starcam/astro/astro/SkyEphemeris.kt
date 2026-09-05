@@ -1,6 +1,8 @@
 package com.starcam.astro.astro
 
 import kotlin.math.acos
+import kotlin.math.asin
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -52,6 +54,58 @@ object SkyEphemeris {
     fun zenithRaDec(latDeg: Double, lonDeg: Double, epochSec: Long): Pair<Double, Double> {
         val jd = unixSecondsToJd(epochSec.toDouble())
         return lstDeg(jd, lonDeg) to latDeg
+    }
+
+    /**
+     * 地平坐标（高度角/方位角）+ 观测地坐标 + 拍摄时刻 → 赤道坐标（赤经/赤纬）。
+     *
+     * @param altDeg 高度角（仰角，-90°~+90°，地平线上为正）
+     * @param azDeg 真方位角（0°~360°，北为 0°，东为 90°，南为 180°，西为 270°）
+     * @param latDeg 观测地纬度（北纬为正）
+     * @param lonDeg 观测地经度（东经为正）
+     * @param epochSec UTC 秒
+     * @return Pair(赤经度 [0, 360), 赤纬度 [-90, 90])
+     */
+    fun altAzToRaDec(
+        altDeg: Double,
+        azDeg: Double,
+        latDeg: Double,
+        lonDeg: Double,
+        epochSec: Long,
+    ): Pair<Double, Double> {
+        val jd = unixSecondsToJd(epochSec.toDouble())
+        val lst = lstDeg(jd, lonDeg)
+
+        val altRad = Math.toRadians(altDeg)
+        val azRad = Math.toRadians(azDeg)
+        val latRad = Math.toRadians(latDeg)
+
+        val sinAlt = sin(altRad)
+        val cosAlt = cos(altRad)
+        val sinLat = sin(latRad)
+        val cosLat = cos(latRad)
+        val cosAz = cos(azRad)
+        val sinAz = sin(azRad)
+
+        // sin(dec) = sin(lat)*sin(alt) + cos(lat)*cos(alt)*cos(az)
+        val sinDec = (sinLat * sinAlt + cosLat * cosAlt * cosAz).coerceIn(-1.0, 1.0)
+        val decRad = asin(sinDec)
+        val decDeg = Math.toDegrees(decRad)
+
+        // 时角 H：
+        // cos(dec)*cos(H) = cos(lat)*sin(alt) - sin(lat)*cos(alt)*cos(az)
+        // cos(dec)*sin(H) = -cos(alt)*sin(az)
+        val y = -cosAlt * sinAz
+        val x = cosLat * sinAlt - sinLat * cosAlt * cosAz
+        val hRad = atan2(y, x)
+        var hDeg = Math.toDegrees(hRad)
+        if (hDeg < 0.0) hDeg += 360.0
+
+        // RA = LST - H
+        var raDeg = (lst - hDeg) % 360.0
+        if (raDeg < 0.0) raDeg += 360.0
+
+        return raDeg to decDeg
     }
 
     /** 两星天球角距（度） */

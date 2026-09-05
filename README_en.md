@@ -15,11 +15,13 @@ A pure offline Android application for astrophotography plate-solving and night 
   - Native NDK port of `astrometry.net` 0.97 with 4100-series all-sky index files;
   - Custom 8,400+ star triangle voting matcher (with bright-source masking and multi-candidate weak star rounds for sub-second wide-field solving);
   - Optional online fallback via `nova.astrometry.net` API (requires user-provided API key).
-- **Real-Time Viewfinder Recognition**: CameraX analysis pipeline performs periodic solving, projecting golden dashed constellation lines and bright star names onto the camera preview in real time.
+- **Real-Time Viewfinder Recognition & AR Live Star Map**: CameraX analysis pipeline performs periodic blind solving, and a sensor-driven AR live star map projects the sky onto the viewfinder with zero latency as you move the phone (adjustable FOV, calibratable).
+- **Layer Controls & Object Info Cards**: Independently toggle constellation lines, star names, constellation labels, and Messier overlays; press-and-hold to compare against the original photo; tap any object in the picture for a bilingual info card (type / magnitude / distance / background).
 - **Rich Astronomical Overlays**:
   - Official 88 modern constellation stick figures and names;
   - 3,800+ traditional Chinese and Western proper star names (Sirius, Vega, Betelgeuse, Arcturus, Polaris, etc.);
-  - 44 prominent Messier deep-sky objects (Andromeda Galaxy M31, Orion Nebula M42, Pleiades M45, etc.) color-coded by astrophysical object type.
+  - 45 prominent Messier deep-sky objects (Andromeda Galaxy M31, Orion Nebula M42, Pleiades M45, etc.) color-coded by astrophysical object type.
+- **Bilingual UI**: One-tap switching between Simplified Chinese and English across the entire app, including constellation, star, and deep-sky object names.
 - **Professional Astrophotography Tools**:
   - Direct raw image gallery loading (bypasses OS downsampling to preserve genuine faint star centroids);
   - Dual-layer zoomable viewer (smooth comparison between original photo and annotated overlay);
@@ -40,7 +42,7 @@ A pure offline Android application for astrophotography plate-solving and night 
 │   │   └── src/main/jniLibs/arm64-v8a/      # Prebuilt libstellar_solver.so native engine
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # Engineering architecture and 36 validation reports (§0.10 ~ §0.43c)
+├── docs/                   # Engineering architecture and 40 validation reports (§0.10 ~ §0.49c)
 ├── tools/                  # Python catalog generators and offline test utilities
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md               # Chinese documentation
@@ -67,7 +69,7 @@ cd code
 # Assemble Debug APK
 ./gradlew :app:assembleDebug
 
-# Run full unit tests (astronomical math, catalog integrity, 61/61 passing)
+# Run full unit tests (astronomical math, catalog integrity, 80/80 passing)
 ./gradlew :app:testDebugUnitTest
 
 # Output path

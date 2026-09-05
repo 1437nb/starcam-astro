@@ -117,7 +117,7 @@ fun GalleryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("选择星空照片（原图）") },
+                title = { Text(com.starcam.astro.ui.I18n.Gallery.title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Text("←", fontSize = 22.sp) }
                 },
@@ -128,7 +128,7 @@ fun GalleryScreen(
                             selected.clear()
                         }) {
                             Text(
-                                if (multi) "取消多选" else "多选",
+                                if (multi) com.starcam.astro.ui.I18n.Gallery.cancelMulti else com.starcam.astro.ui.I18n.Gallery.multiSelect,
                                 fontSize = 15.sp,
                                 color = MaterialTheme.colorScheme.primary,
                             )
@@ -152,7 +152,7 @@ fun GalleryScreen(
                         enabled = selected.isNotEmpty(),
                     ) {
                         Text(
-                            "识别所选（${selected.size}${if (selected.size >= maxSelect) "，已达上限" else ""}）",
+                            com.starcam.astro.ui.I18n.Gallery.identifySelected(selected.size, maxSelect),
                             fontSize = 16.sp,
                         )
                     }
@@ -176,7 +176,7 @@ fun GalleryScreen(
                 Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("相册中没有照片", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(com.starcam.astro.ui.I18n.Gallery.empty, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             else -> LazyVerticalGrid(
@@ -273,22 +273,20 @@ private fun PermissionDenied(onRetry: () -> Unit, modifier: Modifier = Modifier)
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            "需要「照片和视频」权限",
+            com.starcam.astro.ui.I18n.Gallery.permissionTitle,
             fontSize = 18.sp,
             fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.size(12.dp))
         Text(
-            "原图模式直接读取相册原文件，识别时才能使用照片的拍摄参数" +
-                "（焦距 → 视场、拍摄时间 → 天区）加速解算。\n" +
-                "系统选择器会隐藏这些参数（厂商隐私保护），导致识别变慢甚至失败。",
+            com.starcam.astro.ui.I18n.Gallery.permissionDesc,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.size(20.dp))
-        Button(onClick = onRetry) { Text("授予权限") }
+        Button(onClick = onRetry) { Text(com.starcam.astro.ui.I18n.grantPermission) }
     }
 }
 

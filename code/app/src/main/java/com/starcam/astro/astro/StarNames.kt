@@ -3821,11 +3821,23 @@ object StarNames {
         118322 to "ε Tuc",
     )
 
-    /** 显示名解析：中文名优先 → 星表内中文名 → 拜耳命名法 → 原名 */
-    fun displayName(hip: Int, fallback: String): String {
-        zh[hip]?.let { return it }
-        if (fallback.isNotEmpty() && fallback.any { it.code in 0x4e00..0x9fff }) return fallback
-        bayer[hip]?.let { return it }
-        return fallback
+    /** 全天主要著名恒星的标准英文专名（委托至 [StarNamesEn] 以避免 clinit 方法超出 JVM 64KB 上限） */
+    val en: Map<Int, String> get() = StarNamesEn.names
+
+    /** 显示名解析：支持中英文双语模式 */
+    fun displayName(hip: Int, fallback: String, isEnglish: Boolean = false): String {
+        if (isEnglish) {
+            en[hip]?.let { return it }
+            bayer[hip]?.let { return it }
+            if (fallback.isNotEmpty() && fallback.none { it.code in 0x4e00..0x9fff }) {
+                return fallback
+            }
+            return ""
+        } else {
+            zh[hip]?.let { return it }
+            if (fallback.isNotEmpty() && fallback.any { it.code in 0x4e00..0x9fff }) return fallback
+            bayer[hip]?.let { return it }
+            return fallback
+        }
     }
 }

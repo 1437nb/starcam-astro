@@ -22,25 +22,48 @@ data class SolveDiagnostics(
 
     enum class Verdict { TOO_FEW, FEW, PLENTY_UNSOLVED }
 
-    fun verdictTitle(): String = when (verdict) {
-        Verdict.TOO_FEW -> "画面里几乎看不到星点"
-        Verdict.FEW -> "只检测到少量星点"
-        Verdict.PLENTY_UNSOLVED -> "星点充足，但没能匹配星表"
+    fun verdictTitle(isEnglish: Boolean = false): String = if (isEnglish) {
+        when (verdict) {
+            Verdict.TOO_FEW -> "Barely any stars detected"
+            Verdict.FEW -> "Only a few stars detected"
+            Verdict.PLENTY_UNSOLVED -> "Plenty of stars, but catalog match failed"
+        }
+    } else {
+        when (verdict) {
+            Verdict.TOO_FEW -> "画面里几乎看不到星点"
+            Verdict.FEW -> "只检测到少量星点"
+            Verdict.PLENTY_UNSOLVED -> "星点充足，但没能匹配星表"
+        }
     }
 
-    fun verdictDetail(): String = when (verdict) {
-        Verdict.TOO_FEW ->
-            "共检测到 $starCount 个星点（不足 8 个）。常见原因：曝光太短或感光度太低、" +
-                "月光/光污染太亮、镜头没对准星空或没对上焦。"
-        Verdict.FEW ->
-            "共检测到 $starCount 个星点。数量太少，匹配算法没有把握。" +
-                "建议：延长曝光或提高 ISO、等待月亮落下，或换一片更开阔的天区。"
-        Verdict.PLENTY_UNSOLVED ->
-            "共检测到 $starCount 个星点，但没有找到与内置亮星表一致的图案。常见原因：" +
-                "变焦视场太窄（亮星表覆盖有限，可到设置改用官方引擎优先）、" +
-                "画面以深空天体为主，或星点被抖动拉成了线。"
+    fun verdictDetail(isEnglish: Boolean = false): String = if (isEnglish) {
+        when (verdict) {
+            Verdict.TOO_FEW ->
+                "Detected $starCount stars (fewer than 8). Common causes: exposure too short or ISO too low, " +
+                    "strong moonlight or light pollution, camera out of focus or not aimed at night sky."
+            Verdict.FEW ->
+                "Detected $starCount stars. Too few for reliable plate solving. " +
+                    "Suggestions: increase exposure time or ISO, wait for moon to set, or aim at a wider sky area."
+            Verdict.PLENTY_UNSOLVED ->
+                "Detected $starCount stars, but no matching star pattern was found. Common causes: " +
+                    "zoom field of view too narrow (try Official Engine First in Settings), " +
+                    "field dominated by deep sky objects, or star trails caused by camera shake."
+        }
+    } else {
+        when (verdict) {
+            Verdict.TOO_FEW ->
+                "共检测到 $starCount 个星点（不足 8 个）。常见原因：曝光太短或感光度太低、" +
+                    "月光/光污染太亮、镜头没对准星空或没对上焦。"
+            Verdict.FEW ->
+                "共检测到 $starCount 个星点。数量太少，匹配算法没有把握。" +
+                    "建议：延长曝光或提高 ISO、等待月亮落下，或换一片更开阔的天区。"
+            Verdict.PLENTY_UNSOLVED ->
+                "共检测到 $starCount 个星点，但没有找到与内置亮星表一致的图案。常见原因：" +
+                    "变焦视场太窄（亮星表覆盖有限，可到设置改用官方引擎优先）、" +
+                    "画面以深空天体为主，或星点被抖动拉成了线。"
+        }
     }
 
-    fun enginesText(): String =
-        if (enginesTried.isEmpty()) "" else "已尝试：" + enginesTried.joinToString(" → ")
+    fun enginesText(isEnglish: Boolean = false): String =
+        if (enginesTried.isEmpty()) "" else (if (isEnglish) "Engines tried: " else "已尝试：") + enginesTried.joinToString(" → ")
 }

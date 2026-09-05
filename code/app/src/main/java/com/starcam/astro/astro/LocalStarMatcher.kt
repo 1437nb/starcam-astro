@@ -380,22 +380,51 @@ object LocalStarMatcher {
      *  - FOV 合理性：pixScale×图像边长换算视场须在 0.05°~180° 区间。假阳性
      *    常表现为尺度坍缩/膨胀（实测假解输出 627° 与 1900° 视场，真解 34°~42°）。
      */
-    fun match(detected: List<DetectedStar>, width: Int, height: Int): LocalMatchResult? {
+    /**
+     * 自研星表求解主入口。
+     *
+     * 改进（v1.5.31 传感器粗定标支持）：
+     *  - 当传入 [pointingHint] 时，优先执行以指向天区为中心、半径受限的快速匹配；
+     *  - 若先验快速匹配未果（如地磁异常），自动平滑回退至原有全天盲解，保证识别率绝不下降。
+     */
+    fun match(
+        detected: List<DetectedStar>,
+        width: Int,
+        height: Int,
+        pointingHint: PointingHint? = null,
+    ): LocalMatchResult? {
         if (detected.size < 5) return null
+        if (pointingHint != null) {
+            val hintResult = matchInternal(detected, width, height, pointingHint)
+            if (hintResult != null) return hintResult
+        }
+        return matchInternal(detected, width, height, null)
+    }
+
+    private fun matchInternal(
+        detected: List<DetectedStar>,
+        width: Int,
+        height: Int,
+        pointingHint: PointingHint?,
+    ): LocalMatchResult? {
         val (t1, t2) = voteThresholds(detected.map { it.brightness })
 
         // 投票与 parity（镜像）无关：每个阈值只投一次，normal/mirrored 共享结果。
         // （v1.5.8 的双阈值曾按"每 parity × 每阈值"各投一次，投票最多 4 轮，
         //  失败/弱解照片识别耗时从 ~2s 涨到 ~9s；本重构降回最多 2 轮，成功率不变）
-        val primaryPairs = votePairs(detected, width, height, t1)
-        var best = bestCandidate(detected, width, height, primaryPairs)
+        val primaryPairs = votePairs(detected, width, height, t1, pointingHint = pointingHint)
+        var best = bestCandidate(detected, width, height, primaryPairs, pointingHint)
         if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
             return best
         }
         // §0.43 稀疏场重投：单候选轮完全无解时，用每星 top-3 候选重投一轮
         // （仅当无解，有解路径完全不动；伪解由 plausibleFov/skySpan 门槛把守）。
         if (best == null) {
-            best = bestCandidate(detected, width, height, votePairs(detected, width, height, t1, multi = true))
+            best = bestCandidate(
+                detected, width, height,
+                votePairs(detected, width, height, t1, multi = true, pointingHint = pointingHint),
+                pointingHint,
+            )
             if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
                 return best
             }
@@ -408,17 +437,25 @@ object LocalStarMatcher {
             val anchor20 = detected.map { it.brightness }.sortedDescending().getOrElse(19) { 0f }
             val weakT = maxOf(25f, anchor20 * 0.25f)
             if (weakT < t1) {
-                best = bestCandidate(detected, width, height, votePairs(detected, width, height, weakT))
+                best = bestCandidate(
+                    detected, width, height,
+                    votePairs(detected, width, height, weakT, pointingHint = pointingHint),
+                    pointingHint,
+                )
                 if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
                     return best
                 }
             }
         }
         if (t2 != t1) {
-            val backupPairs = votePairs(detected, width, height, t2)
-            var alt = bestCandidate(detected, width, height, backupPairs)
+            val backupPairs = votePairs(detected, width, height, t2, pointingHint = pointingHint)
+            var alt = bestCandidate(detected, width, height, backupPairs, pointingHint)
             if (alt == null) {
-                alt = bestCandidate(detected, width, height, votePairs(detected, width, height, t2, multi = true))
+                alt = bestCandidate(
+                    detected, width, height,
+                    votePairs(detected, width, height, t2, multi = true, pointingHint = pointingHint),
+                    pointingHint,
+                )
             }
             // 备用轮只有拿到强解才反超主轮：弱解之间以主轮为准（主口味优先，
             // 备用轮弱解顶掉主轮真解的回归见 §0.32.3 —— apod4 12 内点真解曾被
@@ -470,6 +507,7 @@ object LocalStarMatcher {
         width: Int,
         height: Int,
         pairs: List<Pair<Int, StarEntry>>,
+        pointingHint: PointingHint? = null,
     ): LocalMatchResult? {
         if (pairs.size < 4) return null
         val normal = fitAndVerify(detected, width, height, pairs, mirrorX = false)
@@ -477,6 +515,12 @@ object LocalStarMatcher {
         return listOfNotNull(normal, mirrored)
             .filter { it.inlierCount >= 6 && plausibleFov(it.solve.pixScaleArcsec, width, height) }
             .filter { skySpanConsistent(it, detected) }
+            .filter { candidate ->
+                if (pointingHint == null) true
+                else {
+                    haversineDeg(candidate.solve.raDeg, candidate.solve.decDeg, pointingHint.raDeg, pointingHint.decDeg) <= pointingHint.radiusDeg + 35.0
+                }
+            }
             .maxByOrNull { it.inlierCount }
     }
 
@@ -533,6 +577,7 @@ object LocalStarMatcher {
         height: Int,
         threshold: Float = voteBrightnessThreshold(detected.map { it.brightness }),
         multi: Boolean = false,
+        pointingHint: PointingHint? = null,
     ): List<Pair<Int, StarEntry>> {
         val idx = debugForceIndexMag?.let { buildIndex(it) } ?: index()
 
@@ -614,6 +659,18 @@ object LocalStarMatcher {
         // 固定对应集顺序（RANSAC 以固定种子按索引采样，顺序不稳定会导致
         // 采样轨迹跨运行不同 → 边界照片的解算结果不可复现）
         pairs.sortBy { it.first }
+
+        // 若有传感器粗定标先验，优先保留目标天区附近的对应星，过滤反半球伪对应
+        if (pointingHint != null) {
+            val maxDist = pointingHint.radiusDeg + 45.0
+            val nearPairs = pairs.filter { (_, s) ->
+                haversineDeg(s.ra, s.dec, pointingHint.raDeg, pointingHint.decDeg) <= maxDist
+            }
+            if (nearPairs.size >= 4) {
+                return nearPairs
+            }
+        }
+
         return pairs
     }
 

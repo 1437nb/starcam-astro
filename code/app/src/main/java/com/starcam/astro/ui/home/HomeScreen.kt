@@ -94,9 +94,9 @@ fun HomeScreen(
                 tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.height(12.dp))
-            Text("星空识星", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text(com.starcam.astro.ui.I18n.appName, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Text(
-                "拍照认星 · 识别照片中的星座与亮星",
+                com.starcam.astro.ui.I18n.appDesc,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -112,7 +112,7 @@ fun HomeScreen(
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
             ) {
-                Text("📷  拍照认星", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(com.starcam.astro.ui.I18n.Home.takePhoto, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(12.dp))
 
@@ -129,7 +129,7 @@ fun HomeScreen(
             ) {
                 Icon(AppIcons.Gallery, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondary)
                 Spacer(Modifier.size(8.dp))
-                Text("从相册选择（原图·保留拍摄参数）", fontSize = 16.sp)
+                Text(com.starcam.astro.ui.I18n.Home.chooseGalleryOriginal, fontSize = 16.sp)
             }
             Spacer(Modifier.height(12.dp))
             OutlinedButton(
@@ -141,7 +141,7 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(16.dp),
             ) {
-                Text("系统相册（兼容模式·位置可能被隐藏）", fontSize = 15.sp)
+                Text(com.starcam.astro.ui.I18n.Home.chooseGalleryCompat, fontSize = 15.sp)
             }
             Spacer(Modifier.height(12.dp))
 
@@ -151,7 +151,7 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(16.dp),
             ) {
-                Text("✨  离线演示（内置真实星空照片）", fontSize = 16.sp)
+                Text(com.starcam.astro.ui.I18n.Home.offlineDemo, fontSize = 16.sp)
             }
             Spacer(Modifier.height(12.dp))
 
@@ -161,7 +161,7 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(16.dp),
             ) {
-                Text("🕘  识别历史", fontSize = 16.sp)
+                Text(com.starcam.astro.ui.I18n.Home.history, fontSize = 16.sp)
             }
             Spacer(Modifier.height(12.dp))
 
@@ -171,14 +171,14 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(16.dp),
             ) {
-                Text("⚙️  设置（API Key）", fontSize = 16.sp)
+                Text(com.starcam.astro.ui.I18n.Home.settings, fontSize = 16.sp)
             }
 
             Spacer(Modifier.height(24.dp))
 
             // 状态提示
             val hintColor = if (hasApiKey) Color(0xFF8FD694) else MaterialTheme.colorScheme.error
-            val hintText = if (hasApiKey) "✓ 已配置 API Key，可在线识别" else "未配置 API Key：在线识别需免费 Key；可先体验「离线演示」"
+            val hintText = if (hasApiKey) com.starcam.astro.ui.I18n.Home.apiKeyConfigured else com.starcam.astro.ui.I18n.Home.apiKeyNotConfigured
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
@@ -199,19 +199,19 @@ fun HomeScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("如何使用", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(com.starcam.astro.ui.I18n.Home.howToUseTitle, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Spacer(Modifier.height(8.dp))
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
                     Spacer(Modifier.height(8.dp))
-                    Text("1. 夜晚到光污染较少的地方，用手机拍摄星空（建议使用夜景/长曝光，至少包含 3 颗亮星）", style = MaterialTheme.typography.bodySmall)
+                    Text(com.starcam.astro.ui.I18n.Home.howToUse1, style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(6.dp))
-                    Text("2. 点击「拍照认星」或从相册选择照片", style = MaterialTheme.typography.bodySmall)
+                    Text(com.starcam.astro.ui.I18n.Home.howToUse2, style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(6.dp))
-                    Text("3. 应用先用内置星表离线识别（不联网），失败时自动回退 astrometry.net 在线服务识别天区", style = MaterialTheme.typography.bodySmall)
+                    Text(com.starcam.astro.ui.I18n.Home.howToUse3, style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(6.dp))
-                    Text("4. 识别完成后，星座连线、星名与星座名称将叠加显示在照片上", style = MaterialTheme.typography.bodySmall)
+                    Text(com.starcam.astro.ui.I18n.Home.howToUse4, style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(6.dp))
-                    Text("提示：离线识别无需网络与 API Key；在线回退需要免费 API Key（nova.astrometry.net/api_help）。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(com.starcam.astro.ui.I18n.Home.howToUseTip, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Spacer(Modifier.height(32.dp))

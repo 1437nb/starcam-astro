@@ -28,6 +28,39 @@ object Constellations {
         "Vel" to "船帆座", "Vir" to "室女座", "Vol" to "飞鱼座", "Vul" to "狐狸座",
     )
 
-    /** 缩写 → 中文名；未知返回缩写本身 */
-    fun zhName(abbr: String): String = ZH[abbr] ?: abbr
+    /** 88 个星座的 IAU 标准英文/拉丁全名 */
+    val LATIN: Map<String, String> = mapOf(
+        "And" to "Andromeda", "Ant" to "Antlia", "Aps" to "Apus", "Aql" to "Aquila",
+        "Aqr" to "Aquarius", "Ara" to "Ara", "Ari" to "Aries", "Aur" to "Auriga",
+        "Boo" to "Boötes", "Cae" to "Caelum", "Cam" to "Camelopardalis", "Cap" to "Capricornus",
+        "Car" to "Carina", "Cas" to "Cassiopeia", "Cen" to "Centaurus", "Cep" to "Cepheus",
+        "Cet" to "Cetus", "Cha" to "Chamaeleon", "Cir" to "Circinus", "CMa" to "Canis Major",
+        "CMi" to "Canis Minor", "Cnc" to "Cancer", "Col" to "Columba", "Com" to "Coma Berenices",
+        "CrA" to "Corona Australis", "CrB" to "Corona Borealis", "Crt" to "Crater", "Cru" to "Crux",
+        "Crv" to "Corvus", "CVn" to "Canes Venatici", "Cyg" to "Cygnus", "Del" to "Delphinus",
+        "Dor" to "Dorado", "Dra" to "Draco", "Equ" to "Equuleus", "Eri" to "Eridanus",
+        "For" to "Fornax", "Gem" to "Gemini", "Gru" to "Grus", "Her" to "Hercules",
+        "Hor" to "Horologium", "Hya" to "Hydra", "Hyi" to "Hydrus", "Ind" to "Indus",
+        "Lac" to "Lacerta", "Leo" to "Leo", "Lep" to "Lepus", "Lib" to "Libra",
+        "LMi" to "Leo Minor", "Lup" to "Lupus", "Lyn" to "Lynx", "Lyr" to "Lyra",
+        "Men" to "Mensa", "Mic" to "Microscopium", "Mon" to "Monoceros", "Mus" to "Musca",
+        "Nor" to "Norma", "Oct" to "Octans", "Oph" to "Ophiuchus", "Ori" to "Orion",
+        "Pav" to "Pavo", "Peg" to "Pegasus", "Per" to "Perseus", "Phe" to "Phoenix",
+        "Pic" to "Pictor", "PsA" to "Piscis Austrinus", "Psc" to "Pisces", "Pup" to "Puppis",
+        "Pyx" to "Pyxis", "Ret" to "Reticulum", "Scl" to "Sculptor", "Sco" to "Scorpius",
+        "Sct" to "Scutum", "Ser" to "Serpens", "Sex" to "Sextans", "Sge" to "Sagitta",
+        "Sgr" to "Sagittarius", "Tau" to "Taurus", "Tel" to "Telescopium", "TrA" to "Triangulum Australe",
+        "Tri" to "Triangulum", "Tuc" to "Tucana", "UMa" to "Ursa Major", "UMi" to "Ursa Minor",
+        "Vel" to "Vela", "Vir" to "Virgo", "Vol" to "Volans", "Vul" to "Vulpecula",
+    )
+
+    /** 缩写 → 星座名（根据语言返回中文或英文/拉丁全名，未知返回缩写本身） */
+    fun name(abbr: String, isEnglish: Boolean = false): String =
+        if (isEnglish) LATIN[abbr] ?: abbr else ZH[abbr] ?: abbr
+
+    /** 缩写 → 中文名；未知返回缩写本身（兼容旧接口） */
+    fun zhName(abbr: String): String = name(abbr, isEnglish = false)
+
+    /** 缩写 → 英文/拉丁名；未知返回缩写本身 */
+    fun enName(abbr: String): String = name(abbr, isEnglish = true)
 }

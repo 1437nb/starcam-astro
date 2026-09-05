@@ -69,15 +69,21 @@ fun HistoryScreen(
     onOpenImage: (String) -> Unit,
 ) {
     val context = LocalContext.current
+    val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
     var entries by remember { mutableStateOf(HistoryStore.load(context)) }
     var deleting by remember { mutableStateOf<HistoryStore.Entry?>(null) }
     var toast by remember { mutableStateOf<String?>(null) }
     val stats = remember(entries) { StatsStore.summary(context) }
-    val dayFmt = remember { SimpleDateFormat("yyyy年M月d日 EEEE", Locale.getDefault()) }
+    val dayFmt = remember(isEn) {
+        SimpleDateFormat(
+            if (isEn) "EEE, MMM d, yyyy" else "yyyy年M月d日 EEEE",
+            if (isEn) Locale.ENGLISH else Locale.SIMPLIFIED_CHINESE,
+        )
+    }
     val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
 
     // 按日期分组（entries 已时间倒序，LinkedHashMap 保序）
-    val groups = remember(entries) {
+    val groups = remember(entries, dayFmt) {
         val map = LinkedHashMap<String, MutableList<HistoryStore.Entry>>()
         for (e in entries) {
             map.getOrPut(dayFmt.format(Date(e.timestamp))) { mutableListOf() }.add(e)
@@ -93,7 +99,7 @@ fun HistoryScreen(
     deleting?.let { entry ->
         AlertDialog(
             onDismissRequest = { deleting = null },
-            title = { Text("删除这条识别记录？") },
+            title = { Text(com.starcam.astro.ui.I18n.History.deleteDialogTitle) },
             text = {
                 Text(
                     buildString {
@@ -107,10 +113,10 @@ fun HistoryScreen(
                     HistoryStore.remove(context, entry.timestamp)
                     entries = HistoryStore.load(context)
                     deleting = null
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(com.starcam.astro.ui.I18n.delete, color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deleting = null }) { Text("取消") }
+                TextButton(onClick = { deleting = null }) { Text(com.starcam.astro.ui.I18n.cancel) }
             },
         )
     }
@@ -118,10 +124,10 @@ fun HistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("识别历史") },
+                title = { Text(com.starcam.astro.ui.I18n.History.title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = com.starcam.astro.ui.I18n.back)
                     }
                 },
                 actions = {
@@ -129,17 +135,17 @@ fun HistoryScreen(
                         OutlinedButton(
                             onClick = {
                                 val desc = HistoryStore.exportCsv(context, entries)
-                                toast = desc?.let { "已导出：$it" } ?: "导出失败"
+                                toast = desc?.let { com.starcam.astro.ui.I18n.History.exportSuccess(it) } ?: com.starcam.astro.ui.I18n.History.exportFailed
                             },
                             modifier = Modifier.padding(end = 4.dp),
-                        ) { Text("导出") }
+                        ) { Text(com.starcam.astro.ui.I18n.History.export) }
                         OutlinedButton(
                             onClick = {
                                 HistoryStore.clear(context)
                                 entries = emptyList()
                             },
                             modifier = Modifier.padding(end = 8.dp),
-                        ) { Text("清空") }
+                        ) { Text(com.starcam.astro.ui.I18n.History.clear) }
                     }
                 },
             )
@@ -153,10 +159,10 @@ fun HistoryScreen(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("还没有识别记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(com.starcam.astro.ui.I18n.History.emptyTitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "成功识别的照片会自动记录在这里",
+                    com.starcam.astro.ui.I18n.History.emptyDesc,
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -182,10 +188,14 @@ fun HistoryScreen(
                     ) {
                         Text(
                             if (stats.count > 0) {
-                                "共识别 ${stats.count} 次 · 成功率 ${(stats.successRate * 100).toInt()}% · " +
-                                    "平均 ${stats.avgMs / 1000} 秒 · 最近 ${stats.lastMs / 1000} 秒"
+                                com.starcam.astro.ui.I18n.History.statsSummary(
+                                    stats.count,
+                                    (stats.successRate * 100).toInt(),
+                                    stats.avgMs / 1000,
+                                    stats.lastMs / 1000,
+                                )
                             } else {
-                                "暂无识别统计"
+                                com.starcam.astro.ui.I18n.History.noStats
                             },
                             fontSize = 12.sp,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -253,7 +263,7 @@ private fun HistoryCell(
             )
         } else {
             Text(
-                "图片已失效",
+                com.starcam.astro.ui.I18n.History.imageInvalid,
                 fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

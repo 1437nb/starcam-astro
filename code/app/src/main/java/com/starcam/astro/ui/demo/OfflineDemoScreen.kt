@@ -89,10 +89,10 @@ fun OfflineDemoScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("离线演示") },
+                title = { Text(com.starcam.astro.ui.I18n.Demo.title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = com.starcam.astro.ui.I18n.back)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -112,12 +112,11 @@ fun OfflineDemoScreen(
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(14.dp),
             ) {
-                Text("✨ 随机生成模拟星空（合成图）", fontSize = 16.sp)
+                Text(com.starcam.astro.ui.I18n.Demo.randomSky, fontSize = 16.sp)
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                "或选择一张内置真实星空照片——均为真实手机拍摄，" +
-                    "离线识别链路已验证可识别，无需网络与 API Key：",
+                com.starcam.astro.ui.I18n.Demo.selectRealPhoto,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
