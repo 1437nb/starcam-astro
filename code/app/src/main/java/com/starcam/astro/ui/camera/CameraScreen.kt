@@ -19,6 +19,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,6 +55,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -92,7 +95,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -112,10 +117,12 @@ private suspend fun <T> ListenableFuture<T>.await(context: Context): T =
     }
 
 /**
- * 相机页：拍照认星入口（§0.41 对焦辅助 + 曝光引导）。
+ * 相机页：拍照认星入口（§0.41 对焦辅助 + 曝光引导，§0.49 AR 星图，§0.50 Pro 曝光）。
  * - 点击对焦：轻点画面（最亮星）→ 对焦框 + AE/AF 锁定，提示星空对焦技巧；
- * - 曝光引导：EV 补偿滑块（±档）+ 夜景快捷按钮 + 拍摄参数文字建议。
+ * - 曝光引导：EV 补偿滑块（±档）+ Pro 手动 ISO/快门 + 夜景快捷按钮；
+ * - AR 星图：传感器驱动实时星座叠加 + FOV 自动标定 + 电子水平仪。
  */
+@OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
 @Composable
 fun CameraScreen(
     onBack: () -> Unit,
@@ -159,6 +166,13 @@ fun CameraScreen(
     var arEnabled by remember { mutableStateOf(settings.arLiveStarMap) }
     val arFlag = remember { java.util.concurrent.atomic.AtomicBoolean(settings.arLiveStarMap) }
     var arFovDeg by remember { mutableStateOf(settings.arFovDeg) }
+    var fovAutoCalibrated by remember { mutableStateOf(false) }
+    // §0.50：Pro 手动曝光（会话级，与 EV/闪光灯一致不持久化）
+    var proMode by remember { mutableStateOf(false) }
+    var proIso by remember { mutableStateOf(1600) }
+    var proShutterIdx by remember { mutableStateOf(4) } // 默认 1s 档
+    var isoRangeState by remember { mutableStateOf<IntRange?>(null) }
+    var exposureRangeState by remember { mutableStateOf<LongRange?>(null) }
     // 最新姿态（绘制线程直读，避免状态风暴）与求解器校准中心（天球单位向量）
     val latestPointing = remember {
         java.util.concurrent.atomic.AtomicReference(DeviceOrientationTracker.DevicePointing())
@@ -307,6 +321,49 @@ fun CameraScreen(
             )
             cameraControl = camera.cameraControl
             maxEvIndex = camera.cameraInfo.exposureState.exposureCompensationRange.upper
+
+            // §0.50：Camera2 能力查询（Pro 手动曝光支持性）+ AR FOV 自动标定
+            try {
+                val info2 = androidx.camera.camera2.interop.Camera2CameraInfo.from(camera.cameraInfo)
+                val focal = info2.getCameraCharacteristic(
+                    android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS,
+                )?.firstOrNull()
+                val phys = info2.getCameraCharacteristic(
+                    android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE,
+                )
+                if (focal != null && phys != null && focal > 0f) {
+                    // 传感器朝向 90（常见后置）：竖屏显示时水平方向对应传感器高度维
+                    val sensorRot = info2.getCameraCharacteristic(
+                        android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION,
+                    ) ?: 90
+                    val rotated = sensorRot % 180 != 0
+                    val fovPortrait = com.starcam.astro.astro.CameraMath.horizontalFovDeg(
+                        focal.toDouble(), phys.height.toDouble(),
+                    )
+                    val fovLandscape = com.starcam.astro.astro.CameraMath.horizontalFovDeg(
+                        focal.toDouble(), phys.width.toDouble(),
+                    )
+                    val fov = if (rotated) {
+                        if (isPortrait) fovPortrait else fovLandscape
+                    } else {
+                        if (isPortrait) fovLandscape else fovPortrait
+                    }
+                    if (fov in 30.0..100.0) {
+                        arFovDeg = fov.toFloat().coerceIn(40f, 90f)
+                        fovAutoCalibrated = true
+                    }
+                } else {
+                    fovAutoCalibrated = false
+                }
+                isoRangeState = info2.getCameraCharacteristic(
+                    android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE,
+                )?.let { it.lower..it.upper }
+                exposureRangeState = info2.getCameraCharacteristic(
+                    android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE,
+                )?.let { it.lower..it.upper }
+            } catch (_: Throwable) {
+                fovAutoCalibrated = false
+            }
             message = null
         } catch (e: Exception) {
             message = "${com.starcam.astro.ui.I18n.Camera.launchFailed}：${e.message}"
@@ -317,6 +374,39 @@ fun CameraScreen(
     LaunchedEffect(evIndex, cameraControl) {
         val control = cameraControl ?: return@LaunchedEffect
         control.setExposureCompensationIndex(evIndex.coerceIn(-maxEvIndex, maxEvIndex))
+    }
+
+    // §0.50：Pro 手动曝光——Camera2 运行时注入（AE off + ISO + 快门），无需重绑
+    LaunchedEffect(proMode, proIso, proShutterIdx, cameraControl) {
+        val control = cameraControl ?: return@LaunchedEffect
+        try {
+            val c2 = androidx.camera.camera2.interop.Camera2CameraControl.from(control)
+            if (!proMode) {
+                // 清空注入项，恢复相机自动 AE
+                c2.clearCaptureRequestOptions()
+            } else {
+                val stops = com.starcam.astro.astro.CameraMath.shutterStopsSec
+                val sec = stops[proShutterIdx.coerceIn(0, stops.lastIndex)]
+                val nanos = com.starcam.astro.astro.CameraMath.clampExposureNanos(
+                    com.starcam.astro.astro.CameraMath.secToNanos(sec), exposureRangeState,
+                )
+                val iso = com.starcam.astro.astro.CameraMath.clampIso(proIso, isoRangeState)
+                val opts = androidx.camera.camera2.interop.CaptureRequestOptions.Builder()
+                    .setCaptureRequestOption(
+                        android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE,
+                        android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF,
+                    )
+                    .setCaptureRequestOption(
+                        android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, iso,
+                    )
+                    .setCaptureRequestOption(
+                        android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, nanos,
+                    )
+                    .build()
+                c2.setCaptureRequestOptions(opts)
+            }
+        } catch (_: Throwable) {
+        }
     }
 
     // §0.41：对焦框显示约 1.2 秒后消失
@@ -717,6 +807,54 @@ fun CameraScreen(
                 }
             }
 
+            // §0.50：电子水平仪（相机滚转角；|roll|<1° 水平变绿）
+            if (pointingState.hasOrientation && pointingState.altDeg > 0.0) {
+                val roll = com.starcam.astro.astro.CameraMath.rollDeg(
+                    pointingState.right, pointingState.up,
+                )
+                val level = kotlin.math.abs(roll) < 1.0
+                Surface(
+                    color = Color(0xAA111827),
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 12.dp)
+                        .padding(top = if (focusHint || message != null) 200.dp else 148.dp)
+                        .size(58.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Canvas(Modifier.fillMaxSize()) {
+                            val r = size.minDimension / 2f - 6.dp.toPx()
+                            val c = Offset(size.width / 2f, size.height / 2f)
+                            // 固定参考刻度（上、下小点）+ 随滚转旋转的地平线
+                            drawCircle(
+                                color = Color.White.copy(alpha = 0.25f),
+                                radius = r,
+                                center = c,
+                                style = Stroke(width = 1.5.dp.toPx()),
+                            )
+                            val lineLen = r * 1.25f
+                            val rad = Math.toRadians(roll)
+                            val dx = cos(rad).toFloat() * lineLen
+                            val dy = sin(rad).toFloat() * lineLen
+                            drawLine(
+                                color = if (level) Color(0xFF69F0AE) else Color.White.copy(alpha = 0.9f),
+                                start = Offset(c.x - dx, c.y - dy),
+                                end = Offset(c.x + dx, c.y + dy),
+                                strokeWidth = 2.dp.toPx(),
+                            )
+                        }
+                        Text(
+                            "${"%.0f".format(roll)}°",
+                            color = if (level) Color(0xFF69F0AE) else Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 14.dp),
+                        )
+                    }
+                }
+            }
+
             // §0.41：曝光引导（EV 滑块 + 拍摄参数建议）+ §0.49 FOV 校准
             Column(
                 modifier = Modifier
@@ -726,13 +864,17 @@ fun CameraScreen(
                     .padding(horizontal = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                // §0.49：AR 星图视场校准滑块（对齐真实镜头 FOV）
+                // §0.49：AR 星图视场校准滑块（对齐真实镜头 FOV；§0.50 支持自动标定）
                 if (arEnabled && settings.sensorAssistedPointing) {
                     Text(
-                        // %.0f 必须传浮点参数（传 Int 会抛 IllegalFormatException 导致
-                        // 相机页组合即闪退，v1.5.35 实测）
-                        com.starcam.astro.ui.I18n.Ar.fovLabel.format(arFovDeg),
-                        color = Color.White.copy(alpha = 0.85f),
+                        if (fovAutoCalibrated) {
+                            com.starcam.astro.ui.I18n.Ar.fovAuto.format(arFovDeg)
+                        } else {
+                            // %.0f 必须传浮点参数（传 Int 会抛 IllegalFormatException 导致
+                            // 相机页组合即闪退，v1.5.35 实测）
+                            com.starcam.astro.ui.I18n.Ar.fovLabel.format(arFovDeg)
+                        },
+                        color = if (fovAutoCalibrated) Color(0xFFB9F6CA) else Color.White.copy(alpha = 0.85f),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                     )
@@ -740,24 +882,96 @@ fun CameraScreen(
                         value = arFovDeg,
                         onValueChange = {
                             arFovDeg = it
+                            fovAutoCalibrated = false // 手动微调后标记为手动值
                         },
                         onValueChangeFinished = { settings.arFovDeg = arFovDeg },
                         valueRange = 40f..90f,
                     )
                 }
-                Text(
-                    com.starcam.astro.ui.I18n.Camera.evLabel(evIndex),
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (maxEvIndex > 0) {
-                    Slider(
-                        value = evIndex.toFloat(),
-                        onValueChange = { evIndex = it.roundToInt() },
-                        valueRange = -maxEvIndex.toFloat()..maxEvIndex.toFloat(),
-                        steps = (maxEvIndex * 2 - 1).coerceAtLeast(0),
+
+                // §0.50：Pro 手动曝光（ISO + 快门，AE off 运行时注入）
+                val proSupported = isoRangeState != null && exposureRangeState != null &&
+                    (exposureRangeState ?: 0L..0L).let { it.first <= 33_333_333L && it.last >= 1_000_000_000L }
+                if (proSupported) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { proMode = !proMode }
+                            .padding(vertical = 2.dp),
+                    ) {
+                        Text(
+                            if (proMode) com.starcam.astro.ui.I18n.Pro.proOn else com.starcam.astro.ui.I18n.Pro.proOff,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (proMode) MaterialTheme.colorScheme.primary else Color.White,
+                        )
+                    }
+                    if (proMode) {
+                        val stops = com.starcam.astro.astro.CameraMath.shutterStopsSec
+                        val sec = stops[proShutterIdx.coerceIn(0, stops.lastIndex)]
+                        Text(
+                            "ISO ${com.starcam.astro.astro.CameraMath.clampIso(proIso, isoRangeState)} · " +
+                                com.starcam.astro.astro.CameraMath.shutterLabel(sec),
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            com.starcam.astro.ui.I18n.Pro.isoLabel,
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 10.sp,
+                        )
+                        Slider(
+                            value = proIso.toFloat(),
+                            onValueChange = {
+                                proIso = com.starcam.astro.astro.CameraMath.clampIso(
+                                    (it.roundToInt() / 100) * 100, isoRangeState,
+                                )
+                            },
+                            valueRange = (isoRangeState?.first ?: 100).toFloat()..
+                                (isoRangeState?.last ?: 6400).toFloat(),
+                        )
+                        Text(
+                            com.starcam.astro.ui.I18n.Pro.shutterLabel,
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 10.sp,
+                        )
+                        Slider(
+                            value = proShutterIdx.toFloat(),
+                            onValueChange = { proShutterIdx = it.roundToInt() },
+                            valueRange = 0f..(stops.lastIndex.toFloat()),
+                            steps = stops.size - 2,
+                        )
+                        if (sec > 1.0) {
+                            Text(
+                                com.starcam.astro.ui.I18n.Pro.longExposureWarn,
+                                color = Color(0xFFFFE082),
+                                fontSize = 11.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                            )
+                        }
+                    }
+                }
+
+                // §0.41：EV 滑块（Pro 开启时 AE 已关，EV 无意义，隐藏）
+                if (!proMode) {
+                    Text(
+                        com.starcam.astro.ui.I18n.Camera.evLabel(evIndex),
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
                     )
+                    if (maxEvIndex > 0) {
+                        Slider(
+                            value = evIndex.toFloat(),
+                            onValueChange = { evIndex = it.roundToInt() },
+                            valueRange = -maxEvIndex.toFloat()..maxEvIndex.toFloat(),
+                            steps = (maxEvIndex * 2 - 1).coerceAtLeast(0),
+                        )
+                    }
                 }
                 // 夜景增强提示条：星点拖尾预警 + 拍摄参数建议
                 if (evIndex > 0) {

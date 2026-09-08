@@ -181,10 +181,24 @@ object I18n {
     object Ar {
         val toggleDesc: String get() = if (isEn) "AR live star map" else "AR 实时星图"
         val fovLabel: String get() = if (isEn) "FOV calibration %.0f°" else "视场校准 %.0f°"
+        val fovAuto: String get() = if (isEn) "🎯 FOV %.1f° (auto)" else "🎯 视场 %.1f°（自动标定）"
         val needOrientation: String get() = if (isEn) "🧭 Waiting for orientation…" else "🧭 等待传感器就绪…"
         val needLocation: String get() = if (isEn) "📍 Location needed for AR star map" else "📍 开启定位后显示 AR 星图"
         val belowHorizon: String get() = if (isEn) "⬇ Point phone at the sky" else "⬇ 请将手机朝向星空"
         val calibratedHint: String get() = if (isEn) "🎯 Calibrated by solver" else "🎯 已由识别校准"
+    }
+
+    // ==================== Pro 手动曝光（§0.50 CameraScreen） ====================
+    object Pro {
+        val proOn: String get() = if (isEn) "⚙️ Pro Manual (AE off) · tap to exit" else "⚙️ Pro 手动曝光（AE 关）· 点击退出"
+        val proOff: String get() = if (isEn) "⚙️ Pro Manual Exposure · tap to enable" else "⚙️ Pro 手动曝光 · 点击开启"
+        val isoLabel: String get() = if (isEn) "ISO sensitivity" else "感光度 ISO"
+        val shutterLabel: String get() = if (isEn) "Shutter speed" else "快门时长"
+        val longExposureWarn: String get() = if (isEn)
+            "🌙 Long exposure: preview slows and accumulates light. Hold steady or use a tripod."
+        else
+            "🌙 长曝光：预览会变慢并持续积光，请固定手机或使用三脚架"
+        val levelTitle: String get() = if (isEn) "Camera roll" else "相机滚转"
     }
 
     // ==================== 图层控制（§0.47 LayerPanel） ====================
