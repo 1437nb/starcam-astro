@@ -74,7 +74,9 @@ fun BatchScreen(
                     val result = StarSolver.solve(context, bmp, path, settings) { }
                         ?: return@withContext "未能识别（亮星不足或视场不支持）"
                     val solve = result.solve
-                    val out = OverlayRenderer.render(bmp, solve)
+                    // §0.58 太阳系天体标注（需该照片 EXIF 的时间 + GPS，缺失则为空）
+                    val solar = com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(path)
+                    val out = OverlayRenderer.render(bmp, solve, solarPositions = solar)
                         ?: return@withContext "渲染失败（结果缺坐标系）"
                     val name = "StarCam_${fmt.format(Date())}_$i.jpg"
                     val loc = ImageUtils.saveBitmapToGallery(context, out, name)

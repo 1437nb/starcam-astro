@@ -142,4 +142,28 @@ object ExifPriorsReader {
         } ?: return null
         return ms / 1000
     }
+
+    /**
+     * §0.58：从照片 EXIF 推算**该照片拍摄瞬间**太阳系天体的站心位置。
+     *
+     * 日月行星的位置随时刻显著变化（月亮每小时走约 0.55°），因此必须同时具备
+     * 拍摄时间与 GPS 定位才能给出正确结果——**缺任意一项即返回空表**，
+     * 宁可不标注也不能标错（错标比不标更糟）。演示合成图无真实时刻，同样走空表。
+     *
+     * 返回结果已按 [SolarSystemCatalog.defaultAnnotated] 过滤（外加太阳），
+     * 只保留肉眼可见、值得标注的目标。
+     */
+    fun solarSystemForPhoto(imagePath: String): List<SolarSystemEphemeris.SolarPosition> {
+        val priors = try {
+            read(imagePath)
+        } catch (e: Throwable) {
+            return emptyList()
+        }
+        val epoch = priors.epochSec ?: return emptyList()
+        val lat = priors.latDeg ?: return emptyList()
+        val lon = priors.lonDeg ?: return emptyList()
+        val jd = SolarSystemEphemeris.unixSecondsToJd(epoch)
+        val wanted = setOf(SolarSystemEphemeris.SolarBody.SUN) + SolarSystemCatalog.defaultAnnotated
+        return SolarSystemEphemeris.topocentricPositions(jd, lat, lon).filter { it.body in wanted }
+    }
 }

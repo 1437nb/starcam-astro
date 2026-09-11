@@ -79,4 +79,67 @@ class CameraMathTest {
         // 全画幅 50mm 对角线（43.3mm）FOV ≈ 46.8°
         assertEquals(46.8, CameraMath.diagonalFovDeg(50.0, 36.0, 24.0), 0.1)
     }
+
+    @Test
+    fun rotateBasisAroundUpPreservesZAndRotatesHorizon() {
+        // 初始基：正北指向 (axis=(0,1,0), right=(1,0,0), up=(0,0,1))
+        val right = floatArrayOf(1f, 0f, 0f)
+        val up = floatArrayOf(0f, 0f, 1f)
+        val axis = floatArrayOf(0f, 1f, 0f)
+
+        // 顺时针旋转 90°（由北向东）：axis 应变成正东 (1,0,0)，right 应变成正南 (0,-1,0)，up 保持 (0,0,1)
+        val oR = FloatArray(3)
+        val oU = FloatArray(3)
+        val oA = FloatArray(3)
+        CameraMath.rotateBasisAroundUp(right, up, axis, 90.0, oR, oU, oA)
+
+        assertEquals("East component of rotated axis", 1.0, oA[0].toDouble(), 1e-6)
+        assertEquals("North component of rotated axis", 0.0, oA[1].toDouble(), 1e-6)
+        assertEquals("Up component of rotated axis", 0.0, oA[2].toDouble(), 1e-6)
+
+        assertEquals("East component of rotated right", 0.0, oR[0].toDouble(), 1e-6)
+        assertEquals("North component of rotated right", -1.0, oR[1].toDouble(), 1e-6)
+        assertEquals("Up component of rotated right", 0.0, oR[2].toDouble(), 1e-6)
+
+        assertEquals("Up component unchanged", 1.0, oU[2].toDouble(), 1e-6)
+
+        // 验证铅垂不变性与滚转角绝对不变：任意角度旋转后 rollDeg 完全一致
+        for (deg in listOf(-12.5, 0.0, 45.0, 88.0, 180.0, -90.0)) {
+            val r2 = FloatArray(3); val u2 = FloatArray(3); val a2 = FloatArray(3)
+            CameraMath.rotateBasisAroundUp(right, up, axis, deg, r2, u2, a2)
+            assertEquals("Z of right invariant", right[2], r2[2], 1e-6f)
+            assertEquals("Z of up invariant", up[2], u2[2], 1e-6f)
+            assertEquals("Z of axis invariant", axis[2], a2[2], 1e-6f)
+            assertEquals("Roll angle invariant", CameraMath.rollDeg(right, up), CameraMath.rollDeg(r2, u2), 1e-6)
+        }
+    }
+
+    @Test
+    fun selectMainCameraFocalPrefersWideOverUltraWideAndTele() {
+        // 多摄机型常见：1.85mm（超广角 ~104°）、5.4mm（主摄 ~48°）、18.0mm（长焦 ~15°）
+        // 传感器尺寸 6.4mm × 4.8mm，竖屏下对应 4.8mm
+        val focals = floatArrayOf(1.85f, 5.4f, 18.0f)
+        val chosen = CameraMath.selectMainCameraFocal(
+            focals = focals,
+            sensorWidthMm = 6.4,
+            sensorHeightMm = 4.8,
+            isPortrait = true,
+            rotated = true,
+            targetFovDeg = 62.0,
+        )
+        assertEquals("应优选主摄 5.4mm 焦距", 5.4f, chosen!!, 1e-4f)
+
+        // 单镜头机型
+        val single = CameraMath.selectMainCameraFocal(
+            focals = floatArrayOf(4.3f),
+            sensorWidthMm = 6.4,
+            sensorHeightMm = 4.8,
+            isPortrait = true,
+            rotated = true,
+        )
+        assertEquals(4.3f, single!!, 1e-4f)
+
+        // 空列表安全返回 null
+        assertEquals(null, CameraMath.selectMainCameraFocal(null, 6.4, 4.8, true, true))
+    }
 }

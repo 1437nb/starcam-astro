@@ -65,4 +65,73 @@ object CameraMath {
     /** 已解视场与焦距换算的 35mm 等效检查辅助（对角线 FOV） */
     fun diagonalFovDeg(focalMm: Double, widthMm: Double, heightMm: Double): Double =
         horizontalFovDeg(focalMm, kotlin.math.sqrt(widthMm.pow(2) + heightMm.pow(2)))
+
+    /**
+     * 将东北天三轴基围绕世界铅垂轴（Up=(0,0,1)）顺时针（由北向东）旋转 [azDeg] 度（§0.56）。
+     * - 用于地磁偏角校正（磁北 → 真北）及天球求解航向残差校准
+     * - Z 分量绝对保持不变，画面滚转角（rollDeg）与地平线几何 100% 保持稳定一致
+     * - 支持就地修改（outX 默认为输入数组，零分配）
+     */
+    fun rotateBasisAroundUp(
+        right: FloatArray,
+        up: FloatArray,
+        axis: FloatArray,
+        azDeg: Double,
+        outRight: FloatArray = right,
+        outUp: FloatArray = up,
+        outAxis: FloatArray = axis,
+    ) {
+        if (kotlin.math.abs(azDeg) < 1e-5) {
+            if (outRight !== right) System.arraycopy(right, 0, outRight, 0, 3)
+            if (outUp !== up) System.arraycopy(up, 0, outUp, 0, 3)
+            if (outAxis !== axis) System.arraycopy(axis, 0, outAxis, 0, 3)
+            return
+        }
+        val rad = Math.toRadians(azDeg)
+        val c = kotlin.math.cos(rad).toFloat()
+        val s = kotlin.math.sin(rad).toFloat()
+        fun rot(v: FloatArray, out: FloatArray) {
+            val x = v[0]
+            val y = v[1]
+            val z = v[2]
+            out[0] = x * c + y * s
+            out[1] = -x * s + y * c
+            out[2] = z
+        }
+        rot(right, outRight)
+        rot(up, outUp)
+        rot(axis, outAxis)
+    }
+
+    /**
+     * 在多摄机型返回的焦距列表中，选出视场最接近标准主摄（~62° FOV）的焦距（§0.56），
+     * 避免误选超广角（>90°）或长焦（<40°）导致 AR 星图缩放严重失真。
+     */
+    fun selectMainCameraFocal(
+        focals: FloatArray?,
+        sensorWidthMm: Double,
+        sensorHeightMm: Double,
+        isPortrait: Boolean,
+        rotated: Boolean,
+        targetFovDeg: Double = 62.0,
+    ): Float? {
+        if (focals == null || focals.isEmpty() || sensorWidthMm <= 0.0 || sensorHeightMm <= 0.0) return null
+        val dim = if (rotated) {
+            if (isPortrait) sensorHeightMm else sensorWidthMm
+        } else {
+            if (isPortrait) sensorWidthMm else sensorHeightMm
+        }
+        var bestFocal = focals[0]
+        var bestDiff = Double.MAX_VALUE
+        for (f in focals) {
+            if (f <= 0f) continue
+            val fov = horizontalFovDeg(f.toDouble(), dim)
+            val diff = kotlin.math.abs(fov - targetFovDeg)
+            if (diff < bestDiff) {
+                bestDiff = diff
+                bestFocal = f
+            }
+        }
+        return bestFocal
+    }
 }

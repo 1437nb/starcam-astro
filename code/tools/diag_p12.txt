@@ -1,0 +1,185 @@
+
+
+
+
+
+Test results - Class com.starcam.astro.Photo12RegressionTest
+
+
+
+
+
+
+Class com.starcam.astro.Photo12RegressionTest
+
+all > 
+com.starcam.astro > Photo12RegressionTest
+
+
+
+
+
+
+
+
+
+1
+tests
+
+
+
+
+0
+failures
+
+
+
+
+0
+ignored
+
+
+
+
+59.474s
+duration
+
+
+
+
+
+
+
+
+100%
+successful
+
+
+
+
+
+
+
+
+Tests
+
+
+Standard output
+
+
+
+Tests
+
+
+
+Test
+Duration
+Result
+
+
+
+photo12SolveRate
+59.474s
+passed
+
+
+
+
+Standard output
+
+=== VOTE-TABLE 4963 detected=64 brightest=7026, 2902, 1908, 1814, 1220 th20=351
+work=37 strictEmpty=0 looseFired=0
+P#0 b=7026 noTruth : hip=19343(v=22), hip=109074(v=19), hip=7588(v=18), hip=62322(v=18), hip=7607(v=17)
+P#1 b=2902 noTruth : hip=86228(v=15), hip=88794(v=14), hip=71908(v=12), hip=48002(v=12), hip=68282(v=11)
+P#2 b=1908 noTruth : hip=27989(v=25), hip=27288(v=20), hip=86263(v=17), hip=26241(v=16), hip=61084(v=15)
+P#3 b=1814 noTruth : hip=21421(v=38), hip=22549(v=17), hip=20894(v=16), hip=52727(v=15), hip=86228(v=15)
+P#4 b=1220 noTruth : hip=25428(v=26), hip=18724(v=21), hip=47908(v=17), hip=66249(v=16), hip=68282(v=16)
+P#5 b=1075 noTruth : hip=25336(v=41), hip=56211(v=22), hip=78384(v=19), hip=84143(v=19), hip=65474(v=19)
+P#6 b=961 noTruth : hip=26311(v=54), hip=25930(v=20), hip=63613(v=19), hip=43813(v=18), hip=81693(v=18)
+P#7 b=947 noTruth : hip=82273(v=15), hip=50583(v=15), hip=73807(v=14), hip=74946(v=13), hip=60260(v=13)
+P#8 b=810 noTruth : hip=26727(v=45), hip=43783(v=22), hip=8903(v=15), hip=26311(v=15), hip=26549(v=15)
+P#9 b=663 noTruth : hip=26311(v=22), hip=25930(v=21), hip=81266(v=16), hip=45101(v=14), hip=78933(v=14)
+P#10 b=655 noTruth : hip=37504(v=13), hip=14354(v=13), hip=18907(v=13), hip=67927(v=12), hip=57632(v=12)
+P#11 b=574 noTruth : hip=7607(v=22), hip=56561(v=22), hip=66249(v=21), hip=101772(v=21), hip=78104(v=21)
+P#12 b=551 noTruth : hip=107556(v=17), hip=28380(v=17), hip=102098(v=16), hip=24674(v=15), hip=97165(v=15)
+P#13 b=482 noTruth : hip=26451(v=36), hip=68756(v=23), hip=48002(v=22), hip=43783(v=21), hip=91117(v=20)
+
+PHOTO 4963 2200x1015 stars=64 totalMs=6782 SOLVED ra=78.70 dec=20.85 fov=77.2 inliers=27 FALSE-POSITIVE
+PHOTO 4974 2200x1015 stars=64 totalMs=2987 SOLVED ra=81.96 dec=32.07 fov=75.8 inliers=50 TRUE-SOLVE
+PHOTO 4984 1650x2200 stars=64 totalMs=3684 SOLVED ra=59.64 dec=27.55 fov=75.9 inliers=64 TRUE-SOLVE
+PHOTO 4998 2200x1650 stars=64 totalMs=3493 SOLVED ra=59.65 dec=27.50 fov=75.8 inliers=65 TRUE-SOLVE
+=== VOTE-TABLE 5031 detected=32 brightest=498, 457, 433, 403, 399 th20=39
+work=13 strictEmpty=0 looseFired=0
+P#0 b=498 noTruth : hip=4427(v=22), hip=50371(v=13), hip=20889(v=11), hip=73334(v=11), hip=24674(v=10)
+P#1 b=457 noTruth : hip=67927(v=16), hip=104060(v=14), hip=8832(v=13), hip=3179(v=13), hip=76267(v=12)
+P#2 b=433 noTruth : hip=17847(v=22), hip=73714(v=12), hip=37677(v=11), hip=13209(v=10), hip=6867(v=10)
+P#3 b=403 noTruth : hip=746(v=14), hip=13268(v=14), hip=78401(v=13), hip=78933(v=13), hip=21421(v=12)
+P#4 b=399 noTruth : hip=6686(v=15), hip=112961(v=14), hip=52419(v=13), hip=33579(v=12), hip=78401(v=12)
+P#5 b=213 noTruth : hip=48455(v=14), hip=73273(v=13), hip=24674(v=11), hip=28358(v=11), hip=54872(v=11)
+P#6 b=182 noTruth : hip=8886(v=21), hip=49669(v=13), hip=87073(v=10), hip=78072(v=9), hip=91117(v=8)
+P#7 b=131 noTruth : hip=20455(v=18), hip=73273(v=15), hip=3821(v=13), hip=78820(v=13), hip=20205(v=12)
+P#8 b=104 noTruth : hip=13268(v=18), hip=76333(v=16), hip=84143(v=15), hip=42570(v=14), hip=17358(v=13)
+P#9 b=83 noTruth : hip=2920(v=15), hip=80763(v=13), hip=33579(v=11), hip=83207(v=11), hip=26727(v=11)
+P#10 b=73 noTruth : hip=82363(v=6), hip=95947(v=6), hip=72607(v=6), hip=106985(v=5), hip=19747(v=5)
+P#11 b=70 noTruth : hip=56343(v=12), hip=26069(v=11), hip=84379(v=11), hip=18907(v=11), hip=92420(v=10)
+P#12 b=61 noTruth : hip=72607(v=7), hip=48002(v=6), hip=65477(v=6), hip=28380(v=5), hip=45941(v=5)
+
+PHOTO 5031 2200x1650 stars=32 totalMs=825 UNSOLVED MISS
+PHOTO 5040 2200x1650 stars=64 totalMs=3101 SOLVED ra=68.75 dec=-14.28 fov=76.1 inliers=53 TRUE-SOLVE
+PHOTO 5049 2200x1650 stars=64 totalMs=3141 SOLVED ra=71.18 dec=-20.72 fov=78.8 inliers=21 TRUE-SOLVE
+PHOTO 5057 2200x1650 stars=64 totalMs=2276 SOLVED ra=62.89 dec=14.62 fov=76.5 inliers=8 TRUE-SOLVE
+PHOTO 5068 2200x1650 stars=64 totalMs=3159 SOLVED ra=57.83 dec=26.62 fov=76.1 inliers=61 TRUE-SOLVE
+PHOTO 5076 2200x1650 stars=64 totalMs=2959 SOLVED ra=57.57 dec=27.44 fov=76.1 inliers=62 TRUE-SOLVE
+=== VOTE-TABLE 5087 detected=64 brightest=828, 820, 702, 664, 544 th20=121
+work=35 strictEmpty=0 looseFired=0
+P#0 b=828 noTruth : hip=80763(v=12), hip=45860(v=11), hip=36046(v=9), hip=79992(v=9), hip=14879(v=9)
+P#1 b=820 noTruth : hip=42911(v=18), hip=53910(v=16), hip=25281(v=16), hip=72220(v=15), hip=99473(v=14)
+P#2 b=702 noTruth : hip=113881(v=26), hip=45101(v=21), hip=25281(v=20), hip=59803(v=20), hip=66657(v=19)
+P#3 b=664 noTruth : hip=113963(v=32), hip=109176(v=23), hip=45556(v=17), hip=50801(v=17), hip=60260(v=17)
+P#4 b=544 noTruth : hip=13209(v=21), hip=48319(v=13), hip=27288(v=13), hip=100345(v=12), hip=20889(v=12)
+P#5 b=433 noTruth : hip=16083(v=24), hip=17499(v=20), hip=42536(v=18), hip=18724(v=18), hip=44382(v=16)
+P#6 b=430 noTruth : hip=91262(v=28), hip=86974(v=20), hip=112158(v=18), hip=62434(v=18), hip=61084(v=17)
+P#7 b=362 noTruth : hip=106278(v=17), hip=7607(v=15), hip=52419(v=15), hip=66657(v=14), hip=47908(v=14)
+P#8 b=275 noTruth : hip=72105(v=12), hip=99675(v=10), hip=74666(v=10), hip=81833(v=10), hip=55282(v=10)
+P#9 b=266 noTruth : hip=20455(v=23), hip=112029(v=17), hip=30122(v=16), hip=107556(v=15), hip=10064(v=15)
+P#10 b=241 noTruth : hip=112748(v=49), hip=17702(v=30), hip=78933(v=29), hip=26549(v=26), hip=78820(v=24)
+P#11 b=224 noTruth : hip=62434(v=12), hip=37826(v=10), hip=107089(v=9), hip=50372(v=8), hip=17448(v=8)
+P#12 b=205 noTruth : hip=57363(v=26), hip=109176(v=21), hip=37677(v=20), hip=93194(v=18), hip=102488(v=16)
+P#13 b=194 noTruth : hip=57399(v=18), hip=97804(v=17), hip=37229(v=15), hip=78820(v=15), hip=13847(v=15)
+
+PHOTO 5087 1650x2200 stars=64 totalMs=2116 UNSOLVED MISS
+=== VOTE-TABLE 5092 detected=64 brightest=1824, 1819, 1649, 1257, 1114 th20=327
+work=45 strictEmpty=0 looseFired=0
+P#0 b=1824 noTruth : hip=33856(v=26), hip=78933(v=23), hip=93085(v=23), hip=45080(v=22), hip=48455(v=22)
+P#1 b=1819 noTruth : hip=21421(v=25), hip=17499(v=18), hip=17702(v=18), hip=99675(v=17), hip=101958(v=15)
+P#2 b=1649 noTruth : hip=41037(v=22), hip=54872(v=19), hip=60718(v=19), hip=35264(v=17), hip=86263(v=16)
+P#3 b=1257 noTruth : hip=17702(v=17), hip=17573(v=16), hip=59774(v=15), hip=71957(v=14), hip=74395(v=13)
+P#4 b=1114 noTruth : hip=17847(v=19), hip=20885(v=17), hip=65936(v=15), hip=50372(v=14), hip=21421(v=14)
+P#5 b=1030 noTruth : hip=42911(v=18), hip=25985(v=17), hip=28103(v=15), hip=69996(v=14), hip=39429(v=14)
+P#6 b=851 noTruth : hip=53229(v=20), hip=60718(v=18), hip=17499(v=17), hip=17847(v=17), hip=17702(v=16)
+P#7 b=835 noTruth : hip=113881(v=28), hip=45101(v=25), hip=112029(v=20), hip=80763(v=20), hip=49583(v=20)
+P#8 b=829 noTruth : hip=113963(v=30), hip=48319(v=19), hip=109176(v=18), hip=78933(v=18), hip=43783(v=17)
+P#9 b=808 noTruth : hip=17499(v=24), hip=17702(v=21), hip=17847(v=20), hip=20205(v=20), hip=20894(v=20)
+P#10 b=748 noTruth : hip=86974(v=13), hip=48319(v=12), hip=13847(v=11), hip=27288(v=11), hip=42911(v=10)
+P#11 b=568 noTruth : hip=42536(v=19), hip=66657(v=18), hip=20205(v=18), hip=20455(v=18), hip=17448(v=14)
+P#12 b=554 noTruth : hip=61084(v=22), hip=112158(v=19), hip=45080(v=17), hip=74395(v=16), hip=91262(v=16)
+P#13 b=545 noTruth : hip=17499(v=34), hip=20894(v=26), hip=17702(v=24), hip=20455(v=24), hip=26311(v=19)
+
+PHOTO 5092 1650x2200 stars=64 totalMs=3223 UNSOLVED MISS
+SUMMARY true=8 false=1 miss=3 total=12
+
+
+
+
+
+
+
+Wrap lines
+
+
+Generated by 
+Gradle 8.12.1 at 2026年9月2日 下午8:31:58
+
+
+
+

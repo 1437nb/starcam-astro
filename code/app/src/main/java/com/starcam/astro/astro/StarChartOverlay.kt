@@ -6,12 +6,13 @@ package com.starcam.astro.astro
  */
 object StarChartOverlay {
 
-    /** 投影后的星点 */
+    /** 投影后的星点；[belowHorizon] 表示天球高度角 < 0（§0.53 全天星空变暗用） */
     data class Star2D(
         val entry: StarEntry,
         val x: Float,
         val y: Float,
         val visible: Boolean,
+        val belowHorizon: Boolean = false,
     )
 
     /** 星座连线（两端点均为可见星） */
@@ -74,8 +75,14 @@ object StarChartOverlay {
         return labels
     }
 
-    /** §0.43c：梅西耶深空天体投影（画面内返回可见标记） */
-    data class Messier2D(val obj: MessierObject, val x: Float, val y: Float, val visible: Boolean)
+    /** §0.43c：梅西耶深空天体投影（画面内返回可见标记）；[belowHorizon] 同 [Star2D] */
+    data class Messier2D(
+        val obj: MessierObject,
+        val x: Float,
+        val y: Float,
+        val visible: Boolean,
+        val belowHorizon: Boolean = false,
+    )
 
     fun projectMessier(wcs: WcsTransform, width: Int, height: Int): List<Messier2D> {
         val out = ArrayList<Messier2D>(16)
@@ -87,6 +94,44 @@ object StarChartOverlay {
             }
             val visible = p[0] in -80f..(width + 80f) && p[1] in -80f..(height + 80f)
             out.add(Messier2D(obj, p[0], p[1], visible))
+        }
+        return out
+    }
+
+    /**
+     * §0.58：太阳系天体投影（月亮 / 行星）。
+     *
+     * 与恒星、梅西耶同为「无穷远投影」——日月行星虽在有限距离，但照片成像仍遵循
+     * 同一 WCS 映射，故直接用 [WcsTransform.skyToScreen]。〔注：月亮的站心视差
+     * 已在历表侧修正，此处只需传入站心坐标。〕
+     *
+     * @param positions 由 [SolarSystemEphemeris.topocentricPositions] 得到的站心位置
+     */
+    data class Solar2D(
+        val pos: SolarSystemEphemeris.SolarPosition,
+        val x: Float,
+        val y: Float,
+        val visible: Boolean,
+        val belowHorizon: Boolean = false,
+    )
+
+    fun projectSolarSystem(
+        wcs: WcsTransform,
+        width: Int,
+        height: Int,
+        positions: List<SolarSystemEphemeris.SolarPosition>,
+        marginPx: Float = 80f,
+    ): List<Solar2D> {
+        val out = ArrayList<Solar2D>(positions.size)
+        for (pos in positions) {
+            val p = wcs.skyToScreen(pos.raDeg, pos.decDeg, width, height)
+            if (p[0].isNaN() || p[1].isNaN()) {
+                out.add(Solar2D(pos, Float.NaN, Float.NaN, visible = false))
+                continue
+            }
+            val visible = p[0] in -marginPx..(width + marginPx) &&
+                p[1] in -marginPx..(height + marginPx)
+            out.add(Solar2D(pos, p[0], p[1], visible))
         }
         return out
     }

@@ -177,9 +177,76 @@ fun CameraScreen(
     val latestPointing = remember {
         java.util.concurrent.atomic.AtomicReference(DeviceOrientationTracker.DevicePointing())
     }
-    val arCorrectionVec = remember { java.util.concurrent.atomic.AtomicReference<FloatArray?>(null) }
+    // §0.56：真解航向角残差与校准状态（绕世界 Up 轴旋转，取代 2D 屏幕平移）
+    val arAzimuthOffsetDeg = remember { java.util.concurrent.atomic.AtomicReference(0.0) }
+    var arCalibrated by remember { mutableStateOf(false) }
+    val effRight = remember { FloatArray(3) }
+    val effUp = remember { FloatArray(3) }
+    val effAxis = remember { FloatArray(3) }
     val arSky = remember { com.starcam.astro.astro.ArSkyProjector.ProjectedSky() }
     var arTick by remember { mutableStateOf(0) }
+    // §0.58：太阳系天体站心位置缓存。历表内部已按 30 秒窗口缓存，此处再按返回实例
+    // 做一次「身份判别」，使过滤后的待标注列表最多 30 秒才重新构造一次，
+    // 逐帧路径只做一次引用比较，不产生任何分配。
+    val solarFrame = remember { SolarFrameCache() }
+    // §0.54b：找星导航目标 与 AR 点击详情卡片
+    var arTarget by remember { mutableStateOf<ArTarget?>(null) }
+    var arTargetPicker by remember { mutableStateOf(false) }
+    var arCard by remember { mutableStateOf<com.starcam.astro.ui.result.SkyObjectRef?>(null) }
+    // 目标投影 scratch 与导航画笔：一次性创建，每帧零新建对象（重做要点）
+    val arTpos = remember { FloatArray(3) }
+    val navPaintSp = with(LocalDensity.current) { 1.sp.toPx() }
+    val navPaints = remember(navPaintSp) {
+        NavPaints(
+            ring = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 2.2f * navPaintSp
+                color = 0xFF69F0AE.toInt()
+            },
+            text = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF69F0AE.toInt()
+                textSize = 12f * navPaintSp
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            },
+            arrow = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 3f * navPaintSp
+                strokeCap = android.graphics.Paint.Cap.ROUND
+                color = 0xFF69F0AE.toInt()
+            },
+        )
+    }
+    // §0.56：地平线与地平罗盘标尺画笔（一次性创建，每帧零新建对象）
+    val horizonPaint = remember(navPaintSp) {
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0x66A7F3D0.toInt()
+            strokeWidth = 1.5f * navPaintSp
+            style = android.graphics.Paint.Style.STROKE
+            pathEffect = android.graphics.DashPathEffect(floatArrayOf(10f * navPaintSp, 8f * navPaintSp), 0f)
+        }
+    }
+    val cardinalDotPaint = remember(navPaintSp) {
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xBBA7F3D0.toInt()
+            style = android.graphics.Paint.Style.FILL
+        }
+    }
+    val cardinalMajorTextPaint = remember(navPaintSp) {
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xEEA7F3D0.toInt()
+            textSize = 12f * navPaintSp
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setShadowLayer(3f * navPaintSp, 1f, 1f, 0xFF000000.toInt())
+        }
+    }
+    val cardinalMinorTextPaint = remember(navPaintSp) {
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0x88A7F3D0.toInt()
+            textSize = 9.5f * navPaintSp
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setShadowLayer(2f * navPaintSp, 1f, 1f, 0xFF000000.toInt())
+        }
+    }
     val isPortrait = LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
 
     // ~60fps 重绘节拍：withFrameNanos 对齐 vsync；姿态走 AtomicReference 直读
@@ -241,10 +308,13 @@ fun CameraScreen(
         if (!hasPermission) return@LaunchedEffect
         try {
             val provider = ProcessCameraProvider.getInstance(context).await(context)
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
-            }
+            val preview = Preview.Builder()
+                .setTargetAspectRatio(androidx.camera.core.AspectRatio.RATIO_4_3)
+                .build().also {
+                    it.setSurfaceProvider(previewView.surfaceProvider)
+                }
             imageCapture = ImageCapture.Builder()
+                .setTargetAspectRatio(androidx.camera.core.AspectRatio.RATIO_4_3)
                 // 质量优先：星空弱光场景下 MINIMIZE_LATENCY 会以画质换速度，
                 // 识别对星点清晰度敏感（§0.15 提星质量是成功率关键）
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
@@ -288,15 +358,47 @@ fun CameraScreen(
                             res.solve.raDeg, res.solve.decDeg, isEn,
                         )
                         if (arFlag.get()) {
-                            // §0.49：AR 模式——求解器只做校准（真解中心向量 → 屏幕平移修正），
-                            // 不再渲染位图叠加（防双重绘制）
-                            val corr = com.starcam.astro.astro.ArSkyProjector.unitVector(
-                                res.solve.raDeg, res.solve.decDeg,
-                            )
+                            // §0.56：真解视场与航向偏角校准（替代 2D 屏幕平移）
+                            // 1. 真实视场自动标定（Ground Truth 像素比例尺）
+                            val solvedFov = res.solve.fieldWidthDeg
+                            // 2. 真实航向残差：通过当前时刻 LST 与纬度将 (ra, dec) 转换为真地平真方位 azSolve
+                            val nowSec = System.currentTimeMillis() / 1000L
+                            val pCur = orientationTracker.currentPointing
+                            val latVal = pCur.latDeg
+                            val lonVal = pCur.lonDeg
+                            var deltaAz = 0.0
+                            if (latVal != null && lonVal != null) {
+                                val jdNow = com.starcam.astro.astro.SkyEphemeris.unixSecondsToJd(nowSec.toDouble())
+                                val lstNow = com.starcam.astro.astro.SkyEphemeris.lstDeg(jdNow, lonVal)
+                                val d2r = Math.PI / 180.0
+                                val sl = kotlin.math.sin(lstNow * d2r)
+                                val cl = kotlin.math.cos(lstNow * d2r)
+                                val sp = kotlin.math.sin(latVal * d2r)
+                                val cp = kotlin.math.cos(latVal * d2r)
+                                val cd = kotlin.math.cos(res.solve.decDeg * d2r)
+                                val vx = cd * kotlin.math.cos(res.solve.raDeg * d2r)
+                                val vy = cd * kotlin.math.sin(res.solve.raDeg * d2r)
+                                val vz = kotlin.math.sin(res.solve.decDeg * d2r)
+                                val e = -sl * vx + cl * vy
+                                val n = -sp * cl * vx - sp * sl * vy + cp * vz
+                                var azSolve = Math.toDegrees(kotlin.math.atan2(e, n))
+                                if (azSolve < 0.0) azSolve += 360.0
+                                deltaAz = azSolve - pCur.azDeg
+                                while (deltaAz > 180.0) deltaAz -= 360.0
+                                while (deltaAz < -180.0) deltaAz += 360.0
+                            }
                             mainHandler.post {
                                 previewOverlay = null
                                 previewLabel = label
-                                arCorrectionVec.set(corr)
+                                if (solvedFov in 35.0..85.0) {
+                                    arFovDeg = solvedFov.toFloat().coerceIn(40f, 90f)
+                                    fovAutoCalibrated = true
+                                    settings.arFovDeg = arFovDeg
+                                }
+                                if (kotlin.math.abs(deltaAz) <= 45.0) {
+                                    arAzimuthOffsetDeg.set(deltaAz)
+                                    arCalibrated = true
+                                }
                             }
                         } else {
                             val overlay = renderLiveOverlay(frame, res.solve.wcs!!)
@@ -329,35 +431,41 @@ fun CameraScreen(
             cameraControl = camera.cameraControl
             maxEvIndex = camera.cameraInfo.exposureState.exposureCompensationRange.upper
 
-            // §0.50：Camera2 能力查询（Pro 手动曝光支持性）+ AR FOV 自动标定
+            // §0.50/§0.56：Camera2 能力查询（Pro 手动曝光支持性）+ AR FOV 主摄优选标定
             try {
                 val info2 = androidx.camera.camera2.interop.Camera2CameraInfo.from(camera.cameraInfo)
-                val focal = info2.getCameraCharacteristic(
+                val focals = info2.getCameraCharacteristic(
                     android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS,
-                )?.firstOrNull()
+                )
                 val phys = info2.getCameraCharacteristic(
                     android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE,
                 )
-                if (focal != null && phys != null && focal > 0f) {
-                    // 传感器朝向 90（常见后置）：竖屏显示时水平方向对应传感器高度维
+                if (focals != null && phys != null && focals.isNotEmpty()) {
                     val sensorRot = info2.getCameraCharacteristic(
                         android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION,
                     ) ?: 90
                     val rotated = sensorRot % 180 != 0
-                    val fovPortrait = com.starcam.astro.astro.CameraMath.horizontalFovDeg(
-                        focal.toDouble(), phys.height.toDouble(),
+                    val focal = com.starcam.astro.astro.CameraMath.selectMainCameraFocal(
+                        focals, phys.width.toDouble(), phys.height.toDouble(), isPortrait, rotated,
                     )
-                    val fovLandscape = com.starcam.astro.astro.CameraMath.horizontalFovDeg(
-                        focal.toDouble(), phys.width.toDouble(),
-                    )
-                    val fov = if (rotated) {
-                        if (isPortrait) fovPortrait else fovLandscape
+                    if (focal != null && focal > 0f) {
+                        val fovPortrait = com.starcam.astro.astro.CameraMath.horizontalFovDeg(
+                            focal.toDouble(), phys.height.toDouble(),
+                        )
+                        val fovLandscape = com.starcam.astro.astro.CameraMath.horizontalFovDeg(
+                            focal.toDouble(), phys.width.toDouble(),
+                        )
+                        val fov = if (rotated) {
+                            if (isPortrait) fovPortrait else fovLandscape
+                        } else {
+                            if (isPortrait) fovLandscape else fovPortrait
+                        }
+                        if (fov in 30.0..100.0) {
+                            arFovDeg = fov.toFloat().coerceIn(40f, 90f)
+                            fovAutoCalibrated = true
+                        }
                     } else {
-                        if (isPortrait) fovLandscape else fovPortrait
-                    }
-                    if (fov in 30.0..100.0) {
-                        arFovDeg = fov.toFloat().coerceIn(40f, 90f)
-                        fovAutoCalibrated = true
+                        fovAutoCalibrated = false
                     }
                 } else {
                     fovAutoCalibrated = false
@@ -484,6 +592,43 @@ fun CameraScreen(
         focusHint = false // 已对焦，收起提示
     }
 
+    /**
+     * §0.54b：AR 点击命中测试（显示矩形坐标）。§0.58 太阳系天体优先，
+     * 其次梅西耶，再次亮星；与结果页命中逻辑一致（28dp/32dp 屏幕容差）。
+     */
+    fun arHitTest(rx: Float, ry: Float, messierTolPx: Float, starTolPx: Float):
+        com.starcam.astro.ui.result.SkyObjectRef? {
+        // §0.58 日月光体最醒目，优先命中
+        var solarD = messierTolPx * 1.6f
+        for (s in arSky.solar) {
+            val d = kotlin.math.hypot((s.x - rx).toDouble(), (s.y - ry).toDouble()).toFloat()
+            if (d < solarD) {
+                solarD = d
+                return com.starcam.astro.ui.result.SkyObjectRef.SolarRef(s.pos)
+            }
+        }
+        var best: com.starcam.astro.ui.result.SkyObjectRef? = null
+        var bestD = messierTolPx
+        for (m in arSky.messier) {
+            val d = kotlin.math.hypot((m.x - rx).toDouble(), (m.y - ry).toDouble()).toFloat()
+            if (d < bestD) {
+                bestD = d
+                best = com.starcam.astro.ui.result.SkyObjectRef.MessierRef(m.obj)
+            }
+        }
+        if (best != null) return best
+        var starD = starTolPx
+        for (s in arSky.stars) {
+            if (s.entry.mag > 3.2) continue
+            val d = kotlin.math.hypot((s.x - rx).toDouble(), (s.y - ry).toDouble()).toFloat()
+            if (d < starD) {
+                starD = d
+                best = com.starcam.astro.ui.result.SkyObjectRef.StarRef(s.entry)
+            }
+        }
+        return best
+    }
+
     Scaffold { padding ->
         Box(
             modifier = Modifier
@@ -503,11 +648,13 @@ fun CameraScreen(
                     com.starcam.astro.ui.theme.AppThemeMode.NIGHT_RED
                 val pxPerSp = with(LocalDensity.current) { 1.sp.toPx() }
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    // 读 arTick 触发逐帧重绘；姿态从 AtomicReference 直读（不触发重组）
+                    // 读 arTick 触发逐帧重绘；姿态从 tracker 融合引擎取"显示时刻预测值"
+                    // （旋转矢量锚点 + 陀螺仪积分 + 外推 24ms，§0.52）
                     @Suppress("UNUSED_EXPRESSION")
                     arTick
-                    val p = latestPointing.get()
-                    val canDraw = p.hasOrientation && p.latDeg != null && p.lonDeg != null && p.altDeg > 0.0
+                    val p = orientationTracker.predictedPointing()
+                    // §0.53 全天星空：仅需姿态 + 定位（朝下也画"脚下半球"星空）
+                    val canDraw = p.hasOrientation && p.latDeg != null && p.lonDeg != null
                     if (canDraw) {
                         // PreviewView FIT_CENTER：假设预览流 4:3（旋转后竖屏 3:4），
                         // 计算整幅可见的显示矩形，AR 星图精确覆盖该矩形
@@ -524,13 +671,38 @@ fun CameraScreen(
                         )
                         val lst = com.starcam.astro.astro.SkyEphemeris.lstDeg(jd, lon)
 
+                        // §0.56：真北基上施加航向校准残差（若已校准）
+                        System.arraycopy(p.right, 0, effRight, 0, 3)
+                        System.arraycopy(p.up, 0, effUp, 0, 3)
+                        System.arraycopy(p.axis, 0, effAxis, 0, 3)
+                        val calOffset = arAzimuthOffsetDeg.get()
+                        if (arCalibrated && kotlin.math.abs(calOffset) > 1e-4) {
+                            com.starcam.astro.astro.CameraMath.rotateBasisAroundUp(
+                                effRight, effUp, effAxis, calOffset,
+                            )
+                        }
+
+                        // §0.58 太阳系天体（月亮/行星）：站心位置随时刻变化，
+                        // 用带缓存的查询（30 秒窗口），逐帧只做一次引用比较，零分配。
+                        val allSolar = com.starcam.astro.astro.SolarSystemEphemeris.cachedTopocentric(
+                            System.currentTimeMillis() / 1000, lat, lon,
+                        )
+                        if (solarFrame.src !== allSolar) {
+                            solarFrame.src = allSolar
+                            solarFrame.list = allSolar.filter {
+                                it.body == com.starcam.astro.astro.SolarSystemEphemeris.SolarBody.SUN ||
+                                    it.body in com.starcam.astro.astro.SolarSystemCatalog.defaultAnnotated
+                            }
+                        }
+
                         com.starcam.astro.astro.ArSkyProjector.project(
-                            right = p.right, up = p.up, axis = p.axis,
+                            right = effRight, up = effUp, axis = effAxis,
                             lstDeg = lst, latDeg = lat,
                             fovDeg = arFovDeg.toDouble(),
                             widthPx = rectW, heightPx = rectH,
-                            correctionVec = arCorrectionVec.get(),
+                            correctionVec = null,
                             out = arSky,
+                            solarPositions = solarFrame.list,
                         )
                         val nc = drawContext.canvas.nativeCanvas
                         nc.save()
@@ -540,7 +712,7 @@ fun CameraScreen(
                             nc,
                             com.starcam.astro.astro.LayeredRenderer.OverlayScene(
                                 arSky.widthPx.toInt(), arSky.heightPx.toInt(),
-                                arSky.stars, arSky.lines, arSky.labels, arSky.messier,
+                                arSky.stars, arSky.lines, arSky.labels, arSky.messier, arSky.solar,
                             ),
                             com.starcam.astro.astro.LayerFlags.ALL,
                             isEnglish = isEn,
@@ -548,17 +720,153 @@ fun CameraScreen(
                             night = night,
                             drawWidth = rectW,
                             drawHeight = rectH,
+                            // §0.53：地平线以下的星空变暗（朝下时仍显示，视觉区分天/地）
+                            dimBelowHorizon = true,
+                            // §0.58：AR 视场即水平视场 → 直接得板比例，日月按真实视直径绘制
+                            degPerPx = (arFovDeg / rectW).toFloat(),
                         )
+                        // §0.53/§0.56：地平线指示线与地平罗盘标尺（大圆针孔投影直线 + 4边鲁棒求交 + 8方位罗盘标尺，对齐 Stellarium）
+                        val f = (rectW / 2f) / kotlin.math.tan(Math.toRadians(arFovDeg / 2.0)).toFloat()
+                        val ru = effRight[2]
+                        val uu = effUp[2]
+                        val au = effAxis[2]
+                        val halfW = rectW / 2f
+                        val halfH = rectH / 2f
+
+                        // 直线方程：ru*(x - cx) - uu*(y - cy) + f*au = 0
+                        // A*x + B*y + C = 0
+                        val lineA = ru
+                        val lineB = -uu
+                        val lineC = f * au - ru * halfW + uu * halfH
+
+                        var p1x = 0f; var p1y = 0f
+                        var p2x = 0f; var p2y = 0f
+                        var hitCount = 0
+
+                        fun addHit(hx: Float, hy: Float) {
+                            if (hitCount == 0) {
+                                p1x = hx; p1y = hy
+                                hitCount++
+                            } else if (hitCount == 1) {
+                                if (kotlin.math.abs(p1x - hx) > 1f || kotlin.math.abs(p1y - hy) > 1f) {
+                                    p2x = hx; p2y = hy
+                                    hitCount++
+                                }
+                            }
+                        }
+
+                        if (kotlin.math.abs(lineB) > 1e-5f) {
+                            val yLeft = -lineC / lineB
+                            if (yLeft in 0f..rectH) addHit(0f, yLeft)
+                            val yRight = -(lineC + lineA * rectW) / lineB
+                            if (yRight in 0f..rectH) addHit(rectW, yRight)
+                        }
+                        if (kotlin.math.abs(lineA) > 1e-5f && hitCount < 2) {
+                            val xTop = -lineC / lineA
+                            if (xTop in 0f..rectW) addHit(xTop, 0f)
+                            if (hitCount < 2) {
+                                val xBottom = -(lineC + lineB * rectH) / lineA
+                                if (xBottom in 0f..rectW) addHit(xBottom, rectH)
+                            }
+                        }
+
+                        if (hitCount >= 2) {
+                            nc.drawLine(p1x, p1y, p2x, p2y, horizonPaint)
+                        }
+
+                        // §0.56：地平 8 方位罗盘标尺（北/东/南/西 + 东北/东南/西南/西北）
+                        for (i in 0 until 8) {
+                            val azDeg = i * 45.0
+                            val isMajor = i % 2 == 0
+                            val rad = Math.toRadians(azDeg)
+                            val e = kotlin.math.sin(rad).toFloat()
+                            val n = kotlin.math.cos(rad).toFloat()
+                            val camX = e * effRight[0] + n * effRight[1]
+                            val camY = e * effUp[0] + n * effUp[1]
+                            val camZ = e * effAxis[0] + n * effAxis[1]
+                            if (camZ > 0.08f) {
+                                val sx = halfW + f * camX / camZ
+                                val sy = halfH - f * camY / camZ
+                                if (sx in 10f..(rectW - 10f) && sy in 10f..(rectH - 10f)) {
+                                    nc.drawCircle(sx, sy, (if (isMajor) 2.5f else 1.8f) * pxPerSp, cardinalDotPaint)
+                                    val cLabel = com.starcam.astro.ui.I18n.Ar.cardinalLabel(i, isEn)
+                                    nc.drawText(
+                                        cLabel,
+                                        sx + 5f * pxPerSp,
+                                        sy - 5f * pxPerSp,
+                                        if (isMajor) cardinalMajorTextPaint else cardinalMinorTextPaint,
+                                    )
+                                }
+                            }
+                        }
+                        // §0.54b：找星导航叠加（Paint 复用、scratch 输出，每帧零新建对象）
+                        arTarget?.let { target ->
+                            val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
+                            val label = target.label(isEn)
+                            val visible = com.starcam.astro.astro.ArSkyProjector.projectPoint(
+                                target.raDeg, target.decDeg, effRight, effUp, effAxis,
+                                lst, lat, arFovDeg.toDouble(), rectW, rectH, null,
+                                arTpos,
+                            )
+                            if (visible) {
+                                val sx = arTpos[0]
+                                val sy = arTpos[1]
+                                val onScreen = sx in -24f..rectW + 24f && sy in -24f..rectH + 24f
+                                if (onScreen) {
+                                    // 目标在视场内：脉冲光环 + 标签 + ✓
+                                    val pulse = (arTick % 60) / 60f
+                                    navPaints.ring.strokeWidth = 2.2f * pxPerSp
+                                    nc.drawCircle(sx, sy, (16f + 4f * pulse) * pxPerSp, navPaints.ring)
+                                    navPaints.text.textSize = 12f * pxPerSp
+                                    nc.drawText(
+                                        "$label · ${com.starcam.astro.ui.I18n.Ar.found}",
+                                        sx + 14f * pxPerSp, sy - 10f * pxPerSp, navPaints.text,
+                                    )
+                                } else {
+                                    // 视场外：边缘方向箭头 + 偏离角
+                                    val dx = sx - rectW / 2f
+                                    val dy = sy - rectH / 2f
+                                    val len = kotlin.math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+                                    if (len > 1f) {
+                                        val ux = dx / len
+                                        val uy = dy / len
+                                        val dist = 10f * pxPerSp
+                                        val ax = rectW / 2f + ux * dist
+                                        val ay = rectH / 2f + uy * dist
+                                        val arrowLen = 22f * pxPerSp
+                                        navPaints.arrow.strokeWidth = 3f * pxPerSp
+                                        nc.drawLine(ax, ay, ax + ux * arrowLen, ay + uy * arrowLen, navPaints.arrow)
+                                        val angDeg = Math.toDegrees(kotlin.math.atan((len / f).toDouble()))
+                                        val note = com.starcam.astro.ui.I18n.Ar.offAngle.format(angDeg)
+                                        navPaints.text.textSize = 12f * pxPerSp
+                                        nc.drawText(
+                                            label, ax + ux * 16f * pxPerSp - 40f * pxPerSp,
+                                            ay + uy * 16f * pxPerSp - 8f * pxPerSp, navPaints.text,
+                                        )
+                                        nc.drawText(
+                                            note, ax + ux * 16f * pxPerSp - 40f * pxPerSp,
+                                            ay + uy * 16f * pxPerSp + 10f * pxPerSp, navPaints.text,
+                                        )
+                                    }
+                                }
+                            } else {
+                                // 目标在身后（相机背面）：提示反向旋转
+                                navPaints.text.textSize = 12f * pxPerSp
+                                nc.drawText(
+                                    "↻ $label", rectW / 2f - 60f * pxPerSp, rectH / 2f - 60f * pxPerSp,
+                                    navPaints.text,
+                                )
+                            }
+                        }
                         nc.restore()
                     }
                 }
-                // AR 未就绪提示（无姿态/无定位/指向地平线以下）
+                // AR 未就绪提示（无姿态/无定位）
                 val hint = run {
                     val p = pointingState
                     when {
                         !p.hasOrientation -> com.starcam.astro.ui.I18n.Ar.needOrientation
                         p.latDeg == null -> com.starcam.astro.ui.I18n.Ar.needLocation
-                        p.altDeg <= 0.0 -> com.starcam.astro.ui.I18n.Ar.belowHorizon
                         else -> null
                     }
                 }
@@ -575,7 +883,7 @@ fun CameraScreen(
                     )
                 }
                 // 校准状态角标
-                if (arCorrectionVec.get() != null) {
+                if (arCalibrated) {
                     Text(
                         com.starcam.astro.ui.I18n.Ar.calibratedHint,
                         color = Color(0xFFB9F6CA),
@@ -588,6 +896,18 @@ fun CameraScreen(
                             .padding(horizontal = 6.dp, vertical = 3.dp),
                     )
                 }
+            }
+
+            // §0.54b：AR 点击详情科普卡片（底部浮层，复用结果页卡片组件）
+            arCard?.let { ref ->
+                com.starcam.astro.ui.result.ObjectInfoCard(
+                    ref = ref,
+                    onDismiss = { arCard = null },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp),
+                )
             }
 
             // §0.42：实时认星叠加层（星座线标注帧 + 识别标签）
@@ -616,11 +936,33 @@ fun CameraScreen(
             }
 
             // §0.41：点击对焦层 + 对焦框（透明覆盖预览，归一化坐标与 PreviewView 对齐）
+            // §0.54b：AR 开启时先命中天体（→科普卡片），未命中才进入对焦
+            val arMessierTolPx = with(LocalDensity.current) { 28.dp.toPx() }
+            val arStarTolPx = with(LocalDensity.current) { 32.dp.toPx() }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
                         detectTapGestures { pos ->
+                            val arOn = arEnabled && settings.sensorAssistedPointing
+                            if (arOn) {
+                                // 换算到 AR 显示矩形坐标，命中 arSky 中的天体
+                                val streamAspect = if (isPortrait) 3f / 4f else 4f / 3f
+                                val boxH = size.height.toFloat()
+                                val rectH = minOf(boxH, size.width.toFloat() / streamAspect)
+                                val rectW = rectH * streamAspect
+                                val rectL = (size.width - rectW) / 2f
+                                val rectT = (size.height - rectH) / 2f
+                                val rx = pos.x - rectL
+                                val ry = pos.y - rectT
+                                if (rx in 0f..rectW && ry in 0f..rectH) {
+                                    val hit = arHitTest(rx, ry, arMessierTolPx, arStarTolPx)
+                                    if (hit != null) {
+                                        arCard = hit
+                                        return@detectTapGestures
+                                    }
+                                }
+                            }
                             focusAt(pos.x / size.width, pos.y / size.height)
                         }
                     },
@@ -671,13 +1013,35 @@ fun CameraScreen(
                         arEnabled = !arEnabled
                         arFlag.set(arEnabled)
                         settings.arLiveStarMap = arEnabled
-                        if (!arEnabled) previewOverlay = null
+                        if (!arEnabled) {
+                            previewOverlay = null
+                            arTarget = null
+                            arCard = null
+                            arCalibrated = false
+                            arAzimuthOffsetDeg.set(0.0)
+                        }
                     }) {
                         Text(
                             "🌌",
                             fontSize = 18.sp,
                             color = if (arEnabled) MaterialTheme.colorScheme.primary else Color.White,
                         )
+                    }
+                    // §0.54b：找星导航目标（AR 开启时显示；有目标时点击清除）
+                    if (arEnabled && settings.sensorAssistedPointing) {
+                        IconButton(onClick = {
+                            if (arTarget != null) {
+                                arTarget = null
+                            } else {
+                                arTargetPicker = true
+                            }
+                        }) {
+                            Text(
+                                if (arTarget != null) "✕🎯" else "🎯",
+                                fontSize = 16.sp,
+                                color = if (arTarget != null) MaterialTheme.colorScheme.primary else Color.White,
+                            )
+                        }
                     }
                     // §0.42：实时认星开关（每 5 秒本地匹配，星座线叠加预览）
                     IconButton(onClick = {
@@ -781,10 +1145,7 @@ fun CameraScreen(
                         6 -> if (isEn) "W" else "西"
                         else -> if (isEn) "NW" else "西北"
                     }
-                    val text = if (!isSky) {
-                        if (isEn) "🧭 Pointing below horizon (Alt %.0f°)".format(pointingState.altDeg)
-                        else "🧭 手机未朝向星空（仰角 %.0f°）".format(pointingState.altDeg)
-                    } else if (pointingState.raDeg != null && pointingState.decDeg != null) {
+                    val text = if (pointingState.raDeg != null && pointingState.decDeg != null) {
                         val raH = (pointingState.raDeg ?: 0.0) / 15.0
                         val raM = ((raH - raH.toInt()) * 60).toInt()
                         val dec = pointingState.decDeg ?: 0.0
@@ -1023,8 +1384,38 @@ fun CameraScreen(
             }
         }
     }
+
+    // §0.54b：找星目标选择弹窗
+    if (arTargetPicker) {
+        ArTargetPickerDialog(
+            onPick = { target ->
+                arTarget = target
+                arTargetPicker = false
+            },
+            onDismiss = { arTargetPicker = false },
+        )
+    }
 }
 
+
+/** §0.54b：找星导航画笔（一次性创建，Canvas 逐帧复用，避免每帧新建 Paint） */
+private class NavPaints(
+    val ring: android.graphics.Paint,
+    val text: android.graphics.Paint,
+    val arrow: android.graphics.Paint,
+)
+
+/**
+ * §0.58：AR 太阳系天体列表的帧内缓存。
+ *
+ * 历表侧 [SolarSystemEphemeris.cachedTopocentric] 已按 30 秒窗口复用同一实例，
+ * 这里再以「实例身份」为键缓存过滤后的待标注列表：只要实例没换，逐帧只做一次
+ * 引用比较，不构造任何新对象（AR 叠加层要求零每帧分配）。
+ */
+private class SolarFrameCache {
+    var src: List<com.starcam.astro.astro.SolarSystemEphemeris.SolarPosition>? = null
+    var list: List<com.starcam.astro.astro.SolarSystemEphemeris.SolarPosition> = emptyList()
+}
 
 
 /**

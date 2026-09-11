@@ -122,4 +122,20 @@ class SkyEphemerisTest {
         val expectedRa = (zenithRa + 90.0) % 360.0
         assertEquals("正东地平线赤经", expectedRa, ra, 1e-6)
     }
+
+    @Test
+    fun altAzNegativeAltitudeIsValid() {
+        // §0.53 全天星空：负仰角（朝下）也能算 RA/Dec——地平线以下星空需要
+        val lat = 30.0
+        val lon = 100.0
+        val time = 1700000000L
+        // 正南 alt=-20°（南中天以下 20°，非退化点）：dec = alt + lat - 90 = -80°，
+        // 中天时角 H=0 → RA = LST
+        val (ra, dec) = SkyEphemeris.altAzToRaDec(-20.0, 180.0, lat, lon, time)
+        assertTrue("负仰角赤经应在 0..360: $ra", ra in 0.0..360.0)
+        assertTrue("负仰角赤纬应在 -90..90: $dec", dec in -90.0..90.0)
+        assertEquals(-80.0, dec, 1e-6)
+        val (zenithRa, _) = SkyEphemeris.zenithRaDec(lat, lon, time)
+        assertEquals(zenithRa, ra, 1e-6)
+    }
 }

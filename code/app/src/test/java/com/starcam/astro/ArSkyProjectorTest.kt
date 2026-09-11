@@ -1,6 +1,7 @@
 package com.starcam.astro
 
 import com.starcam.astro.astro.ArSkyProjector
+import com.starcam.astro.astro.SolarSystemEphemeris
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -141,8 +142,7 @@ class ArSkyProjectorTest {
     }
 
     @Test
-    fun messierAndLinesProjected() {
-        val (right, up, axis) = zenithBasis()
+    fun messierAndLinesProjected() {        val (right, up, axis) = zenithBasis()
         val out = project(right, up, axis, lstDeg = 0.0, latDeg = 40.0)
         // 连线端点必须来自可见星集合
         val starSet = out.stars.map { it.entry }.toSet()
@@ -173,4 +173,194 @@ class ArSkyProjectorTest {
 
     private fun segKey(a: Int, b: Int): Long =
         if (a <= b) (a.toLong() shl 32) or b.toLong() else (b.toLong() shl 32) or a.toLong()
+
+    @Test
+    fun pointingDownStillProjectsStars() {
+        // §0.53 全天星空：相机朝下（axis=(0,0,-1)，right×up=axis 右手系）时，
+        // 星空依然投影（"脚下半球"），且可见星全部为地平线以下
+        val right = floatArrayOf(1f, 0f, 0f)
+        val up = floatArrayOf(0f, -1f, 0f)
+        val axis = floatArrayOf(0f, 0f, -1f)
+        val out = project(right, up, axis, lstDeg = 0.0, latDeg = 40.0)
+        assertTrue("朝下也应投影出可见星", out.stars.isNotEmpty())
+        assertTrue("朝下时可见星应全部 belowHorizon", out.stars.all { it.belowHorizon })
+        // 梅西耶同理
+        assertTrue("朝下时梅西耶可见项应全部 belowHorizon", out.messier.all { it.belowHorizon })
+    }
+
+    @Test
+    fun pointingUpStarsAreAboveHorizon() {
+        // 相机朝上（天顶方向）：可见星全部为地平线以上
+        val (right, up, axis) = zenithBasis()
+        val out = project(right, up, axis, lstDeg = 0.0, latDeg = 40.0)
+        assertTrue(out.stars.isNotEmpty())
+        assertTrue("朝上时可见星应全部 above horizon", out.stars.none { it.belowHorizon })
+        assertTrue(out.messier.none { it.belowHorizon })
+    }
+
+    private fun projectPoint(
+        raDeg: Double,
+        decDeg: Double,
+        right: FloatArray,
+        up: FloatArray,
+        axis: FloatArray,
+        lstDeg: Double = 0.0,
+        latDeg: Double = 40.0,
+        fovDeg: Double = 60.0,
+        w: Float = 1000f,
+        h: Float = 1000f,
+        correction: FloatArray? = null,
+    ): FloatArray? {
+        val out = FloatArray(3)
+        val ok = ArSkyProjector.projectPoint(
+            raDeg, decDeg, right, up, axis,
+            lstDeg, latDeg, fovDeg, w, h, correction, out,
+        )
+        return if (ok) out else null
+    }
+
+    @Test
+    fun projectPointAtViewCenter() {
+        // §0.54b 找星导航：视轴正对天顶 (0,40) → 中心方向的目标精确投影到画面中心
+        val (right, up, axis) = zenithBasis()
+        val pos = projectPoint(0.0, 40.0, right, up, axis)!!
+        assertEquals(500f, pos[0], 0.5f)
+        assertEquals(500f, pos[1], 0.5f)
+        assertTrue(pos[2] > 0.08f)
+    }
+
+    @Test
+    fun projectPointBehindCameraIsNull() {
+        // 指向天顶时，南天极（身后）目标应返回 null
+        val (right, up, axis) = zenithBasis()
+        assertTrue("身后目标应不可见", projectPoint(0.0, -90.0, right, up, axis) == null)
+    }
+
+    @Test
+    fun projectPointMatchesPinholeScale() {
+        // 天顶以北 10°（dec=50, ra=0）在 fov=60° 下偏离中心 f·tan(10°)
+        val (right, up, axis) = zenithBasis()
+        val pos = projectPoint(0.0, 50.0, right, up, axis)!!
+        val f = (1000f / 2f) / kotlin.math.tan(Math.toRadians(30.0)).toFloat()
+        val expected = f * kotlin.math.tan(Math.toRadians(10.0)).toFloat()
+        assertEquals(500f, pos[0], 1f) // 东西居中
+        val actual = 500f - pos[1] // 北在上 → y 偏移 = cy - y
+        assertEquals(expected.toDouble(), actual.toDouble(), expected * 0.05 + 2f)
+    }
+
+    @Test
+    fun projectPointAppliesCorrection() {
+        // 校准向量 = 天顶以北 5°：目标 (0,45) 应在画面中心附近
+        val (right, up, axis) = zenithBasis()
+        val pos = projectPoint(0.0, 45.0, right, up, axis, correction = ArSkyProjector.unitVector(0.0, 45.0))!!
+        val d = kotlin.math.hypot((pos[0] - 500f).toDouble(), (pos[1] - 500f).toDouble())
+        assertTrue("校准后目标应居中，实际偏离 ${"%.1f".format(d)}px", d < 2.0)
+    }
+
+    // ── §0.58 太阳系天体投影 ─────────────────────────────────────
+
+    private fun solarAt(ra: Double, dec: Double, body: SolarSystemEphemeris.SolarBody =
+        SolarSystemEphemeris.SolarBody.JUPITER) =
+        SolarSystemEphemeris.SolarPosition(
+            body = body,
+            raDeg = ra,
+            decDeg = dec,
+            distanceAu = 6.0,
+            angularDiameterDeg = 0.0088,
+            magnitude = -2.0,
+            phase = 0.99,
+            elongationDeg = 90.0,
+        )
+
+    @Test
+    fun solarBodyAtViewCenterProjectsToCenter() {
+        // 相机指向天顶（LST=0, lat=40 → 天顶为 RA=0, Dec=40）：
+        // 位于该天球坐标的太阳系天体必须落在画面正中
+        val (right, up, axis) = zenithBasis()
+        val out = ArSkyProjector.ProjectedSky()
+        ArSkyProjector.project(
+            right, up, axis, 0.0, 40.0, 60.0, 1000f, 1000f, null, out,
+            listOf(solarAt(0.0, 40.0)),
+        )
+        assertEquals("应有 1 个太阳系天体", 1, out.solar.size)
+        val s = out.solar[0]
+        assertEquals(500f, s.x, 0.5f)
+        assertEquals(500f, s.y, 0.5f)
+        assertTrue(s.visible)
+        assertTrue("天顶方向应在地平线以上", !s.belowHorizon)
+    }
+
+    @Test
+    fun solarBodyOffAxisMatchesPinholeScale() {
+        // 天顶以北 10°（Dec=50）在 fov=60°/1000px 下偏移 f·tan(10°)
+        val (right, up, axis) = zenithBasis()
+        val out = ArSkyProjector.ProjectedSky()
+        ArSkyProjector.project(
+            right, up, axis, 0.0, 40.0, 60.0, 1000f, 1000f, null, out,
+            listOf(solarAt(0.0, 50.0, SolarSystemEphemeris.SolarBody.MOON)),
+        )
+        assertEquals(1, out.solar.size)
+        val s = out.solar[0]
+        val f = (1000f / 2f) / tan(Math.toRadians(30.0)).toFloat()
+        val expected = f * tan(Math.toRadians(10.0)).toFloat()
+        assertEquals("东西应居中", 500f, s.x, 0.5f)
+        assertEquals("北在上 → 向上偏移", expected.toDouble(), (500f - s.y).toDouble(), expected * 0.05 + 2.0)
+    }
+
+    @Test
+    fun solarBodyBehindCameraIsExcluded() {
+        val (right, up, axis) = zenithBasis()
+        val out = ArSkyProjector.ProjectedSky()
+        ArSkyProjector.project(
+            right, up, axis, 0.0, 40.0, 60.0, 1000f, 1000f, null, out,
+            listOf(solarAt(0.0, -90.0)), // 南天极：相机指向天顶时在身后
+        )
+        assertTrue("身后天体不应被投影", out.solar.isEmpty())
+    }
+
+    @Test
+    fun solarBodyBelowHorizonIsFlaggedWhenPointingDown() {
+        // 相机朝下（axis = −U）：视野中心是 nadir（lat=40 → Dec=−40、RA=180），
+        // 该方向位于地平线以下，必须被标记 belowHorizon
+        val right = floatArrayOf(1f, 0f, 0f)
+        val up = floatArrayOf(0f, -1f, 0f)
+        val axis = floatArrayOf(0f, 0f, -1f)
+        val out = ArSkyProjector.ProjectedSky()
+        ArSkyProjector.project(
+            right, up, axis, 0.0, 40.0, 120.0, 1000f, 1000f, null, out,
+            listOf(solarAt(180.0, -40.0)),
+        )
+        assertEquals("朝下的视野中心天体应被投影", 1, out.solar.size)
+        assertTrue("朝下时 nadir 方向应为地平线以下", out.solar[0].belowHorizon)
+        assertEquals(500f, out.solar[0].x, 0.5f)
+        assertEquals(500f, out.solar[0].y, 0.5f)
+    }
+
+    @Test
+    fun solarListIsClearedOnResetAndEmptyWhenOmitted() {
+        val (right, up, axis) = zenithBasis()
+        val out = ArSkyProjector.ProjectedSky()
+        ArSkyProjector.project(
+            right, up, axis, 0.0, 40.0, 60.0, 1000f, 1000f, null, out,
+            listOf(solarAt(0.0, 40.0)),
+        )
+        assertEquals(1, out.solar.size)
+        // 不传 solarPositions → reset() 必须清空上一帧残留（否则会画幽灵标记）
+        ArSkyProjector.project(right, up, axis, 0.0, 40.0, 60.0, 1000f, 1000f, null, out)
+        assertTrue("复位后太阳系列表应为空", out.solar.isEmpty())
+    }
+
+    @Test
+    fun solarBodyScreenPositionIsFinite() {
+        // 全天天体扫描：所有被投影的天体坐标必须是有限值（防 NaN 污染绘制）
+        val (right, up, axis) = zenithBasis()
+        val jd = SolarSystemEphemeris.julianDay(2026, 9, 10, 16.0)
+        val positions = SolarSystemEphemeris.topocentricPositions(jd, 40.0, 116.0)
+        val out = ArSkyProjector.ProjectedSky()
+        ArSkyProjector.project(
+            right, up, axis, 0.0, 40.0, 90.0, 1000f, 1000f, null, out, positions,
+        )
+        assertTrue("应投影出部分太阳系天体", out.solar.isNotEmpty())
+        assertTrue(out.solar.all { it.x.isFinite() && it.y.isFinite() && it.pos.raDeg.isFinite() })
+    }
 }

@@ -186,6 +186,38 @@ object I18n {
         val needLocation: String get() = if (isEn) "📍 Location needed for AR star map" else "📍 开启定位后显示 AR 星图"
         val belowHorizon: String get() = if (isEn) "⬇ Point phone at the sky" else "⬇ 请将手机朝向星空"
         val calibratedHint: String get() = if (isEn) "🎯 Calibrated by solver" else "🎯 已由识别校准"
+        val horizonLabel: String get() = if (isEn) "— Horizon —" else "— 地平线 —"
+        // 地平 8 方位标尺（对齐 Stellarium）
+        fun cardinalLabel(idx: Int, english: Boolean): String = if (english) {
+            when (idx % 8) {
+                0 -> "N"
+                1 -> "NE"
+                2 -> "E"
+                3 -> "SE"
+                4 -> "S"
+                5 -> "SW"
+                6 -> "W"
+                7 -> "NW"
+                else -> ""
+            }
+        } else {
+            when (idx % 8) {
+                0 -> "北"
+                1 -> "东北"
+                2 -> "东"
+                3 -> "东南"
+                4 -> "南"
+                5 -> "西南"
+                6 -> "西"
+                7 -> "西北"
+                else -> ""
+            }
+        }
+        // §0.54b 找星导航
+        val targetBtn: String get() = if (isEn) "Find target" else "找星"
+        val clearTarget: String get() = if (isEn) "Clear target" else "清除目标"
+        val found: String get() = if (isEn) "✓ Found" else "✓ 已找到"
+        val offAngle: String get() = if (isEn) "Offset %.0f°" else "偏离 %.0f°"
     }
 
     // ==================== Pro 手动曝光（§0.50 CameraScreen） ====================
@@ -208,6 +240,8 @@ object I18n {
         val starNames: String get() = if (isEn) "Star names" else "恒星名称"
         val constellationNames: String get() = if (isEn) "Constellation names" else "星座名称"
         val messier: String get() = if (isEn) "Messier objects" else "梅西耶天体"
+        /** §0.58 太阳系天体图层 */
+        val planets: String get() = if (isEn) "Moon & planets" else "月亮与行星"
         val holdOriginal: String get() = if (isEn) "Hold to view original" else "按住看原图"
         val releaseToRestore: String get() = if (isEn) "Release to restore" else "松开恢复标注"
     }
@@ -218,6 +252,12 @@ object I18n {
         val distLabel: String get() = if (isEn) "Distance" else "距离"
         val typeLabel: String get() = if (isEn) "Type" else "类型"
         val constellationLabel: String get() = if (isEn) "Constellation" else "所属星座"
+        // §0.58 太阳系天体卡片专用
+        val elongationLabel: String get() = if (isEn) "Elongation" else "距角"
+        val phaseLabel: String get() = if (isEn) "Illuminated" else "被照亮"
+        val diameterLabel: String get() = if (isEn) "Angular size" else "视直径"
+        val aboveHorizon: String get() = if (isEn) "Above horizon" else "地平线上"
+        val belowHorizon: String get() = if (isEn) "Below horizon" else "地平线下"
         fun close(): String = if (isEn) "Close" else "关闭"
         val tapHint: String get() = if (isEn) "Tap a marker for details" else "轻点标记查看详情"
     }

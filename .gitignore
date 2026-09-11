@@ -7,9 +7,11 @@ testdata/
 *.gray
 
 # --- 构建产物与打包输出 ---
-apk/
+# 同样锚定根目录：避免误伤 src 下任何名为 apk 的目录
+/apk/
 **/build/
 .gradle/
+.kotlin/
 *.apk
 *.aab
 
@@ -18,18 +20,29 @@ local.properties
 *.keystore
 *.jks
 *.key
-*.txt
+*.pem
+*.p12
+.env
 *.zip
 *.bak
 
-# --- 冗余二进制副本（code/assets 已含） ---
-indexes/
+# 说明：`*.txt` 曾在此处，但它会误伤需保留的文本文件
+# （如 code/tools/diag_p12.txt，交接说明明确要求随包交付），故改为精确排除。
+# 诊断类文本若确需忽略，请针对具体路径单独添加。
+
+# --- 冗余二进制副本（code/app/src/main/assets/indexes 已含，那份是随包必需的） ---
+# 注意：必须带前导斜杠锚定到根目录。写成 `indexes/` 会匹配任意层级同名目录，
+# 把 app 的 assets/indexes（8 个 FITS 离线索引，离线求解的命根子）一起排除掉。
+/indexes/
 
 # --- IDE 与系统文件 ---
 .idea/
 *.iml
 .DS_Store
 Thumbs.db
+
+# --- 工具状态目录（WorkBuddy 工作记忆等；项目知识以 docs/ 与交接说明.md 为准） ---
+.workbuddy/
 
 # --- 临时文件与日志 ---
 *.log

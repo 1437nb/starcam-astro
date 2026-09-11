@@ -115,6 +115,12 @@ internal sealed interface ResultUiState {
         val engine: SolveEngine?,
         /** 引擎详情（索引档位/内点数/任务号等） */
         val engineDetail: String?,
+        /**
+         * §0.58 太阳系天体标记（月亮/行星/太阳）。
+         * 仅在 EXIF 同时具备拍摄时间与 GPS 时非空——缺任一项都无法确定
+         * 拍摄瞬间的行星位置，宁可不标也不能标错。
+         */
+        val solar: List<StarChartOverlay.Solar2D> = emptyList(),
     ) : ResultUiState
     data class Error(
         val message: String,
@@ -180,7 +186,21 @@ fun ResultScreen(
         val lines = StarChartOverlay.projectLines(stars)
         val labels = StarChartOverlay.constellationLabels(stars, isEn)
         val messier = StarChartOverlay.projectMessier(wcs, w, h)
-        state = ResultUiState.Success(solve, bitmap, stars, lines, labels, messier, isDemo, engine, engineDetail)
+        // §0.58 太阳系天体（月亮/行星）：位置随时刻变化，需 EXIF 的拍摄时间 + GPS。
+        // 缺任一项即返回空表（宁可不标也不能标错）；演示模式为合成天区，同样跳过。
+        val solar = if (isDemo) {
+            emptyList()
+        } else {
+            runCatching {
+                StarChartOverlay.projectSolarSystem(
+                    wcs, w, h,
+                    com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(imagePath),
+                )
+            }.getOrDefault(emptyList())
+        }
+        state = ResultUiState.Success(
+            solve, bitmap, stars, lines, labels, messier, isDemo, engine, engineDetail, solar,
+        )
         return true
     }
 
@@ -636,10 +656,24 @@ private fun renderAnnotatedBitmap(
     val canvas = Canvas(out)
     canvas.drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
     val scene = LayeredRenderer.OverlayScene(
-        src.width, src.height, state.stars, state.lines, state.labels, state.messier,
+        src.width, src.height, state.stars, state.lines, state.labels, state.messier, state.solar,
     )
-    LayeredRenderer.draw(canvas, scene, flags, isEnglish, density = 2.0f)
+    LayeredRenderer.draw(
+        canvas, scene, flags, isEnglish, density = 2.0f,
+        degPerPx = plateScaleDegPerPx(state),
+    )
     return out
+}
+
+/**
+ * §0.58 板比例（天球度 / 图像像素）：由求解视场与位图宽度推得。
+ * 供渲染器把日月画成真实视直径；求解视场异常时返回 null（退化为固定标记）。
+ */
+internal fun plateScaleDegPerPx(state: ResultUiState.Success): Float? {
+    val w = state.bitmap.width
+    val fov = state.solve.fieldWidthDeg
+    if (w <= 0 || fov <= 0.0 || !fov.isFinite()) return null
+    return (fov / w).toFloat()
 }
 
 /**
@@ -749,7 +783,9 @@ private fun StarPhotoOverlay(
                 contentScale = androidx.compose.ui.layout.ContentScale.FillBounds,
             )
             if (!holdingOriginal) {
-                val scene = LayeredRenderer.OverlayScene(w, h, state.stars, state.lines, state.labels, state.messier)
+                val scene = LayeredRenderer.OverlayScene(
+                    w, h, state.stars, state.lines, state.labels, state.messier, state.solar,
+                )
                 Canvas(modifier = imageModifier) {
                     // 显式传 DrawScope.size（组合件绘制区）：nativeCanvas.width 是整块
                     // 窗口画布，直接用会导致 x/y 缩放比不一致、星座严重变形（v1.5.33）
@@ -758,6 +794,7 @@ private fun StarPhotoOverlay(
                         scene, flags, isEn, density = pxPerSp, night = night,
                         drawWidth = size.width.toFloat(),
                         drawHeight = size.height.toFloat(),
+                        degPerPx = plateScaleDegPerPx(state),
                     )
                 }
             }
@@ -821,7 +858,7 @@ private fun StarPhotoOverlay(
     }
 }
 
-/** §0.47：图层控制面板（星座连线/星名/星座名/梅西耶 4 个独立开关） */
+/** §0.47：图层控制面板（星座连线/星名/星座名/梅西耶/月亮与行星 5 个独立开关） */
 @Composable
 private fun LayerPanel(
     flags: LayerFlags,
@@ -845,6 +882,7 @@ private fun LayerPanel(
             LayerToggle(com.starcam.astro.ui.I18n.Layers.starNames, flags.starNames) { onChange(flags.copy(starNames = it)) }
             LayerToggle(com.starcam.astro.ui.I18n.Layers.constellationNames, flags.constellationNames) { onChange(flags.copy(constellationNames = it)) }
             LayerToggle(com.starcam.astro.ui.I18n.Layers.messier, flags.messier) { onChange(flags.copy(messier = it)) }
+            LayerToggle(com.starcam.astro.ui.I18n.Layers.planets, flags.planets) { onChange(flags.copy(planets = it)) }
         }
     }
 }
@@ -871,6 +909,8 @@ private fun LayerToggle(label: String, checked: Boolean, onChange: (Boolean) -> 
 sealed interface SkyObjectRef {
     data class MessierRef(val obj: com.starcam.astro.astro.MessierObject) : SkyObjectRef
     data class StarRef(val entry: com.starcam.astro.astro.StarEntry) : SkyObjectRef
+    /** §0.58 太阳系天体（月亮/行星/太阳），携带该时刻的观测参数供卡片展示 */
+    data class SolarRef(val pos: com.starcam.astro.astro.SolarSystemEphemeris.SolarPosition) : SkyObjectRef
 }
 
 /**
@@ -885,7 +925,21 @@ internal fun hitTestObjectAt(
     messierTolImgPx: Float,
     starTolImgPx: Float,
 ): SkyObjectRef? {
-    // 梅西耶优先
+    // §0.58 太阳系天体优先级最高：日月行星是全画面最醒目的目标，
+    // 且常与深空天体近邻（如月亮掠过毕星团），必须先命中
+    var solarRef: SkyObjectRef? = null
+    var solarDist = messierTolImgPx * 1.6f
+    for (s in state.solar) {
+        if (!s.visible) continue
+        val d = kotlin.math.hypot((s.x - imgX).toDouble(), (s.y - imgY).toDouble()).toFloat()
+        if (d < solarDist) {
+            solarDist = d
+            solarRef = SkyObjectRef.SolarRef(s.pos)
+        }
+    }
+    if (solarRef != null) return solarRef
+
+    // 梅西耶
     var best: SkyObjectRef? = null
     var bestDist = messierTolImgPx
     for (m in state.messier) {
@@ -1018,6 +1072,74 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                             buildString {
                                 append(com.starcam.astro.ui.I18n.InfoCard.distLabel); append(": ")
                                 append(if (isEn) it.distLyEn else it.distLyZh)
+                            },
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 13.sp,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            if (isEn) it.descEn else it.descZh,
+                            color = Color.White.copy(alpha = 0.92f),
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp,
+                        )
+                    }
+                }
+                is SkyObjectRef.SolarRef -> {
+                    val pos = ref.pos
+                    val body = pos.body
+                    val bodyColor = Color(com.starcam.astro.astro.SolarSystemCatalog.color(body))
+                    val info = com.starcam.astro.astro.SolarSystemCatalog.info[body]
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("● ", color = bodyColor, fontSize = 16.sp)
+                        Text(
+                            com.starcam.astro.astro.SolarSystemCatalog.name(body, isEn),
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "✕",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 16.sp,
+                            modifier = Modifier.clickable(onClick = onDismiss).padding(4.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        com.starcam.astro.astro.SolarSystemCatalog.typeLabel(body, isEn),
+                        color = bodyColor,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        buildString {
+                            append(com.starcam.astro.ui.I18n.InfoCard.magLabel); append(": ")
+                            append("m${"%.1f".format(pos.magnitude)}")
+                            append("   ·   ")
+                            append(com.starcam.astro.ui.I18n.InfoCard.elongationLabel); append(": ")
+                            append("${"%.0f".format(pos.elongationDeg)}°")
+                            // 太阳无相位概念，仅日月之外显示被照亮比例
+                            if (body != com.starcam.astro.astro.SolarSystemEphemeris.SolarBody.SUN) {
+                                append("   ·   ")
+                                append(com.starcam.astro.ui.I18n.InfoCard.phaseLabel); append(": ")
+                                append("${"%.0f".format(pos.phase * 100)}%")
+                            }
+                        },
+                        color = bodyColor,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    info?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            buildString {
+                                append(com.starcam.astro.ui.I18n.InfoCard.distLabel); append(": ")
+                                append(if (isEn) it.distEn else it.distZh)
+                                append("   ·   ")
+                                append(com.starcam.astro.ui.I18n.InfoCard.diameterLabel); append(": ")
+                                append("${"%.1f".format(pos.angularDiameterDeg * 60)}′")
                             },
                             color = Color.White.copy(alpha = 0.85f),
                             fontSize = 13.sp,

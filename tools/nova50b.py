@@ -1,6 +1,22 @@
 # -*- coding: utf-8 -*-
-"""nova.astrometry.net BFS 采集 50 张真实定标星空图"""
-import json, os, re, subprocess, time, urllib.request, urllib.parse, http.cookiejar
+"""nova.astrometry.net BFS 采集 50 张真实定标星空图
+
+API Key 不硬编码：优先取命令行 --key <key>，其次环境变量 NOVA_API_KEY。
+（v1.5.48 安全修复：原脚本曾硬编码真实 key，已作废，改用外部注入）
+"""
+import json, os, re, subprocess, sys, time, urllib.request, urllib.parse, http.cookiejar
+
+_KEY = ''
+if '--key' in sys.argv:
+    i = sys.argv.index('--key')
+    if i + 1 < len(sys.argv):
+        _KEY = sys.argv[i + 1]
+if not _KEY:
+    _KEY = os.environ.get('NOVA_API_KEY', '')
+if not _KEY:
+    sys.stderr.write('ERROR: 未配置 nova.astrometry.net API key。\n'
+                     '请设置环境变量 NOVA_API_KEY，或运行：python nova50b.py --key <你的key>\n')
+    sys.exit(1)
 
 cj = http.cookiejar.CookieJar()
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
@@ -19,7 +35,7 @@ def getp(url):
                 raise
             time.sleep(6)
 
-session = api('login', {'apikey': 'akpwurwpjzwxmjcz'})['session']
+session = api('login', {'apikey': _KEY})['session']
 # 导出 cookie 给 curl
 os.makedirs('/tmp/nova50/img', exist_ok=True)
 with open('/tmp/nova50/cookies.txt', 'w') as f:

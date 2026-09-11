@@ -15,12 +15,13 @@ A pure offline Android application for astrophotography plate-solving and night 
   - Native NDK port of `astrometry.net` 0.97 with 4100-series all-sky index files;
   - Custom 8,400+ star triangle voting matcher (with bright-source masking and multi-candidate weak star rounds for sub-second wide-field solving);
   - Optional online fallback via `nova.astrometry.net` API (requires user-provided API key).
-- **Real-Time Viewfinder Recognition & AR Live Star Map**: CameraX analysis pipeline performs periodic blind solving, and a sensor-driven AR live star map projects the sky onto the viewfinder with zero latency as you move the phone (adjustable FOV, calibratable).
+- **Real-Time Viewfinder Recognition & AR Live Star Map**: CameraX analysis pipeline performs periodic blind solving, and a sensor-driven AR live star map projects the sky onto the viewfinder with zero latency as you move the phone (adjustable FOV, calibratable). Includes an all-sky mode that keeps rendering the lower hemisphere even when the phone points down (with a horizon line and 8-point compass), attitude smoothing with gyro extrapolation plus a complementary filter so the map neither jitters nor drifts, and target-finding navigation with a direction arrow and pulsing ring.
 - **Layer Controls & Object Info Cards**: Independently toggle constellation lines, star names, constellation labels, and Messier overlays; press-and-hold to compare against the original photo; tap any object in the picture for a bilingual info card (type / magnitude / distance / background).
 - **Rich Astronomical Overlays**:
   - Official 88 modern constellation stick figures aligned with Stellarium v23.4 constellation line data (672 segments) and names;
   - 3,800+ traditional Chinese and Western proper star names (Sirius, Vega, Betelgeuse, Arcturus, Polaris, etc.);
-  - 45 prominent Messier deep-sky objects (Andromeda Galaxy M31, Orion Nebula M42, Pleiades M45, etc.) color-coded by astrophysical object type.
+  - 45 prominent Messier deep-sky objects (Andromeda Galaxy M31, Orion Nebula M42, Pleiades M45, etc.) color-coded by astrophysical object type;
+  - **Realtime Moon and planet labels** (v1.5.48): the Sun, Moon and planets are computed for the moment encoded in the photo's EXIF timestamp + GPS (JPL approximate Keplerian elements plus a Meeus lunar series, with topocentric parallax correction); the Sun and Moon are drawn at their true apparent diameter, and tapping them shows magnitude, elongation, illuminated fraction and apparent size.
 - **Bilingual UI**: One-tap switching between Simplified Chinese and English across the entire app, including constellation, star, and deep-sky object names.
 - **Professional Astrophotography Tools**:
   - Camera Pro manual exposure (ISO / shutter control for light pollution and faint star fields) with a bubble level;
@@ -29,7 +30,7 @@ A pure offline Android application for astrophotography plate-solving and night 
   - Dual-layer zoomable viewer (smooth comparison between original photo and annotated overlay);
   - Visual failure diagnostics (star detection density heatmap and shooting guidance);
   - Deep space blue and night-vision red themes (protects dark adaptation in the field).
-- **Privacy First**: Fully offline by default. A photo is uploaded only when the user explicitly enables online solving. No telemetry, trackers, or ads.
+- **Privacy First**: Fully offline by default, so photos never leave the phone. A photo is uploaded to `nova.astrometry.net` (and the local cache copy deleted right after the request) only when the user explicitly enters an API key and selects online mode. The optional location permission is used solely for on-device sensor-assisted calibration in the camera screen — never for background tracking, and never attached to an uploaded JPEG. App data is excluded from system backup. No telemetry, trackers, or ads.
 
 ---
 
@@ -44,7 +45,7 @@ A pure offline Android application for astrophotography plate-solving and night 
 │   │   └── src/main/jniLibs/arm64-v8a/      # Prebuilt libstellar_solver.so native engine
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # Engineering architecture and 42 validation reports (§0.10 ~ §0.51)
+├── docs/                   # Engineering architecture and 48 validation reports (§0.11 ~ §0.58)
 ├── tools/                  # Python catalog generators and offline test utilities
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md               # Chinese documentation
@@ -71,7 +72,7 @@ cd code
 # Assemble Debug APK
 ./gradlew :app:assembleDebug
 
-# Run full unit tests (astronomical math, catalog integrity, 89/89 passing)
+# Run full unit tests (astronomical math, catalog integrity, 143/143 passing)
 ./gradlew :app:testDebugUnitTest
 
 # Output path

@@ -1,0 +1,40 @@
+# StarCam .gitattributes
+# 目的：防止二进制资产被 git 的换行/文本转换破坏。
+# 本仓库含 .so(FITS 引擎)、.fits(星表索引)、.jpg(演示照片) 等二进制，
+# 一旦被当作文本处理会在检出时损坏——必须显式标记。
+
+# 默认：由 git 判定文本性；文本统一以 LF 入库，工作区保留本机换行
+* text=auto
+
+# ---- 二进制资产（绝不转换） ----
+*.so       binary
+*.a        binary
+*.fits     binary
+*.apk      binary
+*.aab      binary
+*.jar      binary
+*.jpg      binary
+*.jpeg     binary
+*.png      binary
+*.webp     binary
+*.gif      binary
+*.ttf      binary
+*.otf      binary
+*.bin      binary
+*.dat      binary
+*.jks      binary
+*.keystore binary
+
+# ---- 文本（显式声明，便于 diff 与合并） ----
+*.kt         text
+*.kts        text
+*.java       text
+*.c          text
+*.h          text
+*.py         text
+*.md         text
+*.xml        text
+*.json       text
+*.pro        text
+*.properties text
+*.gradle     text
