@@ -94,12 +94,13 @@ class PlateSolveClient(
 
     private fun postJson(url: String, body: RequestBody): JSONObject {
         val req = Request.Builder().url(url).post(body).build()
-        val resp = client.newCall(req).execute()
-        val text = resp.body?.string().orEmpty()
-        if (!resp.isSuccessful) {
-            throw PlateSolveException("请求失败（HTTP ${resp.code}）", PlateSolveException.Kind.NETWORK)
+        client.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) {
+                throw PlateSolveException("请求失败（HTTP ${resp.code}）", PlateSolveException.Kind.NETWORK)
+            }
+            return JSONObject(text)
         }
-        return JSONObject(text)
     }
 
     private fun login(apiKey: String): String {

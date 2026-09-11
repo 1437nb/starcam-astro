@@ -11,20 +11,9 @@ import android.graphics.Typeface
  */
 object OverlayRenderer {
 
-    /** 把 WCS 从求解图尺寸换算到目标位图尺寸（与 ResultScreen.scaleWcs 同式） */
+    /** 把 WCS 从求解图尺寸换算到目标位图尺寸。 */
     fun scaleWcs(wcs: WcsTransform, sw: Int, sh: Int, w: Int, h: Int): WcsTransform {
-        val sx = w.toDouble() / sw
-        val sy = h.toDouble() / sh
-        return WcsTransform(
-            crpix1 = (wcs.crpix1 - 0.5) * sx + 0.5,
-            crpix2 = (wcs.crpix2 - 0.5) * sy + 0.5,
-            crval1 = wcs.crval1,
-            crval2 = wcs.crval2,
-            cd11 = wcs.cd11 / sx,
-            cd12 = wcs.cd12 / sx,
-            cd21 = wcs.cd21 / sy,
-            cd22 = wcs.cd22 / sy,
-        )
+        return wcs.rescaledFor(sw, sh, w, h)
     }
 
     /** 识别成功 → 叠加星座的位图；缺 WCS 或渲染失败返回 null */

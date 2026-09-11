@@ -173,7 +173,7 @@ fun ResultScreen(
         val wcs = if (solve.imageWidth == w && solve.imageHeight == h) {
             rawWcs
         } else {
-            scaleWcs(rawWcs, solve.imageWidth, solve.imageHeight, w, h)
+            rawWcs.rescaledFor(solve.imageWidth, solve.imageHeight, w, h)
         }
         val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
         val stars = StarChartOverlay.projectStars(wcs, w, h)
@@ -1104,22 +1104,6 @@ private fun InfoRow(label: String, value: String) {
         )
         Text(value, style = MaterialTheme.typography.bodyMedium)
     }
-}
-
-/** 把 WCS 从求解图尺寸换算到显示位图尺寸 */
-private fun scaleWcs(wcs: WcsTransform, sw: Int, sh: Int, w: Int, h: Int): WcsTransform {
-    val sx = w.toDouble() / sw
-    val sy = h.toDouble() / sh
-    return WcsTransform(
-        crpix1 = (wcs.crpix1 - 0.5) * sx + 0.5,
-        crpix2 = (wcs.crpix2 - 0.5) * sy + 0.5,
-        crval1 = wcs.crval1,
-        crval2 = wcs.crval2,
-        cd11 = wcs.cd11 / sx,
-        cd12 = wcs.cd12 / sx,
-        cd21 = wcs.cd21 / sy,
-        cd22 = wcs.cd22 / sy,
-    )
 }
 
 private fun formatRa(raDeg: Double): String {

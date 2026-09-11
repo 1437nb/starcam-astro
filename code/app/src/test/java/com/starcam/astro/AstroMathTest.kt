@@ -114,6 +114,36 @@ class AstroMathTest {
     }
 
     @Test
+    fun rescaledWcsPreservesProjectionWithIndependentAxes() {
+        // 非等比缩放 + 非对角 CD：可捕获把 CD 按“行”而不是按像素轴（列）缩放的错误。
+        val sourceW = 1200
+        val sourceH = 900
+        val targetW = 2000
+        val targetH = 1000
+        val sx = targetW.toDouble() / sourceW
+        val sy = targetH.toDouble() / sourceH
+        val source = WcsTransform(
+            crpix1 = 601.25, crpix2 = 449.75,
+            crval1 = 120.0, crval2 = 22.0,
+            cd11 = -0.008, cd12 = 0.015,
+            cd21 = 0.011, cd22 = 0.006,
+        )
+        val scaled = source.rescaledFor(sourceW, sourceH, targetW, targetH)
+
+        assertEquals(source.cd11 / sx, scaled.cd11, 1e-12)
+        assertEquals(source.cd12 / sy, scaled.cd12, 1e-12)
+        assertEquals(source.cd21 / sx, scaled.cd21, 1e-12)
+        assertEquals(source.cd22 / sy, scaled.cd22, 1e-12)
+
+        for ((ra, dec) in listOf(120.0 to 22.0, 119.2 to 22.5, 120.8 to 21.6)) {
+            val before = source.skyToFitsPixel(ra, dec)
+            val after = scaled.skyToFitsPixel(ra, dec)
+            assertEquals((before[0] - 1.0) * sx + 1.0, after[0], 1e-6)
+            assertEquals((before[1] - 1.0) * sy + 1.0, after[1], 1e-6)
+        }
+    }
+
+    @Test
     fun starDirectionsMatchConvention() {
         // parity -1（北朝上、东在左的标准星图）：CD = [-s,0;0,s]
         val chart = WcsTransform(10.5, 10.5, 0.0, 0.0, -0.01, 0.0, 0.0, 0.01)

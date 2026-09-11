@@ -29,7 +29,7 @@ A pure offline Android application for astrophotography plate-solving and night 
   - Dual-layer zoomable viewer (smooth comparison between original photo and annotated overlay);
   - Visual failure diagnostics (star detection density heatmap and shooting guidance);
   - Deep space blue and night-vision red themes (protects dark adaptation in the field).
-- **Zero Privacy Leakage**: Fully offline operation. No photos are uploaded to any server. No telemetry, no trackers, no ads.
+- **Privacy First**: Fully offline by default. A photo is uploaded only when the user explicitly enables online solving. No telemetry, trackers, or ads.
 
 ---
 
@@ -103,6 +103,6 @@ We gratefully acknowledge the following open-source projects and scientific cata
 
 ## Privacy Policy
 
-1. **Fully Offline**: By default, solving runs entirely on-device using local indexes. Your photos never leave your device.
-2. **Online Mode**: Network requests to `nova.astrometry.net` only occur if you explicitly enter an API key in Settings and choose online mode.
-3. **Minimal Permissions**: Requests camera and storage read permissions only. No location permission, no background tracking, and no personal data collection.
+1. **Offline by Default**: Local engines and offline indexes handle solving on-device, so photos stay on the device by default.
+2. **Explicit Online Mode**: A photo is uploaded to `nova.astrometry.net` only after you enter an API key in Settings and select online mode. The local upload copy is deleted after the request finishes.
+3. **Minimal Permissions and Local Processing**: The app requests camera, photo-read, and optional location permissions for sensor-assisted calibration. Location is used only while the camera screen is open for on-device calculations; it is neither tracked in the background nor included in the uploaded JPEG. App data is excluded from system backups.

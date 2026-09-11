@@ -94,6 +94,36 @@ class WcsTransform(
         return doubleArrayOf(raDeg, dec / r)
     }
 
+    /**
+     * 将此 WCS 从一个位图尺寸映射到另一个位图尺寸。
+     *
+     * FITS 像素坐标从 1 开始。因此屏幕坐标 x = FITS x - 1 在缩放后满足
+     * x' = x · sx，即 CRPIX 应按 `(p - 1) · s + 1` 变换。CD 的列分别描述
+     * X/Y 像素轴对天空坐标的贡献，必须分别按 sx/sy 缩放；按“行”缩放会在
+     * 非等比缩放或旋转 WCS 时产生星图错位。
+     */
+    fun rescaledFor(
+        sourceWidth: Int,
+        sourceHeight: Int,
+        targetWidth: Int,
+        targetHeight: Int,
+    ): WcsTransform {
+        require(sourceWidth > 0 && sourceHeight > 0) { "Source dimensions must be positive" }
+        require(targetWidth > 0 && targetHeight > 0) { "Target dimensions must be positive" }
+        val sx = targetWidth.toDouble() / sourceWidth
+        val sy = targetHeight.toDouble() / sourceHeight
+        return WcsTransform(
+            crpix1 = (crpix1 - 1.0) * sx + 1.0,
+            crpix2 = (crpix2 - 1.0) * sy + 1.0,
+            crval1 = crval1,
+            crval2 = crval2,
+            cd11 = cd11 / sx,
+            cd12 = cd12 / sy,
+            cd21 = cd21 / sx,
+            cd22 = cd22 / sy,
+        )
+    }
+
     companion object {
 
         /** 解析 FITS WCS 头文本（astrometry.net 的 wcs.txt），失败返回 null */

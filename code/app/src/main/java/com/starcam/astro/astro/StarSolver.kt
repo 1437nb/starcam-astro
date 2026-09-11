@@ -195,21 +195,8 @@ object StarSolver {
         toW: Int,
         toH: Int,
     ): SolveResult {
-        val sx = toW.toDouble() / fromW
-        val sy = toH.toDouble() / fromH
         val ps = solve.pixScaleArcsec * fromW.toDouble() / toW
-        val wcs = solve.wcs?.let {
-            // crpix 是 FITS 1 起始坐标：线性像素映射为 (p-1)*k+1，不能直接乘比例
-            // （直接乘会引入 (sx-1, sy-1) 的对角平移，竖屏大倍率下肉眼可辨）
-            WcsTransform(
-                (it.crpix1 - 1.0) * sx + 1.0, (it.crpix2 - 1.0) * sy + 1.0,
-                it.crval1, it.crval2,
-                it.cd11 * (fromW.toDouble() / toW),
-                it.cd12 * (fromW.toDouble() / toW),
-                it.cd21 * (fromW.toDouble() / toW),
-                it.cd22 * (fromW.toDouble() / toW),
-            )
-        }
+        val wcs = solve.wcs?.rescaledFor(fromW, fromH, toW, toH)
         return SolveResult(
             raDeg = solve.raDeg,
             decDeg = solve.decDeg,
@@ -576,12 +563,13 @@ object StarSolver {
                     enginesTried.add("在线识别")
                     onProgress("本地引擎未匹配，正在上传在线求解…")
                     val upload = File(context.cacheDir, "upload_${System.currentTimeMillis()}.jpg")
-                    val ok = ImageUtils.compressForUpload(imagePath, upload) != null
-                    if (!ok) continue
-                    // 用上传后的图片作为渲染基准，保证像素坐标与求解结果一致
-                    val onlineDisplay = ImageUtils.decodeSampledBitmap(upload.absolutePath, 2200)
-                        ?: continue
-                    currentDisplay = onlineDisplay
+                    try {
+                        val ok = ImageUtils.compressForUpload(imagePath, upload) != null
+                        if (!ok) continue
+                        // 用上传后的图片作为渲染基准，保证像素坐标与求解结果一致
+                        val onlineDisplay = ImageUtils.decodeSampledBitmap(upload.absolutePath, 2200)
+                            ?: continue
+                        currentDisplay = onlineDisplay
                         val client = PlateSolveClient(settings.serverUrl)
                         val solve = client.solve(upload, key) { msg -> onProgress(msg) }
                         val detail = listOfNotNull(
@@ -589,6 +577,9 @@ object StarSolver {
                             "在线定标",
                         ).joinToString(" · ")
                         return@withContext EngineResult(solve, engine, detail, currentDisplay)
+                    } finally {
+                        // 仅在内存中保留渲染基准；上传副本不应继续留在缓存目录。
+                        upload.delete()
                     }
                 }
             }

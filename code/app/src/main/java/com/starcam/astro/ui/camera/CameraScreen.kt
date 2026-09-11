@@ -264,22 +264,23 @@ fun CameraScreen(
                     return@setAnalyzer
                 }
                 lastAnalyzeMs.set(now)
+                var decoded: Bitmap? = null
+                var oriented: Bitmap? = null
                 try {
                     // RGBA_8888 输出模式：planes[0..3] 为 R/G/B/A 单通道 →
                     // 逐行拼装 Bitmap（CameraX 1.3.x 无 JPEG 输出格式）
-                    val bmp = bitmapFromRgbaPlanes(image)
+                    decoded = bitmapFromRgbaPlanes(image)
                     val rot = image.imageInfo.rotationDegrees
-                    image.close()
-                    if (bmp == null) return@setAnalyzer
-                    val oriented = if (rot != 0) {
+                    val source = decoded ?: return@setAnalyzer
+                    oriented = if (rot != 0) {
                         val m = Matrix().apply { postRotate(rot.toFloat()) }
-                        Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
-                            .also { if (it !== bmp) bmp.recycle() }
-                    } else bmp
-                    val w = oriented.width
-                    val h = oriented.height
+                        Bitmap.createBitmap(source, 0, 0, source.width, source.height, m, true)
+                    } else source
+                    val frame = oriented ?: return@setAnalyzer
+                    val w = frame.width
+                    val h = frame.height
                     val hint = if (settings.sensorAssistedPointing) orientationTracker.createPointingHint() else null
-                    val stars = LocalStarMatcher.detectStars(oriented, 60)
+                    val stars = LocalStarMatcher.detectStars(frame, 60)
                     val res = LocalStarMatcher.match(stars, w, h, hint)
                     if (res != null && res.solve.wcs != null) {
                         val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
@@ -298,7 +299,7 @@ fun CameraScreen(
                                 arCorrectionVec.set(corr)
                             }
                         } else {
-                            val overlay = renderLiveOverlay(oriented, res.solve.wcs!!)
+                            val overlay = renderLiveOverlay(frame, res.solve.wcs!!)
                             mainHandler.post {
                                 previewOverlay = overlay
                                 previewLabel = label
@@ -308,7 +309,13 @@ fun CameraScreen(
                         mainHandler.post { previewOverlay = null; previewLabel = "" }
                     }
                 } catch (e: Exception) {
+                    // 单帧异常不能阻断 ImageAnalysis；下一帧仍可继续识别。
+                } finally {
+                    // 预览每五秒产生一张约 2MB 的帧。显式回收临时位图，避免长时间
+                    // 取景时持续累积 native heap；展示中的 overlay 由 Compose 状态持有。
                     image.close()
+                    oriented?.takeIf { !it.isRecycled }?.recycle()
+                    decoded?.takeIf { it !== oriented && !it.isRecycled }?.recycle()
                 }
             }
             provider.unbindAll()
