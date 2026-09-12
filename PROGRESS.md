@@ -47,14 +47,16 @@
 
 ## 四、与远端的关系
 
-本地 `main` 可能领先 `origin/main`（未推送的提交会在这里累积）。
-**本文不写死数字**，以命令为准：
+本地 `main` 领先 `origin/main`（未推送的提交会在这里累积）。**本文不写死数字**，以命令为准：
 
 ```bash
-cd C:/starword && git status -sb && git log --oneline origin/main..HEAD
+cd C:/starword
+git fetch origin                      # 若提示不认识 origin/main，先执行这句（新克隆的目录通常已有）
+git status -sb                        # 看 ahead / behind
+git log --oneline origin/main..HEAD   # 看待推送的具体提交
 ```
 
-推送前请确认：本地是否还有不想公开的内容（如内部稿、机器相关路径）。
+推送前请确认：本地是否还有不想公开的内容（本机凭据路径、内部稿、机器相关配置）。
 
 ---
 
