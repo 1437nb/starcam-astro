@@ -22,6 +22,7 @@ A pure offline Android application for astrophotography plate-solving and night 
   - 3,800+ traditional Chinese and Western proper star names (Sirius, Vega, Betelgeuse, Arcturus, Polaris, etc.);
   - 45 prominent Messier deep-sky objects (Andromeda Galaxy M31, Orion Nebula M42, Pleiades M45, etc.) color-coded by astrophysical object type;
   - **Realtime Moon and planet labels** (v1.5.48): the Sun, Moon and planets are computed for the moment encoded in the photo's EXIF timestamp + GPS (JPL approximate Keplerian elements plus a Meeus lunar series, with topocentric parallax correction); the Sun and Moon are drawn at their true apparent diameter, and tapping them shows magnitude, elongation, illuminated fraction and apparent size.
+- **Weak-EXIF fallback** (v1.5.49): when a photo carries no GPS, the device's current location is used to estimate the imaged sky region, so the native solver no longer has to start from a full-sky blind search, and the Sun/Moon/planet labels benefit as well. The location source is stated on the result screen together with a "may be inaccurate" note. **EXIF GPS always wins — it is never overridden.**
 - **Bilingual UI**: One-tap switching between Simplified Chinese and English across the entire app, including constellation, star, and deep-sky object names.
 - **Professional Astrophotography Tools**:
   - Camera Pro manual exposure (ISO / shutter control for light pollution and faint star fields) with a bubble level;

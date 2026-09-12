@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import androidx.exifinterface.media.ExifInterface
 import com.starcam.astro.data.SettingsRepository
 import com.starcam.astro.util.ImageUtils
+import com.starcam.astro.util.LocationHelper
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.min
@@ -330,12 +331,28 @@ object StarSolver {
             when (engine) {
                 SolveEngine.ASTROMETRY_NATIVE -> {
                     enginesTried.add("官方引擎")
+                    // §0.59：本分支多处进度/详情文案都要双语，统一在此取一次
+                    val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
                     // 先验优化：EXIF 焦距 → scale 区间；EXIF GPS+时间 → 天顶 RA/Dec 天区
                     // （官方 solver_set_radec 通道，把全天空盲解缩小到可见天区）
-                    val priors = try {
+                    var priors = try {
                         ExifPriorsReader.read(imagePath)
                     } catch (e: Throwable) {
                         ExifPriors(null, null, null, null, false)
+                    }
+                    // §0.59：照片无 GPS（或只有半套）但有拍摄时间时，用设备当前定位兜底，
+                    // 让官方引擎也能吃到天区先验，不必从全天空盲解起步。
+                    // 位置未必等于拍摄地（异地或久前的旧照片），故提示文案会如实标注来源；
+                    // 兜底失败不阻断流程，照常回落到下面的分段盲解。
+                    if (priors.epochSec != null && (priors.latDeg == null || priors.lonDeg == null)) {
+                        val fallback = try {
+                            LocationHelper(context).getBestLocation()
+                        } catch (e: Throwable) {
+                            null
+                        }
+                        if (fallback != null) {
+                            priors = priors.withFallbackLocation(fallback.latitude, fallback.longitude)
+                        }
                     }
                     var nativeSolve: SolveResult? = null
                     var nativeDetail = ""
@@ -354,7 +371,6 @@ object StarSolver {
                         } else {
                             0.1 to 180.0
                         }
-                        val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
                         onProgress(
                             if (isEn) {
                                 "Astrometry engine solving (Sensor prior: within %.0f°)…".format(sensorHint.radiusDeg)
@@ -391,8 +407,17 @@ object StarSolver {
                         } else {
                             0.1 to 180.0 // 尺度未知：交给官方引擎全范围搜（天区已缩小）
                         }
+                        // §0.59：位置可能来自当前定位兜底，如实标注来源供用户判断可信度
+                        val priorZh = if (priors.locationIsFallback) "当前定位先验" else "天区先验"
+                        val priorEn =
+                            if (priors.locationIsFallback) "current-location prior" else "sky prior"
                         onProgress(
-                            "官方引擎求解中（天区先验：天顶 %.0f° 范围内）…".format(radius),
+                            if (isEn) {
+                                "Astrometry engine solving (%s: zenith within %.0f°)…"
+                                    .format(priorEn, radius)
+                            } else {
+                                "官方引擎求解中（%s：天顶 %.0f° 范围内）…".format(priorZh, radius)
+                            },
                         )
                         nativeSolve = try {
                             StellarSolverNative.solveBitmapPriors(
@@ -404,10 +429,16 @@ object StarSolver {
                             null
                         }
                         if (nativeSolve != null) {
-                            nativeDetail =
-                                "天区先验（天顶 %.0f° 内）· 视场 %.1f°–%.1f°".format(
-                                    radius, lo, hi,
-                                )
+                            val srcZh = if (priors.locationIsFallback) "当前定位" else "EXIF 定位"
+                            val srcEn =
+                                if (priors.locationIsFallback) "current location" else "EXIF GPS"
+                            nativeDetail = if (isEn) {
+                                "Sky prior via %s (zenith ±%.0f°) · FOV %.1f°–%.1f°"
+                                    .format(srcEn, radius, lo, hi)
+                            } else {
+                                "天区先验（%s · 天顶 %.0f° 内）· 视场 %.1f°–%.1f°"
+                                    .format(srcZh, radius, lo, hi)
+                            }
                         }
                     }
 

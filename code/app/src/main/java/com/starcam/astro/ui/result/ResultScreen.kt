@@ -93,6 +93,7 @@ import com.starcam.astro.data.StatsStore
 import com.starcam.astro.ui.theme.AppThemeMode
 import com.starcam.astro.ui.theme.ThemeState
 import com.starcam.astro.util.ImageUtils
+import com.starcam.astro.util.LocationHelper
 import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -117,10 +118,16 @@ internal sealed interface ResultUiState {
         val engineDetail: String?,
         /**
          * §0.58 太阳系天体标记（月亮/行星/太阳）。
-         * 仅在 EXIF 同时具备拍摄时间与 GPS 时非空——缺任一项都无法确定
-         * 拍摄瞬间的行星位置，宁可不标也不能标错。
+         * 需要拍摄时间，以及位置（EXIF GPS，或 §0.59 的当前定位兜底）；
+         * 两者缺一都无法确定拍摄瞬间的行星位置，宁可不标也不能标错。
          */
         val solar: List<StarChartOverlay.Solar2D> = emptyList(),
+        /**
+         * §0.59 位置来源为「当前定位兜底」时为真——照片没有 EXIF GPS，
+         * 改用设备当前定位代替。位置未必等于拍摄地（异地或久前的旧照片会偏），
+         * 信息面板据实提示用户；天体标注的可信度同样受此影响。
+         */
+        val locationIsFallback: Boolean = false,
     ) : ResultUiState
     data class Error(
         val message: String,
@@ -186,20 +193,32 @@ fun ResultScreen(
         val lines = StarChartOverlay.projectLines(stars)
         val labels = StarChartOverlay.constellationLabels(stars, isEn)
         val messier = StarChartOverlay.projectMessier(wcs, w, h)
-        // §0.58 太阳系天体（月亮/行星）：位置随时刻变化，需 EXIF 的拍摄时间 + GPS。
-        // 缺任一项即返回空表（宁可不标也不能标错）；演示模式为合成天区，同样跳过。
+        // §0.58/§0.59 太阳系天体（月亮/行星）：位置随时刻变化，需拍摄时间 + 位置。
+        // 时间必来自 EXIF；位置优先 EXIF GPS，缺失时用当前定位兜底（未必是拍摄地）。
+        // 演示模式为合成天区，直接跳过。
+        val needFallback =
+            com.starcam.astro.astro.ExifPriorsReader.needsLocationFallback(imagePath)
+        val fallbackLoc = if (needFallback) {
+            runCatching { LocationHelper(context).getBestLocation() }.getOrNull()
+        } else {
+            null
+        }
         val solar = if (isDemo) {
             emptyList()
         } else {
             runCatching {
                 StarChartOverlay.projectSolarSystem(
                     wcs, w, h,
-                    com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(imagePath),
+                    com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(
+                        imagePath,
+                        fallbackLoc?.let { it.latitude to it.longitude },
+                    ),
                 )
             }.getOrDefault(emptyList())
         }
         state = ResultUiState.Success(
             solve, bitmap, stars, lines, labels, messier, isDemo, engine, engineDetail, solar,
+            locationIsFallback = fallbackLoc != null,
         )
         return true
     }
@@ -679,22 +698,31 @@ internal fun plateScaleDegPerPx(state: ResultUiState.Success): Float? {
 /**
  * 失败诊断合成图（§0.34）：照片 + 金色星点圈，供放大查看/查看器使用。
  * 与加载页/失败页的动态标注一致：圈大小随星点亮度。
+ *
+ * §0.60：输出与原图**同分辨率**。此前固定降采样到长边 800px，在查看器里放大后
+ * 明显比原图糊（2026-09-12 开发者报）；[DiagStar] 坐标为归一化值，换尺寸不会错位，
+ * 圆半径与描边宽度按同一倍率放大以保持视觉比例。
  */
 private fun renderDiagnosticBitmap(src: Bitmap, diag: SolveDiagnostics): Bitmap {
-    val longEdge = maxOf(src.width, src.height)
-    val viewScale = 800f / longEdge
-    val outW = (src.width * viewScale).toInt().coerceAtLeast(1)
-    val outH = (src.height * viewScale).toInt().coerceAtLeast(1)
+    val outW = src.width
+    val outH = src.height
+    // 以原 800px 输出为基准的放大倍率：用于等比放大圆半径/描边，观感与旧版一致
+    val annotationScale = maxOf(outW, outH) / 800f
     val out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(out)
     canvas.drawBitmap(src, null, Rect(0, 0, outW, outH), Paint(Paint.FILTER_BITMAP_FLAG))
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = 0xFFFFC24B.toInt()
-        strokeWidth = 2.5f
+        strokeWidth = 2.5f * annotationScale
     }
     for (s in diag.stars) {
-        canvas.drawCircle(s.x * outW, s.y * outH, (3f + 7f * s.brightness01).coerceAtLeast(3f), paint)
+        canvas.drawCircle(
+            s.x * outW,
+            s.y * outH,
+            (3f + 7f * s.brightness01).coerceAtLeast(3f) * annotationScale,
+            paint,
+        )
     }
     return out
 }
@@ -1185,6 +1213,15 @@ private fun InfoPanel(state: ResultUiState.Success, modifier: Modifier = Modifie
                     state.engineDetail ?: "",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // §0.59：照片没有 EXIF GPS，识别与天体标注都用的是设备当前定位——必须如实告知
+            if (state.locationIsFallback) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    com.starcam.astro.ui.I18n.Result.locationFallback,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
                 )
             }
             Spacer(Modifier.height(10.dp))

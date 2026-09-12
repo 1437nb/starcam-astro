@@ -22,13 +22,13 @@ android {
         applicationId = "com.starcam.astro"
         minSdk = 26
         targetSdk = 34
-        versionCode = 68
-        versionName = "1.5.48"
+        versionCode = 69
+        versionName = "1.5.49"
     }
 
     // 每版更新内容简述（用户规则：在 APK 文件名上带上更新内容）
     val updateDesc = project.findProperty("updateDesc") as? String
-        ?: "新增月亮与行星实时标注"
+        ?: "无GPS时用当前定位兜底"
 
     // APK 产物自动带版本号、更新内容与变体名（用户规则：文件名标注版本与更新内容）
     applicationVariants.all {

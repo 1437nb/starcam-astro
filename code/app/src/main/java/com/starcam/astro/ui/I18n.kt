@@ -89,6 +89,14 @@ object I18n {
         val titleOnline: String get() = if (isEn) "✅ Online Solved" else "✅ 在线识别成功"
         val titleDefault: String get() = if (isEn) "Solved Successfully" else "识别成功"
 
+        /** §0.59 位置来源提示：照片无 EXIF GPS，识别与天体标注改用设备当前定位 */
+        val locationFallback: String
+            get() = if (isEn) {
+                "⚠ Location from current position (photo has no GPS) · may be inaccurate"
+            } else {
+                "⚠ 位置来源为当前定位（照片无 GPS），可能不准"
+            }
+
         val labelEngine: String get() = if (isEn) "Solver Engine" else "识别引擎"
         val labelCenter: String get() = if (isEn) "Center Coordinates" else "中心坐标"
         val labelFov: String get() = if (isEn) "Field of View" else "视场大小"

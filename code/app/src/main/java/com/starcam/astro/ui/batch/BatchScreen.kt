@@ -38,6 +38,7 @@ import com.starcam.astro.data.HistoryStore
 import com.starcam.astro.data.SettingsRepository
 import com.starcam.astro.astro.StarSolver
 import com.starcam.astro.util.ImageUtils
+import com.starcam.astro.util.LocationHelper
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -74,8 +75,20 @@ fun BatchScreen(
                     val result = StarSolver.solve(context, bmp, path, settings) { }
                         ?: return@withContext "未能识别（亮星不足或视场不支持）"
                     val solve = result.solve
-                    // §0.58 太阳系天体标注（需该照片 EXIF 的时间 + GPS，缺失则为空）
-                    val solar = com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(path)
+                    // §0.58/§0.59 太阳系天体标注：需拍摄时间 + 位置。位置优先 EXIF GPS，
+                    // 缺失时用当前定位兜底（批量导出没有逐张提示的界面，位置来源在
+                    // 单张结果页展示）
+                    val solarFallback =
+                        if (com.starcam.astro.astro.ExifPriorsReader.needsLocationFallback(path)) {
+                            runCatching { LocationHelper(context).getBestLocation() }.getOrNull()
+                                ?.let { it.latitude to it.longitude }
+                        } else {
+                            null
+                        }
+                    val solar = com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(
+                        path,
+                        solarFallback,
+                    )
                     val out = OverlayRenderer.render(bmp, solve, solarPositions = solar)
                         ?: return@withContext "渲染失败（结果缺坐标系）"
                     val name = "StarCam_${fmt.format(Date())}_$i.jpg"

@@ -6,11 +6,32 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
+ * 位置来源。§0.59
+ */
+enum class LocationSource {
+    /** 照片 EXIF 自带 GPS：反映拍摄当时的地点，最可信。 */
+    EXIF,
+
+    /**
+     * 照片无 GPS，改用设备**当前定位**兜底。
+     * 仅当「拍摄地 ≈ 当前所在地」时成立（典型：刚拍完就在原地处理照片）；
+     * 处理异地或久前的旧照片时会给出错误先验，UI 必须如实标注来源。
+     */
+    CURRENT_FALLBACK,
+
+    /** 全然没有位置信息。 */
+    NONE,
+}
+
+/**
  * EXIF 求解先验：焦距 → 视场 scale 区间；GPS + 拍摄时间 → 天顶 RA/Dec 天区。
  *
  * 时间读取优先级：
  *  1. GPSDateStamp + GPSTimeStamp（UTC，与时区无关，最准）
  *  2. DateTimeOriginal（无时区标记，按设备本地时区解析）
+ *
+ * §0.59 起位置可能有两个来源：照片 EXIF，或调用方用当前定位兜底
+ * （见 [LocationSource]）。EXIF 永远优先。
  */
 data class ExifPriors(
     val fovDeg: Double?,
@@ -18,6 +39,7 @@ data class ExifPriors(
     val lonDeg: Double?,
     val epochSec: Long?,
     val timeIsUtc: Boolean,
+    val locationSource: LocationSource = LocationSource.NONE,
 ) {
     /** GPS + 时间齐全 → 天顶 RA/Dec（度）。 */
     val zenith: Pair<Double, Double>?
@@ -28,6 +50,26 @@ data class ExifPriors(
         }
 
     val hasSkyPrior: Boolean get() = zenith != null
+
+    /** 位置来自「当前定位兜底」时为真——UI 据此提示用户「可能不准」。 */
+    val locationIsFallback: Boolean get() = locationSource == LocationSource.CURRENT_FALLBACK
+
+    /**
+     * §0.59：照片缺 GPS 时，用设备当前定位补全经纬度。
+     *
+     * - 已有 EXIF 定位：原样返回（EXIF 永远优先，绝不被覆盖）。
+     * - 无拍摄时间：原样返回——没有时刻就算不出天顶，补位置没有意义。
+     * - 只有经纬度之一缺失：视为缺 GPS，一并补全（EXIF 里半套 GPS 不可用）。
+     */
+    fun withFallbackLocation(lat: Double, lon: Double): ExifPriors {
+        if (latDeg != null && lonDeg != null) return this
+        if (epochSec == null) return this
+        return copy(
+            latDeg = lat,
+            lonDeg = lon,
+            locationSource = LocationSource.CURRENT_FALLBACK,
+        )
+    }
 }
 
 /** EXIF 先验读取器 */
@@ -69,7 +111,13 @@ object ExifPriorsReader {
             val dt = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
             epoch = parseLocalEpoch(dt)
         }
-        return ExifPriors(fovDeg, lat, lon, epoch, isUtc)
+        // §0.59：经纬度成对存在才算 EXIF 定位；只有半套 GPS 视为缺失，交给兜底处理。
+        val source = if (lat != null && lon != null) {
+            LocationSource.EXIF
+        } else {
+            LocationSource.NONE
+        }
+        return ExifPriors(fovDeg, lat, lon, epoch, isUtc, source)
     }
 
     /**
@@ -153,11 +201,20 @@ object ExifPriorsReader {
      * 返回结果已按 [SolarSystemCatalog.defaultAnnotated] 过滤（外加太阳），
      * 只保留肉眼可见、值得标注的目标。
      */
-    fun solarSystemForPhoto(imagePath: String): List<SolarSystemEphemeris.SolarPosition> {
-        val priors = try {
+    fun solarSystemForPhoto(
+        imagePath: String,
+        fallbackLocation: Pair<Double, Double>? = null,
+    ): List<SolarSystemEphemeris.SolarPosition> {
+        var priors = try {
             read(imagePath)
         } catch (e: Throwable) {
             return emptyList()
+        }
+        // §0.59：照片无 GPS 时可用当前定位兜底。注意天体位置对经度敏感
+        // （经度差 1° ≈ 地方恒星时差 4 分钟 ≈ 月亮走 0.04°），异地旧照片会产生
+        // 可见偏差——调用方有责任把 locationIsFallback 透出到 UI，如实告知来源。
+        if (fallbackLocation != null) {
+            priors = priors.withFallbackLocation(fallbackLocation.first, fallbackLocation.second)
         }
         val epoch = priors.epochSec ?: return emptyList()
         val lat = priors.latDeg ?: return emptyList()
@@ -165,5 +222,20 @@ object ExifPriorsReader {
         val jd = SolarSystemEphemeris.unixSecondsToJd(epoch)
         val wanted = setOf(SolarSystemEphemeris.SolarBody.SUN) + SolarSystemCatalog.defaultAnnotated
         return SolarSystemEphemeris.topocentricPositions(jd, lat, lon).filter { it.body in wanted }
+    }
+
+    /**
+     * §0.59：这张照片是否「值得用当前定位兜底」——缺 GPS（或只有半套）但有拍摄时间。
+     *
+     * 供调用方在求解前判断要不要去取一次定位，避免无谓的定位开销；
+     * 也是「有拍摄时间」这一前提的唯一判据（无时刻则补位置毫无意义）。
+     */
+    fun needsLocationFallback(imagePath: String): Boolean {
+        val priors = try {
+            read(imagePath)
+        } catch (e: Throwable) {
+            return false
+        }
+        return priors.epochSec != null && (priors.latDeg == null || priors.lonDeg == null)
     }
 }
