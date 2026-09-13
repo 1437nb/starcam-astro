@@ -36,11 +36,17 @@ class StarSolverTest {
     }
 
     @Test
-    fun fovFromFocal35_portraitUsesShortFrame() {
-        // 竖拍：最长边对应 35mm 画幅短边（24mm）
-        val p = FovEstimate.fovDegFromFocal35(24.0, portrait = true)
-        assertNotNull(p)
-        assertEquals(53.13, p!!, 0.01) // 2·atan(12/24)
+    fun fovFromFocal35_portraitSameAsLandscape() {
+        // §0.61 修正：竖拍不改变传感器长边视场——竖拍只是画面旋转 90°，
+        // 文件像素与传感器长边（36mm 等效方向）不变，长边视场与横拍相同。
+        // 旧行为（竖拍用 24mm 短边）会把 26mm 等效的长边视场 69.39° 低估成
+        // 49.55°，使官方引擎的 pixscale 先验上限低于真实值 → 竖拍照片必然解不出。
+        val landscape = FovEstimate.fovDegFromFocal35(24.0, portrait = false)
+        val portrait = FovEstimate.fovDegFromFocal35(24.0, portrait = true)
+        assertNotNull(landscape)
+        assertNotNull(portrait)
+        assertEquals(73.74, landscape!!, 0.01) // 2·atan(18/24)
+        assertEquals(landscape, portrait) // 竖拍与横拍结果一致
         // 长焦 200mm（望远镜/长焦镜头）：视场很小
         val tele = FovEstimate.fovDegFromFocal35(200.0)
         assertNotNull(tele)

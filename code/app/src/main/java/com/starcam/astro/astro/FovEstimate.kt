@@ -15,12 +15,24 @@ object FovEstimate {
 
     /**
      * 由 35mm 等效焦距计算照片**最长边方向**的视场（度）。
-     * fov = 2·atan(画幅半长 / f35)。[portrait] 竖拍时最长边对应传感器短边。
-     * 返回 null：焦距缺失/非正/非有限。
+     * fov = 2·atan(画幅半长 / f35)。
+     *
+     * ⚠️ 2026-09-13 修正（§0.61）：`portrait` 参数不再改变结果。
+     * 此前竖拍分支用 24mm 短边计算长边视场，但传感器物理与 EXIF 方向无关——
+     * 竖拍只是把整幅画面旋转 90°，文件像素与传感器长边（36mm 等效方向）不变，
+     * 故长边视场始终 = 2·atan(18/f35)。
+     *
+     * 旧 bug 的实害：手机 4:3 传感器 + 竖拍（EXIF Orientation=6/8）时，
+     * 长边视场被低估（26mm 等效 → 49.55° 而非 67.3°），而官方引擎按
+     * 位图宽度换算 pixscale 先验 [fov×0.75, fov×1.35]°，
+     * 真实 pixscale 恰好落在先验上限之外 → 官方引擎必然解不出。
+     * 实例：南宁秋季四边形 30s 照片（2026-09-13 用户报告）识别失败。
+     *
+     * 保留 `portrait` 参数仅为调用方/测试兼容（历史语义已废弃）。
      */
     fun fovDegFromFocal35(focal35mm: Double, portrait: Boolean = false): Double? {
         if (!focal35mm.isFinite() || focal35mm <= 0.0) return null
-        val frameHalf = (if (portrait) FRAME_SHORT_MM else FRAME_LONG_MM) / 2.0
+        val frameHalf = FRAME_LONG_MM / 2.0
         return Math.toDegrees(2.0 * Math.atan(frameHalf / focal35mm))
     }
 
