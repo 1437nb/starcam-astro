@@ -19,7 +19,7 @@
   **已于 2026-09-12 合并为本仓库**，旧副本全部归档到 `C:\star\_archive\`。
 - **不要再从别处开发、不要手工同步副本。** 改代码只在这里改。
 - 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），分支 `main`。
-- 当前基线：**v1.5.48**（versionCode 68），tag `v1.5.48` 已发布到 GitHub Releases。
+- 当前基线：**v1.5.49**（versionCode 69），tag `v1.5.49` 已发布到 GitHub Releases。
 
 ## 1. 项目是什么
 
