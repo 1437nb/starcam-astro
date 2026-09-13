@@ -20,16 +20,16 @@ A pure offline Android application for astrophotography plate-solving and night 
 - **Rich Astronomical Overlays**:
   - Official 88 modern constellation stick figures aligned with Stellarium v23.4 constellation line data (672 segments) and names;
   - 3,800+ traditional Chinese and Western proper star names (Sirius, Vega, Betelgeuse, Arcturus, Polaris, etc.);
-  - 45 prominent Messier deep-sky objects (Andromeda Galaxy M31, Orion Nebula M42, Pleiades M45, etc.) color-coded by astrophysical object type;
+  - 44 prominent Messier deep-sky objects (Andromeda Galaxy M31, Orion Nebula M42, Pleiades M45, etc.) color-coded by astrophysical object type;
   - **Realtime Moon and planet labels** (v1.5.48): the Sun, Moon and planets are computed for the moment encoded in the photo's EXIF timestamp + GPS (JPL approximate Keplerian elements plus a Meeus lunar series, with topocentric parallax correction); the Sun and Moon are drawn at their true apparent diameter, and tapping them shows magnitude, elongation, illuminated fraction and apparent size.
-- **Weak-EXIF fallback** (v1.5.49): when a photo carries no GPS, the device's current location is used to estimate the imaged sky region, so the native solver no longer has to start from a full-sky blind search, and the Sun/Moon/planet labels benefit as well. The location source is stated on the result screen together with a "may be inaccurate" note. **EXIF GPS always wins — it is never overridden.**
+- **Weak-EXIF fallback** (v1.5.49): when a photo carries no GPS, the device's current location is used to estimate the imaged sky region, so the native solver no longer has to start from a full-sky blind search; the Sun/Moon/planet labels and batch export benefit as well. Three hard boundaries: **EXIF GPS always wins and is never overridden**, no fallback without a capture timestamp, and a half-populated GPS pair is treated as missing and completed as a pair. The location source (EXIF vs. current fix) is stated on the solving progress and result screen, together with a "may be inaccurate" note.
 - **Bilingual UI**: One-tap switching between Simplified Chinese and English across the entire app, including constellation, star, and deep-sky object names.
 - **Professional Astrophotography Tools**:
   - Camera Pro manual exposure (ISO / shutter control for light pollution and faint star fields) with a bubble level;
   - Automatic field-of-view (FOV) calibration;
   - Direct raw image gallery loading (bypasses OS downsampling to preserve genuine faint star centroids);
   - Dual-layer zoomable viewer (smooth comparison between original photo and annotated overlay);
-  - Visual failure diagnostics (star detection density heatmap and shooting guidance);
+  - Visual failure diagnostics (star detection density heatmap and shooting guidance; since v1.5.49 the annotated diagnostic image matches the original resolution, so it stays sharp when zoomed);
   - Deep space blue and night-vision red themes (protects dark adaptation in the field).
 - **Privacy First**: Fully offline by default, so photos never leave the phone. A photo is uploaded to `nova.astrometry.net` (and the local cache copy deleted right after the request) only when the user explicitly enters an API key and selects online mode. The optional location permission is used solely for on-device sensor-assisted calibration in the camera screen — never for background tracking, and never attached to an uploaded JPEG. App data is excluded from system backup. No telemetry, trackers, or ads.
 
@@ -46,7 +46,7 @@ A pure offline Android application for astrophotography plate-solving and night 
 │   │   └── src/main/jniLibs/arm64-v8a/      # Prebuilt libstellar_solver.so native engine
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # Engineering architecture and 48 validation reports (§0.11 ~ §0.58)
+├── docs/                   # Engineering architecture and 50 validation reports (§0.11 ~ §0.60)
 ├── tools/                  # Python catalog generators and offline test utilities
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md               # Chinese documentation
@@ -73,7 +73,7 @@ cd code
 # Assemble Debug APK
 ./gradlew :app:assembleDebug
 
-# Run full unit tests (astronomical math, catalog integrity, 143/143 passing)
+# Run full unit tests (astronomical math, catalog integrity, 149/149 passing)
 ./gradlew :app:testDebugUnitTest
 
 # Output path
