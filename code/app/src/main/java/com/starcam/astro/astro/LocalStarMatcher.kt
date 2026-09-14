@@ -77,6 +77,25 @@ object LocalStarMatcher {
     /** §0.62 打分轮：对齐判定容差（像素）与最低对齐星数 */
     private const val ALIGN_TOL_PX = 8f
 
+    /**
+     * §0.62 打分轮的高置信提前退出阈值：对齐数 ≥ 12 且对齐率 ≥ 0.5 才提前收工。
+     * 真解形态实测（apod4 11/26、用户照片 7/26）都低于此，故不会误触发。
+     */
+    private const val SCORED_EARLY_ALIGNED = 12
+    private const val SCORED_EARLY_RATE = 0.5f
+
+    /**
+     * §0.62 打分轮时间预算（毫秒）。评分轮在投票失败后触发，候选可达 7 万个
+     * （实测 45 工作星 × C(14,2) 三角形 × 18 候选 ≈ 70k），按 ~150μs/候选
+     * 需 10.5 秒。给 3 秒预算后，失败路径的额外开销从 ~10s 压到 ~3s，
+     * 而真解候选通常出现在序列前段（用户照片在预算内即命中）。
+     */
+    private const val SCORED_TIME_BUDGET_MS = 3000L
+
+    /** 弧度 → 度的倒数（tanXY 与打分轮共用同一尺度约定） */
+    private const val INV_RAD = 180.0 / PI
+
+
     /** §0.62 调试：最低对齐星数（生产默认 6；设为极大可停用打分轮做 A/B） */
     @Volatile
     internal var debugMinAligned: Int? = null
@@ -108,6 +127,70 @@ object LocalStarMatcher {
     /** §0.62 调试：覆盖对齐率门槛（标定用） */
     @Volatile
     internal var debugMinAlignRate: Float? = null
+
+    /** §0.62 调试：彻底跳过打分轮（A/B 计费用；true=完全不执行） */
+    @Volatile
+    internal var debugDisableScored: Boolean = false
+
+    /** §0.62 调试：打分轮统计（候选数 / scoreHypothesis 调用数 / 耗时 ms） */
+    @Volatile
+    var debugScoredStats: String? = null
+
+    /**
+     * §0.62 打分轮的星表星缓存：只存一次（按 [catalogMag] 过滤），
+     * 每颗星预算好单位向量 (ux, uy, uz)。
+     *
+     * 打分轮会把 scoreHypothesis 调用上万次，每次都要遍历整个亮星域；
+     * 早期版本在循环里对每颗星做 tanXY（含 6 次三角函数）+ haversine，
+     * 单张失败照片因此多花 15 秒（实测 10.0s → 25.5s）。
+     * 改为预算单位向量后，每次投影只剩点积与除法。
+     */
+    private class ScoreTable(
+        val ux: DoubleArray,
+        val uy: DoubleArray,
+        val uz: DoubleArray,
+        val raDeg: DoubleArray,
+        val decDeg: DoubleArray,
+        val entries: Array<StarEntry>,
+    )
+
+    @Volatile
+    private var cachedScoreTable: ScoreTable? = null
+
+    @Volatile
+    private var cachedScoreTableMag: Float = Float.NaN
+
+    private fun scoreTable(): ScoreTable {
+        val mag = catalogMag()
+        cachedScoreTable?.let { if (cachedScoreTableMag == mag) return it }
+        synchronized(this) {
+            cachedScoreTable?.let { if (cachedScoreTableMag == mag) return it }
+            val list = ArrayList<StarEntry>(512)
+            for (st in StarCatalogData.stars) {
+                if (st.mag > mag) continue
+                list.add(st)
+            }
+            val n = list.size
+            val ux = DoubleArray(n); val uy = DoubleArray(n); val uz = DoubleArray(n)
+            val ras = DoubleArray(n); val decs = DoubleArray(n)
+            val r = PI / 180.0
+            for (i in 0 until n) {
+                val st = list[i]
+                val ra = st.ra * r
+                val dec = st.dec * r
+                val cd = cos(dec)
+                ux[i] = cd * cos(ra)
+                uy[i] = cd * sin(ra)
+                uz[i] = sin(dec)
+                ras[i] = st.ra
+                decs[i] = st.dec
+            }
+            val tbl = ScoreTable(ux, uy, uz, ras, decs, list.toTypedArray())
+            cachedScoreTable = tbl
+            cachedScoreTableMag = mag
+            return tbl
+        }
+    }
 
     private fun minAlignRate(): Float = debugMinAlignRate ?: SCORED_MIN_ALIGN_RATE
 
@@ -446,17 +529,47 @@ object LocalStarMatcher {
         val invDet = 1.0 / det
         var hits = 0
         var inFrame = 0
-        val mag = catalogMag()
         // 一对一匹配：每颗检测星只能被一颗星表星占用，杜绝"多星压一点"虚增
         val used = BooleanArray(work.size)
-        for (star in StarCatalogData.stars) {
-            if (star.mag > mag) continue
-            if (pointingHint != null &&
-                haversineDeg(star.ra, star.dec, pointingHint.raDeg, pointingHint.decDeg) >
-                pointingHint.radiusDeg + 45.0
-            ) continue
-            val (X, Y) = tanXY(star.ra, star.dec, ra0, dec0)
-            if (X.isNaN() || Y.isNaN()) continue
+        // 切平面基向量（gnomonic）：X = atan2(dot(u,east), dot(u,center))，
+        // 用单位向量点积代替每星一次 tanXY（三角函数）调用
+        val r0 = ra0 * (PI / 180.0)
+        val d0 = dec0 * (PI / 180.0)
+        val c0x = cos(d0) * cos(r0)
+        val c0y = cos(d0) * sin(r0)
+        val c0z = sin(d0)
+        // east = (-sin r0, cos r0, 0) ; north = center x east
+        val exx = -sin(r0); val exy = cos(r0); val exz = 0.0
+        val nx = c0y * exz - c0z * exy
+        val ny = c0z * exx - c0x * exz
+        val nz = c0x * exy - c0y * exx
+        val tbl = scoreTable()
+        // hint 预过滤的常量提到循环外（点积 -> 角距，避免每星多次三角函数）
+        val hintRadius = if (pointingHint != null) pointingHint.radiusDeg + 45.0 else 0.0
+        val hx: Double; val hy: Double; val hz: Double
+        if (pointingHint != null) {
+            val hr = pointingHint.raDeg * (PI / 180.0)
+            val hd = pointingHint.decDeg * (PI / 180.0)
+            hx = cos(hd) * cos(hr); hy = cos(hd) * sin(hr); hz = sin(hd)
+        } else {
+            hx = 0.0; hy = 0.0; hz = 0.0
+        }
+        for (i in tbl.entries.indices) {
+            if (pointingHint != null) {
+                val dot = tbl.ux[i] * hx + tbl.uy[i] * hy + tbl.uz[i] * hz
+                if (acos(dot.coerceIn(-1.0, 1.0)) / (PI / 180.0) > hintRadius) continue
+            }
+            val uxi = tbl.ux[i]; val uyi = tbl.uy[i]; val uzi = tbl.uz[i]
+            val dC = uxi * c0x + uyi * c0y + uzi * c0z
+            if (dC <= 1e-9) continue
+            val dE = uxi * exx + uyi * exy + uzi * exz
+            val dN = uxi * nx + uyi * ny + uzi * nz
+            // 与 tanXY 完全同尺度：xi = dE/dC、eta = dN/dC，再除弧度因子。
+            // 注意不能用 atan2——那给的是角度值，而模型（fitSimilarity 的输入）
+            // 拟合的是正切值；小角度下二者近似，74° 宽场下差异巨大（实测会让
+            // 用户照片重新变成 UNSOLVED）。
+            val X = (dE / dC) * INV_RAD
+            val Y = (dN / dC) * INV_RAD
             // 模型：X = s*u - ss*v + tx ; Y = ss*u + s*v + ty  (u,v = 照片像素)
             val u = ((s * (X - tx) + ss * (Y - ty)) * invDet).toFloat()
             val v = ((-ss * (X - tx) + s * (Y - ty)) * invDet).toFloat()
@@ -637,7 +750,7 @@ object LocalStarMatcher {
         // 真三角形占比被伪三角形淹没（实测用户照片真 HIP 仅 4~11 票，伪 HIP
         // 14~19 票）。但"逐候选拟合 + 数对齐星数"分离度极高：真候选对齐
         // 16.8/25 颗，伪候选仅 1.0/25（实测同一张照片）。故投票全败时按此打分。
-        if (best == null) {
+        if (best == null && !debugDisableScored) {
             best = scoredRound(detected, width, height, pointingHint)
         }
         return best
@@ -671,6 +784,10 @@ object LocalStarMatcher {
         var bestInFrame = 0
         var bestPairs: List<Pair<Int, StarEntry>>? = null
         val seen = HashSet<Long>()
+        val tStart = System.nanoTime()
+        var nCand = 0L
+        var nScored = 0L
+        var earlyOut = false
 
         for (pi in work.indices) {
             val a = work[pi]
@@ -709,7 +826,9 @@ object LocalStarMatcher {
                     val candidates = merged.values
                         .sortedBy { abs(it.r2 - r2) + abs(it.r3 - r3) }
                         .take(candidateCap())
+                    nCand += candidates.size
                     for (t in candidates) {
+                        nScored++
                         val sc = scoreHypothesis(work, a, b, c, t, width, height, pointingHint)
                         val aligned = sc[0]
                         val inFrame = sc[1]
@@ -727,15 +846,37 @@ object LocalStarMatcher {
                                     workIdx[bi] to eB,
                                     workIdx[ci] to eC,
                                 )
+                                // 提前退出：仅在**高置信**真解形态下收工。
+                                // 注意门槛不能压到 minAligned()/minAlignRate() 本身——
+                                // 那会让第一个勉强达标的候选就终止搜索，选到次优解
+                                // （实测用户照片 inl 15 → 9、scale 122.8 → 118.6）。
+                                if (inFrame >= SCORED_MIN_IN_FRAME &&
+                                    aligned >= SCORED_EARLY_ALIGNED &&
+                                    aligned.toFloat() / inFrame >= SCORED_EARLY_RATE
+                                ) {
+                                    earlyOut = true
+                                }
                             }
                         }
+                        if (earlyOut) break
+                        if ((nScored and 0x3F) == 0L &&
+                            (System.nanoTime() - tStart) / 1_000_000 > SCORED_TIME_BUDGET_MS
+                        ) {
+                            earlyOut = true
+                            break
+                        }
                     }
+                    if (earlyOut) break
                 }
+                if (earlyOut) break
             }
+            if (earlyOut) break
         }
         debugScoredBest = bestScore
         debugScoredInFrame = bestInFrame
         debugScoredWinPairs = bestPairs?.size
+        debugScoredStats = "cand=$nCand scored=$nScored work=${work.size} " +
+            "ms=${(System.nanoTime() - tStart) / 1_000_000}"
         if (bestPairs == null) {
             return null
         }
