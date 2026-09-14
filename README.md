@@ -7,11 +7,29 @@
 
 ---
 
+## 下载安装
+
+最新版本 **[v1.5.51](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.51)** —
+
+| 包 | 大小 | 说明 |
+|---|---|---|
+| [StarCam-v1.5.51-wide-field-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.51/StarCam-v1.5.51-wide-field-fix-release.apk) | 15.7 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.51-wide-field-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.51/StarCam-v1.5.51-wide-field-fix-debug.apk) | 24.8 MB | 含调试日志 |
+
+全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
+
+**系统要求**：Android 8.0（API 26）及以上，**arm64-v8a** 真机
+（离线官方引擎仅提供 arm64 原生库；x86_64 模拟器会优雅回退到 JVM 星表引擎）。
+
+---
+
 ## 核心特性
 
 - **三层混合求解引擎**：
   - 官方 `astrometry.net` 0.97 本地 NDK 盲解（带 4100 系列全天索引）；
-  - 自研 8400+ 星表三角形投票匹配器（带亮源掩蔽、弱星多候选轮，广角照片秒级求解）；
+  - 自研 8400+ 星表三角形匹配器（三角形投票 + **宽场打分轮**，带亮源掩蔽与弱星多候选轮）；
+    宽场打分轮（v1.5.51）解决 60°+ 广角照片的识别：对候选三角形逐个拟合、
+    一对一统计对齐星数并按对齐率判决，不再依赖易被伪三角形稀释的逐星投票；
   - 可选在线 `nova.astrometry.net` API 兜底（需用户自行配置 API Key）。
 - **实时取景认星**：CameraX 分析流周期识别，在相机取景框上实时叠加星座连线与亮星名。
 - **AR 实时星图**（v1.5.40 ~ v1.5.47）：由设备方向传感器驱动，星图零延迟跟随手机转动；
@@ -59,7 +77,7 @@
 │   │   └── src/main/jniLibs/arm64-v8a/      # libstellar_solver.so 预编译引擎
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # 完整工程文档与 50 份验证增补报告（§0.11 ~ §0.60）
+├── docs/                   # 完整工程文档与 51 份验证增补报告（§0.11 ~ §0.62）
 ├── tools/                  # Python 星表生成器与离线工具集
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md
@@ -85,12 +103,30 @@ cd code
 # 编译 Debug APK
 ./gradlew :app:assembleDebug
 
-# 运行全量单元测试（含星表完整性、天文数学、太阳系历表、跨引擎验证，149 项全绿）
+# 运行全量单元测试（含星表完整性、天文数学、太阳系历表、跨引擎验证、真实照片回归，150 项全绿）
 ./gradlew :app:testDebugUnitTest
 
 # 产物位置
 # app/build/outputs/apk/debug/StarCam-v*-debug.apk
+
+# 编译 Release APK（R8 压缩；lintVital 在无网络环境可用 -x lintVitalRelease 跳过）
+./gradlew :app:assembleRelease -x lintVitalRelease
+# app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
+
+### 真实照片回归（可选）
+
+`app/src/test` 下的 `RealPhotoMatchTest` / `Photo12RegressionTest` 会读取
+`.gray` 格式的实拍素材（`int32 宽 + int32 高 + float32 灰度`）。素材不在仓库内
+（隐私与体积），跑测试时用环境变量指向本地目录：
+
+```bash
+PHOTO_DIR=/path/to/realphotos ./gradlew :app:testDebugUnitTest
+```
+
+回归台固化了真值断言：`apod4`（北斗，34° 窄场）、`user-nanning-20260912`
+（用户实拍，74° 广角，真值取自 astrometry.net 独立解算）必须解出；
+`apod1/2/3/5`、`pleiades`、`m44×2` 作为假阳性对照必须保持 UNSOLVED。
 
 ---
 

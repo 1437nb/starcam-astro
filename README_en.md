@@ -9,11 +9,26 @@ A pure offline Android application for astrophotography plate-solving and night 
 
 ---
 
+## Download
+
+Latest release: **[v1.5.51](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.51)**
+
+| Package | Size | Notes |
+|---|---|---|
+| [StarCam-v1.5.51-wide-field-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.51/StarCam-v1.5.51-wide-field-fix-release.apk) | 15.7 MB | **Recommended** — R8-minified signed build |
+| [StarCam-v1.5.51-wide-field-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.51/StarCam-v1.5.51-wide-field-fix-debug.apk) | 24.8 MB | Includes debug logging |
+
+All versions: [Releases](https://github.com/1437nb/starcam-astro/releases).
+
+**Requirements**: Android 8.0 (API 26) or newer on an **arm64-v8a** device
+(the bundled native solver ships arm64 libraries only; x86_64 emulators fall
+back gracefully to the JVM catalog matcher).
+
 ## Key Features
 
 - **3-Tier Hybrid Solving Engine**:
   - Native NDK port of `astrometry.net` 0.97 with 4100-series all-sky index files;
-  - Custom 8,400+ star triangle voting matcher (with bright-source masking and multi-candidate weak star rounds for sub-second wide-field solving);
+  - Custom 8,400+ star triangle matcher (triangle voting plus a **wide-field scoring round**, with bright-source masking and multi-candidate weak star rounds). The scoring round (v1.5.51) fixes identification for 60°+ wide-angle photos: each candidate triangle is fitted, stars are matched one-to-one, and the winner is chosen by alignment *rate* instead of per-star voting, which noisy false triangles can swamp;
   - Optional online fallback via `nova.astrometry.net` API (requires user-provided API key).
 - **Real-Time Viewfinder Recognition & AR Live Star Map**: CameraX analysis pipeline performs periodic blind solving, and a sensor-driven AR live star map projects the sky onto the viewfinder with zero latency as you move the phone (adjustable FOV, calibratable). Includes an all-sky mode that keeps rendering the lower hemisphere even when the phone points down (with a horizon line and 8-point compass), attitude smoothing with gyro extrapolation plus a complementary filter so the map neither jitters nor drifts, and target-finding navigation with a direction arrow and pulsing ring.
 - **Layer Controls & Object Info Cards**: Independently toggle constellation lines, star names, constellation labels, and Messier overlays; press-and-hold to compare against the original photo; tap any object in the picture for a bilingual info card (type / magnitude / distance / background).
@@ -47,7 +62,7 @@ A pure offline Android application for astrophotography plate-solving and night 
 │   │   └── src/main/jniLibs/arm64-v8a/      # Prebuilt libstellar_solver.so native engine
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # Engineering architecture and 50 validation reports (§0.11 ~ §0.60)
+├── docs/                   # Engineering architecture and 51 validation reports (§0.11 ~ §0.62)
 ├── tools/                  # Python catalog generators and offline test utilities
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md               # Chinese documentation
@@ -74,12 +89,32 @@ cd code
 # Assemble Debug APK
 ./gradlew :app:assembleDebug
 
-# Run full unit tests (astronomical math, catalog integrity, 149/149 passing)
+# Run full unit tests (astronomical math, catalog integrity, solar-system
+# ephemerides, cross-engine checks, real-photo regression — 150/150 passing)
 ./gradlew :app:testDebugUnitTest
 
 # Output path
 # app/build/outputs/apk/debug/StarCam-v*-debug.apk
+
+# Release APK (R8-minified; add -x lintVitalRelease to skip lint on offline machines)
+./gradlew :app:assembleRelease -x lintVitalRelease
+# app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
+
+### Real-Photo Regression (optional)
+
+`RealPhotoMatchTest` and `Photo12RegressionTest` read `.gray` captures
+(`int32 width + int32 height + float32 grayscale`). The material is not stored in
+the repository (privacy and size) — point the tests at your local copy:
+
+```bash
+PHOTO_DIR=/path/to/realphotos ./gradlew :app:testDebugUnitTest
+```
+
+The suite pins ground-truth assertions: `apod4` (Big Dipper, 34° narrow field)
+and `user-nanning-20260912` (a user capture, 74° wide field, ground truth from an
+independent astrometry.net solve) must solve; `apod1/2/3/5`, `pleiades`, and two
+`m44` frames must stay UNSOLVED as false-positive controls.
 
 ---
 
