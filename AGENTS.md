@@ -19,10 +19,17 @@
   **已于 2026-09-12 合并为本仓库**，旧副本全部归档到 `C:\star\_archive\`。
 - **不要再从别处开发、不要手工同步副本。** 改代码只在这里改。
 - 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），分支 `main`。
-- 当前基线：**v1.5.53**（versionCode 73）；v1.5.49 / v1.5.51 / v1.5.52 已发布到 GitHub Releases。
-  v1.5.52 发版后用户报告"识别出来了但连线漂移、线之间没有星"，
-  已定位为切平面原点未对齐图像中心（§0.63）并在 v1.5.53 修复
-  （平均偏差 6.0→1.7px、内点 15→25），v1.5.53 待真机验证后发版。
+- 当前基线：**v1.5.55**（versionCode 75）；v1.5.49/51/52/53 已发布到 GitHub Releases，
+  v1.5.54 未发布（被 v1.5.55 取代）。
+  **v1.5.55 修复了「官方引擎提星恒为 0」的三处 C 层缺陷**（详见 `docs/63-…§0.65…`）：
+  ① `simplexy_set_defaults` 会 memset 整个结构体，而桥先填 `image/nx/ny` 后调它 → 字段清零；
+  ② `simplexy_free_contents` 会 `free(s->image)`，而该指针来自 JNI `GetFloatArrayElements`
+  （ART 堆）→ 非法 free；①把指针清成 NULL 恰好掩盖了②，必须同修；
+  ③ 提星成功判据 `if (rc != 0 || npeaks <= 0)` 与真实语义（`rc=0` 才是失败）相反 → 判据恒真，
+  SEP 路径恒失败、Kotlin 侧三级降级从未生效。
+  此前「部分 ARM64 机型 simplexy 数据竞争」的判断**已推翻**——该缺陷在 x86_64 上 100% 复现
+  （A/B 对照：旧 `ok=0 n=0` vs 新 `ok=1 n=200`，ASan 无报告）。
+  用户报告的原图识别问题由此得到确定解释，无需再等 `local_fail_latest.gray`。
 
 ## 1. 项目是什么
 

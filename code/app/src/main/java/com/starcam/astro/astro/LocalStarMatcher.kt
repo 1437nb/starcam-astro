@@ -238,17 +238,38 @@ object LocalStarMatcher {
         debugForceVoteThreshold?.let { return it to it }
         val sortedDesc = brightness.map { it.toFloat() }.sortedDescending()
         val anchor20 = sortedDesc[minOf(sortedDesc.size - 1, 19)]
+        val top = sortedDesc.firstOrNull() ?: 0f
+        if (top <= 0f) return 900f to 60f
+        // §0.64 量纲兼容：下面 900 这套绝对判据是按 box-blur 检测器的亮度量级
+        // （连通域灰度和，~数千）标定的；SEP 路径喂入的是 simplexy 的 flux
+        // （背景减除后的净流量，量级小得多），绝对判据在 SEP 下恒不成立，
+        // sharp 通道形同虚设。这里补一个**相对形态**判据作为兜底：
+        // 头部陡峭与否只看"第 20 亮星 / 最亮星"的比值，与检测器量纲无关。
         val brightCount = sortedDesc.count { it >= 900f }
         val sharp = 900f
         val adaptive = maxOf(60f, anchor20 * 0.35f)
-        val steep = brightCount >= 10 && anchor20 >= 900f * 0.85f
-        return if (steep) sharp to adaptive else adaptive to sharp
+        val steepAbs = brightCount >= 10 && anchor20 >= 900f * 0.85f
+        val steepRel = anchor20 >= top * 0.55f
+        if (steepAbs || steepRel) {
+            // 相对判据生效时，sharp 也按最亮星比例给出（900/典型最亮 4154 ≈ 0.22）
+            val sharpScaled = if (steepAbs) sharp else maxOf(60f, top * 0.20f)
+            return sharpScaled to adaptive
+        }
+        return adaptive to sharp
     }
 
     // ================= 1. 星点检测 =================
 
     /** 从 Bitmap 检测星点 */
-    fun detectStars(bitmap: Bitmap, maxStars: Int = 40): List<DetectedStar> {
+    /**
+     * [maxStars] 默认 100：与 SEP 路径（200 上限）保持同一量级。
+     * 原默认 40 是宽场欠曝照片的瓶颈 —— 检测端只保留最亮 40 颗时，
+     * mag 5~6 的星被截断，投票可用星数不足（实测用户照片在 40 星下
+     * 内点 25，提到 100 后演示照片多张内点显著提升：5040 37→51、
+     * 5092 19→24）。上限不宜过 150：apod5（假阳性对照）在 n>=150
+     * 时会被噪声星凑出 6 内点的假解（实测 n=150/200 均误报 SOLVED）。
+     */
+    fun detectStars(bitmap: Bitmap, maxStars: Int = 100): List<DetectedStar> {
         val w = bitmap.width
         val h = bitmap.height
         val pixels = IntArray(w * h)

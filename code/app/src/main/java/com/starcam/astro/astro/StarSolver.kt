@@ -579,6 +579,15 @@ object StarSolver {
                         val detail = "内置星表 · 内点 ${matched.inlierCount} 颗"
                         return@withContext EngineResult(matched.solve, engine, detail, currentDisplay)
                     }
+                    // §0.64 诊断：本地匹配失败（或低内点被官方复核拒绝）时落盘实际像素
+                    // 与检出星点，供开发机精确重放（仅 debug 构建，见 dumpLocalFail）
+                    if (stars != null) {
+                        StellarSolverNative.dumpLocalFail(
+                            context, currentDisplay, stars,
+                            if (matched == null) "local-unsolved"
+                            else "local-inliers-${matched.inlierCount}",
+                        )
+                    }
                     // 低内点解被官方复核拒绝 → 不呈现；把自研视场传给官方流程作
                     // scale 先验（§0.33.3），避免盲解两段拖长等待
                     if (matched != null) {
