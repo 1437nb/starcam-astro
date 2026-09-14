@@ -9,12 +9,12 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.51](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.51)** —
+最新版本 **[v1.5.52](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.52)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.51-wide-field-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.51/StarCam-v1.5.51-wide-field-fix-release.apk) | 15.7 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.51-wide-field-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.51/StarCam-v1.5.51-wide-field-fix-debug.apk) | 24.8 MB | 含调试日志 |
+| [StarCam-v1.5.52-perf-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.52/StarCam-v1.5.52-perf-fix-release.apk) | 15.7 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.52-perf-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.52/StarCam-v1.5.52-perf-fix-debug.apk) | 24.8 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
 
@@ -56,6 +56,12 @@
   一对一统计对齐星数，按对齐率判决（真解 0.27、伪解 0.05~0.11，门槛 0.20）。
   实测用户 74° 照片由 UNSOLVED 转为 SOLVED（与 astrometry.net 独立解算差 <0.01°），
   同时 6 张假阳性对照样本全部保持 UNSOLVED。
+
+- **识别耗时修复**（v1.5.52）：v1.5.51 的宽场打分轮在**识别失败**时会多花 15 秒
+  （要逐个评分 7 万个候选三角形），叠加官方引擎的盲解两段后，总耗时可超 1 分钟。
+  本次为打分轮加入单位向量预算表、3 秒时间预算与高置信提前退出：
+  失败路径额外开销降到 2.5~3 秒，离线演示的 12 张照片恢复**单张 1~2 秒解出**，
+  识别精度与成功率均无变化。
 
 - **专业天文工具**：
   - 原图相册直接读取（绕过系统安全中心降采样，保留真实星点）；

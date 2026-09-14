@@ -11,12 +11,12 @@ A pure offline Android application for astrophotography plate-solving and night 
 
 ## Download
 
-Latest release: **[v1.5.51](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.51)**
+Latest release: **[v1.5.52](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.52)**
 
 | Package | Size | Notes |
 |---|---|---|
-| [StarCam-v1.5.51-wide-field-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.51/StarCam-v1.5.51-wide-field-fix-release.apk) | 15.7 MB | **Recommended** — R8-minified signed build |
-| [StarCam-v1.5.51-wide-field-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.51/StarCam-v1.5.51-wide-field-fix-debug.apk) | 24.8 MB | Includes debug logging |
+| [StarCam-v1.5.52-perf-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.52/StarCam-v1.5.52-perf-fix-release.apk) | 15.7 MB | **Recommended** — R8-minified signed build |
+| [StarCam-v1.5.52-perf-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.52/StarCam-v1.5.52-perf-fix-debug.apk) | 24.8 MB | Includes debug logging |
 
 All versions: [Releases](https://github.com/1437nb/starcam-astro/releases).
 
@@ -29,6 +29,14 @@ back gracefully to the JVM catalog matcher).
 - **3-Tier Hybrid Solving Engine**:
   - Native NDK port of `astrometry.net` 0.97 with 4100-series all-sky index files;
   - Custom 8,400+ star triangle matcher (triangle voting plus a **wide-field scoring round**, with bright-source masking and multi-candidate weak star rounds). The scoring round (v1.5.51) fixes identification for 60°+ wide-angle photos: each candidate triangle is fitted, stars are matched one-to-one, and the winner is chosen by alignment *rate* instead of per-star voting, which noisy false triangles can swamp;
+- **Solving-time regression fix** (v1.5.52): the v1.5.51 wide-field scoring round
+  cost an extra 15 s whenever solving *failed* (it scored ~70,000 candidate
+  triangles one by one); stacked on the native engine's blind-solve segments the
+  total could exceed a minute. A precomputed unit-vector table, a 3-second time
+  budget and a high-confidence early exit bring the failure-path overhead down to
+  2.5–3 s. The 12 bundled demo photos are back to **1–2 s each**, with no change in
+  accuracy or success rate.
+
   - Optional online fallback via `nova.astrometry.net` API (requires user-provided API key).
 - **Real-Time Viewfinder Recognition & AR Live Star Map**: CameraX analysis pipeline performs periodic blind solving, and a sensor-driven AR live star map projects the sky onto the viewfinder with zero latency as you move the phone (adjustable FOV, calibratable). Includes an all-sky mode that keeps rendering the lower hemisphere even when the phone points down (with a horizon line and 8-point compass), attitude smoothing with gyro extrapolation plus a complementary filter so the map neither jitters nor drifts, and target-finding navigation with a direction arrow and pulsing ring.
 - **Layer Controls & Object Info Cards**: Independently toggle constellation lines, star names, constellation labels, and Messier overlays; press-and-hold to compare against the original photo; tap any object in the picture for a bilingual info card (type / magnitude / distance / background).
