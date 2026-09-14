@@ -11,12 +11,12 @@ A pure offline Android application for astrophotography plate-solving and night 
 
 ## Download
 
-Latest release: **[v1.5.52](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.52)**
+Latest release: **[v1.5.53](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.53)**
 
 | Package | Size | Notes |
 |---|---|---|
-| [StarCam-v1.5.52-perf-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.52/StarCam-v1.5.52-perf-fix-release.apk) | 15.7 MB | **Recommended** — R8-minified signed build |
-| [StarCam-v1.5.52-perf-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.52/StarCam-v1.5.52-perf-fix-debug.apk) | 24.8 MB | Includes debug logging |
+| [StarCam-v1.5.53-overlay-align-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.53/StarCam-v1.5.53-overlay-align-fix-release.apk) | 15.7 MB | **Recommended** — R8-minified signed build |
+| [StarCam-v1.5.53-overlay-align-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.53/StarCam-v1.5.53-overlay-align-fix-debug.apk) | 24.8 MB | Includes debug logging |
 
 All versions: [Releases](https://github.com/1437nb/starcam-astro/releases).
 
@@ -38,6 +38,16 @@ back gracefully to the JVM catalog matcher).
   accuracy or success rate.
 
   - Optional online fallback via `nova.astrometry.net` API (requires user-provided API key).
+- **Overlay alignment fix** (v1.5.53): fixed constellation lines drifting away from the
+  stars they should connect. The matcher models pixel-to-tangent-plane as a similarity
+  transform, but a photograph is a gnomonic projection **about the image centre** —
+  the model only holds exactly when the tangent-plane origin sits at that centre.
+  It previously used the mean position of the catalog stars, which can be several
+  degrees off on wide fields, imprinting a distortion no similarity transform can
+  absorb (measured: 6.0 px mean error, 23 px at the edges, 0.92 % scale error).
+  The origin is now iterated onto the image centre: error drops to **1.7 px**,
+  inliers rise from 15 to 25, and the lines land on their stars.
+
 - **Real-Time Viewfinder Recognition & AR Live Star Map**: CameraX analysis pipeline performs periodic blind solving, and a sensor-driven AR live star map projects the sky onto the viewfinder with zero latency as you move the phone (adjustable FOV, calibratable). Includes an all-sky mode that keeps rendering the lower hemisphere even when the phone points down (with a horizon line and 8-point compass), attitude smoothing with gyro extrapolation plus a complementary filter so the map neither jitters nor drifts, and target-finding navigation with a direction arrow and pulsing ring.
 - **Layer Controls & Object Info Cards**: Independently toggle constellation lines, star names, constellation labels, and Messier overlays; press-and-hold to compare against the original photo; tap any object in the picture for a bilingual info card (type / magnitude / distance / background).
 - **Rich Astronomical Overlays**:

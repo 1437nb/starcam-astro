@@ -9,12 +9,12 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.52](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.52)** —
+最新版本 **[v1.5.53](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.53)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.52-perf-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.52/StarCam-v1.5.52-perf-fix-release.apk) | 15.7 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.52-perf-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.52/StarCam-v1.5.52-perf-fix-debug.apk) | 24.8 MB | 含调试日志 |
+| [StarCam-v1.5.53-overlay-align-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.53/StarCam-v1.5.53-overlay-align-fix-release.apk) | 15.7 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.53-overlay-align-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.53/StarCam-v1.5.53-overlay-align-fix-debug.apk) | 24.8 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
 
@@ -62,6 +62,13 @@
   本次为打分轮加入单位向量预算表、3 秒时间预算与高置信提前退出：
   失败路径额外开销降到 2.5~3 秒，离线演示的 12 张照片恢复**单张 1~2 秒解出**，
   识别精度与成功率均无变化。
+
+- **叠加对齐修复**（v1.5.53）：修复星座连线相对星点整体漂移、端点落不到星上的问题。
+  匹配模型是「像素 → 切平面」的相似变换，而照片是关于**图像中心**的 gnomonic
+  投影 —— 只有切平面原点取在图像中心时才严格成立；原实现取的是星表星平均位置，
+  宽场下可偏离画面中心数度，整场因此带上相似变换吸收不掉的畸变（实测平均偏差
+  6.0 px、边缘达 23 px、比例尺偏 0.92%）。现在把切平面原点迭代到图像中心，
+  偏差降到 **1.7 px**、内点数 15 → 25，连线与星点严格对齐。
 
 - **专业天文工具**：
   - 原图相册直接读取（绕过系统安全中心降采样，保留真实星点）；
