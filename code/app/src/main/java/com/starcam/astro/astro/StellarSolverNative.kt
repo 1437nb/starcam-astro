@@ -196,6 +196,57 @@ object StellarSolverNative {
         (context.applicationInfo.flags and
             android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
+    /**
+     * §0.64 诊断：把"本地匹配器实际吃到的像素"与它检出的星点落盘（仅 debug 构建）。
+     *
+     * 动机：用户报告"原图识别不了、相册拉高对比度就能识别"，但该图在开发机上
+     * 无论怎么复现都能解出 —— 说明真机喂给求解器的像素/星点与开发机不同。
+     * 失败时留下这份数据，即可在开发机精确重放问题，不必再靠截图推断。
+     *
+     * 输出（应用外部文件目录）：
+     *  - `local_fail_latest.gray`：int32 宽 + int32 高 + float32 灰度（与测试台同格式）
+     *  - `local_fail_latest.txt`：检测到的星点数与坐标/亮度，便于对照
+     */
+    fun dumpLocalFail(
+        context: Context,
+        bitmap: Bitmap,
+        stars: List<DetectedStar>,
+        note: String,
+    ) {
+        if (!isDebugBuild(context)) return
+        try {
+            val dir = context.getExternalFilesDir(null) ?: return
+            val w = bitmap.width
+            val h = bitmap.height
+            val pixels = IntArray(w * h)
+            bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+            val grayFile = java.io.File(dir, "local_fail_latest.gray")
+            java.io.DataOutputStream(java.io.FileOutputStream(grayFile)).use { o ->
+                o.writeInt(w)
+                o.writeInt(h)
+                for (c in pixels) {
+                    val r = (c shr 16) and 0xFF
+                    val g = (c shr 8) and 0xFF
+                    val b = c and 0xFF
+                    o.writeFloat(0.299f * r + 0.587f * g + 0.114f * b)
+                }
+            }
+            java.io.File(dir, "local_fail_latest.txt").writeText(
+                buildString {
+                    append("note=").append(note).append('\n')
+                    append("size=").append(w).append('x').append(h).append('\n')
+                    append("detected=").append(stars.size).append('\n')
+                    for ((i, d) in stars.withIndex()) {
+                        append("star[").append(i).append("] x=").append(d.x)
+                            .append(" y=").append(d.y)
+                            .append(" b=").append(d.brightness).append('\n')
+                    }
+                },
+            )
+        } catch (_: Throwable) {
+        }
+    }
+
     /** 最近一次提星失败的诊断：simplexy 返回码 / 输入灰度均值 / 灰度最大值 */
     @Volatile
     var lastFailRc: Int? = null
@@ -232,10 +283,10 @@ object StellarSolverNative {
                 0.114f * (c and 0xFF)
         }
         val indexes = ensureIndexes(context)
-        // 跨引擎星点复用：部分真机上 .so 内 simplexy（全部入口）提星 0 颗
-        // （2026-08-30 真机五轮实测：同代码独立可执行正常 462 颗、APP 内 0 颗），
-        // 而 JVM 提星（LocalStarMatcher.detectStars，纯 Kotlin box-blur）已被
-        // 证明在同一台手机上工作（自研引擎 5 解即其输入）——用它喂官方引擎。
+        // 跨引擎星点复用：v1.5.55 之前 .so 内 simplexy 恒提星 0 颗（根因是
+        // simplexy_set_defaults 会 memset 整个结构体，而桥在它之前填了
+        // image/nx/ny → 全被清零，已在 §0.65 修复）。保留 JVM 提星作为
+        // 兜底：它对真机灰度差异更鲁棒，且 40 颗亮星足够官方引擎建 quad。
         val extStars = try {
             com.starcam.astro.astro.LocalStarMatcher.detectStars(bitmap, 40)
                 .takeIf { it.size >= 4 }?.let { stars ->
