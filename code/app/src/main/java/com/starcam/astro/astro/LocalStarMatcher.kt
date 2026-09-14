@@ -48,9 +48,87 @@ object LocalStarMatcher {
     @Volatile
     var debugForceVoteThreshold: Float? = null
 
-    /** §0.43 调试：强制索引域星等上限（绕过缓存构建），null=生产默认 4.0 */
+    /**
+     * §0.62 调试：强制**星表域**星等上限——索引 / 第四星验证网格 / 内点统计
+     * 三域同时生效（历史上三者不一致时，涉及暗星的三角形会在验证环节被整体否决，
+     * 只加深索引完全无效——§0.43 深扫实测 4.5→6.5 全部 UNSOLVED 且慢 14~35 倍）。
+     * null = 生产默认（见 [PROD_CATALOG_MAG]）。
+     */
     @Volatile
-    internal var debugForceIndexMag: Float? = null
+    internal var debugForceCatalogMag: Float? = null
+
+    /** 生产星表域星等上限：投票索引 / 验证网格 / 内点统计统一使用 */
+    private const val PROD_CATALOG_MAG = 4.0f
+
+    /** 当前生效的星表域星等上限（调试可覆盖） */
+    private fun catalogMag(): Float = debugForceCatalogMag ?: PROD_CATALOG_MAG
+
+    /**
+     * §0.62 调试：每轮投票送验候选数上限（生产默认 18）。宽场（>60°）实测：
+     * 真候选的比值偏差（gnomonic 投影，median 0.019）大于严格窗 0.012，而数百个
+     * 伪三角形在比值空间里更贴近查询 → 真候选被 take(18) 挤出送验列表，
+     * 真 HIP 得票 4~11 而错误 HIP 得 14~19。提高上限可验证此假设。
+     */
+    @Volatile
+    internal var debugCandidateCap: Int? = null
+
+    private fun candidateCap(): Int = debugCandidateCap ?: 18
+
+    /** §0.62 打分轮：对齐判定容差（像素）与最低对齐星数 */
+    private const val ALIGN_TOL_PX = 8f
+
+    /** §0.62 调试：最低对齐星数（生产默认 6；设为极大可停用打分轮做 A/B） */
+    @Volatile
+    internal var debugMinAligned: Int? = null
+
+    private fun minAligned(): Int = debugMinAligned ?: SCORED_MIN_ALIGNED
+
+    private const val SCORED_MIN_ALIGNED = 6
+
+    /** 打分轮的空结果哨兵 */
+    private val ZERO_SCORE = intArrayOf(0, 0)
+
+    /**
+     * 打分轮胜出条件（§0.62）：
+     *  - 对齐星数 ≥ [SCORED_MIN_ALIGNED]（绝对下限，滤掉零星巧合）；
+     *  - 对齐率 = aligned / inFrame ≥ [SCORED_MIN_ALIGN_RATE]，
+     *    且 inFrame ≥ [SCORED_MIN_IN_FRAME]（样本太少时比率不可信）。
+     *
+     * 标定（n=60 全语料实测）：
+     *   用户南宁照片（真解） rate = 7/26  = 0.27
+     *   pleiades / apod2 / apod5 / apod3 / apod1（伪解） 0.07 ~ 0.11
+     *   m44-1910（伪解）0.05
+     * 真解与伪解之间有 2.5 倍以上的间隔，取 0.20 作为门槛（居中偏保守）。
+     * 伪解的对齐率低是因为尺度坍缩把整片天区压进画面：inFrame 高达 139~235，
+     * 而对齐数只有 13~21；真解的 inFrame 只有 26（画面真实覆盖），对齐 7 颗。
+     */
+    private const val SCORED_MIN_ALIGN_RATE = 0.20f
+    private const val SCORED_MIN_IN_FRAME = 4
+
+    /** §0.62 调试：覆盖对齐率门槛（标定用） */
+    @Volatile
+    internal var debugMinAlignRate: Float? = null
+
+    private fun minAlignRate(): Float = debugMinAlignRate ?: SCORED_MIN_ALIGN_RATE
+
+    /** §0.62 调试：打分轮最佳对齐星数（诊断用，null=未跑） */
+    @Volatile
+    var debugScoredBest: Int? = null
+        private set
+
+    /** §0.62 调试：打分轮最佳候选的 inFrame（用于对齐率标定） */
+    @Volatile
+    var debugScoredInFrame: Int? = null
+        private set
+
+    /** §0.62 调试：打分轮最佳候选的对齐对数与展开后对数（诊断用） */
+    @Volatile
+    var debugScoredWinPairs: Int? = null
+        private set
+
+    @Volatile
+    var debugScoredExpandedPairs: Int? = null
+        private set
 
     /** 双阈值通道（§0.32.3）：主轮内点达到该值即视为强解，不再跑备用轮 */
     private const val DUAL_THRESHOLD_STRONG_INLIERS = 18
@@ -294,6 +372,10 @@ object LocalStarMatcher {
     @Volatile
     private var cachedIndex: StarIndex? = null
 
+    /** [cachedIndex] 构建时使用的星等上限（调试覆盖变化时用于失效重建） */
+    @Volatile
+    private var cachedIndexMag: Float = Float.NaN
+
     /** 调试：返回（索引三角形总数, 首次构建耗时 ms） */
     internal fun debugIndexBuild(): Pair<Int, Long> {
         val t0 = System.nanoTime()
@@ -303,12 +385,99 @@ object LocalStarMatcher {
     }
 
     private fun index(): StarIndex {
-        cachedIndex?.let { return it }
+        val mag = catalogMag()
+        cachedIndex?.let { if (cachedIndexMag == mag) return it }
         synchronized(this) {
-            cachedIndex?.let { return it }
-            cachedIndex = buildIndex()
+            cachedIndex?.let { if (cachedIndexMag == mag) return it }
+            cachedIndex = buildIndex(mag)
+            cachedIndexMag = mag
             return cachedIndex!!
         }
+    }
+
+    /**
+     * §0.62 候选打分：把星表三角形 (t) 与照片三角形 (a,b,c) 做相似拟合，
+     * 统计有多少颗星表星能落在照片检测星上（[ALIGN_TOL_PX] 内）。
+     * 返回 intArrayOf(对齐星数 aligned, 落入画面的星表星数 inFrame)，
+     * 判决用两者之比（对齐率），见 [SCORED_MIN_ALIGN_RATE]。
+     *
+     * 拟合用三点相似变换（照片像素 → 星表切平面），再对全部星表星反投影回
+     * 像素域比对 —— 在像素域比对避免了切平面原点不一致的问题。
+     */
+    private fun scoreHypothesis(
+        work: List<DetectedStar>,
+        a: DetectedStar,
+        b: DetectedStar,
+        c: DetectedStar,
+        t: TriEntry,
+        width: Int,
+        height: Int,
+        pointingHint: PointingHint?,
+    ): IntArray {
+        val eA = hipMap[t.hipA] ?: return ZERO_SCORE
+        val eB = hipMap[t.hipB] ?: return ZERO_SCORE
+        val eC = hipMap[t.hipC] ?: return ZERO_SCORE
+        val ra0 = (eA.ra + eB.ra + eC.ra) / 3.0
+        val dec0 = (eA.dec + eB.dec + eC.dec) / 3.0
+        val fit = fitSimilarity(
+            floatArrayOf(a.x, b.x, c.x),
+            floatArrayOf(a.y, b.y, c.y),
+            floatArrayOf(tanXY(eA.ra, eA.dec, ra0, dec0).first.toFloat(),
+                tanXY(eB.ra, eB.dec, ra0, dec0).first.toFloat(),
+                tanXY(eC.ra, eC.dec, ra0, dec0).first.toFloat()),
+            floatArrayOf(tanXY(eA.ra, eA.dec, ra0, dec0).second.toFloat(),
+                tanXY(eB.ra, eB.dec, ra0, dec0).second.toFloat(),
+                tanXY(eC.ra, eC.dec, ra0, dec0).second.toFloat()),
+        ) ?: return ZERO_SCORE
+        val s = fit[0]
+        val ss = fit[1]
+        val tx = fit[2]
+        val ty = fit[3]
+        val det = s * s + ss * ss
+        if (det < 1e-12) return ZERO_SCORE
+        // 模型：X = s*u - ss*v + tx ; Y = ss*u + s*v + ty  (u,v = 照片像素)
+        // 逆映射回像素后做**一对一**匹配统计：
+        //   [0] = 对齐星数（aligned）
+        //   [1] = 落在画面内的星表星数（inFrame）
+        // 判决用「对齐率 = aligned / inFrame」而非绝对数：伪解常把整片天区压进
+        // 画面（尺度坍缩，inFrame 巨大而 aligned 很少）或只对齐零星几颗，
+        // 真解则在对齐率上接近 1（实测用户照片 inFrame≈全画面 25~30、对齐 20+）。
+        // 循环不变量提到循环外：本函数在打分轮被调用上万次。
+        val invDet = 1.0 / det
+        var hits = 0
+        var inFrame = 0
+        val mag = catalogMag()
+        // 一对一匹配：每颗检测星只能被一颗星表星占用，杜绝"多星压一点"虚增
+        val used = BooleanArray(work.size)
+        for (star in StarCatalogData.stars) {
+            if (star.mag > mag) continue
+            if (pointingHint != null &&
+                haversineDeg(star.ra, star.dec, pointingHint.raDeg, pointingHint.decDeg) >
+                pointingHint.radiusDeg + 45.0
+            ) continue
+            val (X, Y) = tanXY(star.ra, star.dec, ra0, dec0)
+            if (X.isNaN() || Y.isNaN()) continue
+            // 模型：X = s*u - ss*v + tx ; Y = ss*u + s*v + ty  (u,v = 照片像素)
+            val u = ((s * (X - tx) + ss * (Y - ty)) * invDet).toFloat()
+            val v = ((-ss * (X - tx) + s * (Y - ty)) * invDet).toFloat()
+            if (u < -20f || u > width + 20f || v < -20f || v > height + 20f) continue
+            inFrame++
+            var bestI = -1
+            var bestD = ALIGN_TOL_PX
+            for (wi in work.indices) {
+                if (used[wi]) continue
+                val dd = maxOf(abs(u - work[wi].x), abs(v - work[wi].y))
+                if (dd < bestD) {
+                    bestD = dd
+                    bestI = wi
+                }
+            }
+            if (bestI >= 0) {
+                used[bestI] = true
+                hits++
+            }
+        }
+        return intArrayOf(hits, inFrame)
     }
 
     /**
@@ -321,7 +490,7 @@ object LocalStarMatcher {
      * 4.0~4.5 的不可匹配星，同样会稀释亮星近邻列表（仙后座回归实测）——
      * 投票工作集与索引的 mag≤4.0 域必须保持一致。
      */
-    private fun buildIndex(magLimit: Float = 4.0f): StarIndex {
+    private fun buildIndex(magLimit: Float = PROD_CATALOG_MAG): StarIndex {
         val bright = StarCatalogData.stars.filter { it.mag <= magLimit }
         val triMap = HashMap<Int, MutableList<TriEntry>>()
         for (a in bright) {
@@ -464,7 +633,182 @@ object LocalStarMatcher {
                 best = alt
             }
         }
+        // §0.62 打分轮（宽场救场）：逐星投票在 60°+ 宽场会失效 —— 索引里的
+        // 真三角形占比被伪三角形淹没（实测用户照片真 HIP 仅 4~11 票，伪 HIP
+        // 14~19 票）。但"逐候选拟合 + 数对齐星数"分离度极高：真候选对齐
+        // 16.8/25 颗，伪候选仅 1.0/25（实测同一张照片）。故投票全败时按此打分。
+        if (best == null) {
+            best = scoredRound(detected, width, height, pointingHint)
+        }
         return best
+    }
+
+    /**
+     * §0.62 打分轮：对每个（照片三角形 → 星表三角形）候选做相似变换拟合，
+     * 统计有多少颗星表星能落到照片检测星上，取最优。
+     *
+     * 与投票轮的区别：投票是"每颗照片星独立累计票数"，候选爆炸时真信号被
+     * 稀释；打分是"整组一致性"，一组正确对应会让大量星同时对齐，天然抗稀释。
+     * 实测（南宁 74° 照片）：真候选 16.8/25、伪候选 1.0/25，分离 16 倍；
+     * 而投票轮同一组真对应只得 4~11 票、伪对应 14~19 票（被淹没）。
+     */
+    private fun scoredRound(
+        detected: List<DetectedStar>,
+        width: Int,
+        height: Int,
+        pointingHint: PointingHint?,
+    ): LocalMatchResult? {
+        val idx = index()
+        val (t1, _) = voteThresholds(detected.map { it.brightness })
+        val workIdx = detected.indices.filter { detected[it].brightness >= t1 * 0.5f }.take(45)
+        val work = workIdx.map { detected[it] }
+        if (work.size < 5) return null
+        val maxSide = max(width, height) * 0.45f
+
+        // 星表星在当前帧的像素坐标只依赖候选变换，故打分统一在"照片像素"域做：
+        // 用候选变换把星表星投影到像素，再数检测星命中数。
+        var bestScore = 0
+        var bestInFrame = 0
+        var bestPairs: List<Pair<Int, StarEntry>>? = null
+        val seen = HashSet<Long>()
+
+        for (pi in work.indices) {
+            val a = work[pi]
+            val nbrs = work.mapIndexed { j, s -> j to dist(a, s) }
+                .filter { it.second in 1.5f..maxSide }
+                .sortedBy { it.second }
+                .take(14)
+            if (nbrs.size < 2) continue
+            for (i in nbrs.indices) {
+                for (j in i + 1 until nbrs.size) {
+                    val bi = nbrs[i].first
+                    val ci = nbrs[j].first
+                    val b = work[bi]
+                    val c = work[ci]
+                    val sides = floatArrayOf(nbrs[i].second, nbrs[j].second, dist(b, c)).sortedDescending()
+                    if (sides[0] <= 0f) continue
+                    val r2 = sides[1] / sides[0]
+                    val r3 = sides[2] / sides[0]
+                    if (r2 < 0.12f) continue
+                    val merged = HashMap<Long, TriEntry>()
+                    for (key in quantizeKeys(r2, r3, window = 1)) {
+                        idx.triMap[key]?.let { list ->
+                            for (t in list) {
+                                if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) merged[triKey(t)] = t
+                            }
+                        }
+                    }
+                    for (key in quantizeKeys(r2, r3, window = 13)) {
+                        idx.triMap[key]?.let { list ->
+                            for (t in list) {
+                                if (abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f) merged[triKey(t)] = t
+                            }
+                        }
+                    }
+                    if (merged.isEmpty()) continue
+                    val candidates = merged.values
+                        .sortedBy { abs(it.r2 - r2) + abs(it.r3 - r3) }
+                        .take(candidateCap())
+                    for (t in candidates) {
+                        val sc = scoreHypothesis(work, a, b, c, t, width, height, pointingHint)
+                        val aligned = sc[0]
+                        val inFrame = sc[1]
+                        val key = t.hipA.toLong() shl 40 or (t.hipB.toLong() shl 20) or t.hipC.toLong()
+                        if (aligned > bestScore && !seen.contains(key)) {
+                            seen.add(key)
+                            val eA = hipMap[t.hipA]
+                            val eB = hipMap[t.hipB]
+                            val eC = hipMap[t.hipC]
+                            if (eA != null && eB != null && eC != null) {
+                                bestScore = aligned
+                                bestInFrame = inFrame
+                                bestPairs = listOf(
+                                    workIdx[pi] to eA,
+                                    workIdx[bi] to eB,
+                                    workIdx[ci] to eC,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        debugScoredBest = bestScore
+        debugScoredInFrame = bestInFrame
+        debugScoredWinPairs = bestPairs?.size
+        if (bestPairs == null) {
+            return null
+        }
+        if (bestScore < minAligned()) {
+            return null
+        }
+        // 对齐率门槛：伪解（尺度坍缩）会把整片天区压进画面，绝对对齐数不低但
+        // 对齐率极低；真解对齐率明显更高。样本太少时比率不可信，故要求 inFrame 下限。
+        if (bestInFrame < SCORED_MIN_IN_FRAME) {
+            return null
+        }
+        if (bestScore.toFloat() / bestInFrame < minAlignRate()) {
+            return null
+        }
+        // bestCandidate 需要 ≥4 对：用获胜候选的拟合把全部对齐星补进对应集
+        val expanded = expandHypothesisPairs(bestPairs, detected, width, height)
+        debugScoredExpandedPairs = expanded?.size
+        return bestCandidate(detected, width, height, expanded ?: bestPairs, pointingHint)
+    }
+
+    /**
+     * §0.62 把 3 对初始对应扩展为全部对齐对：先用 3 点拟合，再把所有落在检测星
+     * 上的星表星加入对应集。对应集越密，后续 RANSAC/内点拟合越稳。
+     */
+    private fun expandHypothesisPairs(
+        seed: List<Pair<Int, StarEntry>>,
+        detected: List<DetectedStar>,
+        width: Int,
+        height: Int,
+    ): List<Pair<Int, StarEntry>>? {
+        if (seed.size < 3) {
+            return null
+        }
+        val fp = fitPairs(detected, seed, width, height)
+        if (fp == null) {
+            return null
+        }
+        val det = fp.a * fp.a + fp.b * fp.b
+        if (det < 1e-12) {
+            return null
+        }
+        // fitPairs 的模型作用于"中心化像素"（u = x-cx, v = y-cy），逆映射必须补回
+        val cx = width / 2.0
+        val cy = height / 2.0
+        val out = ArrayList<Pair<Int, StarEntry>>()
+        val used = HashSet<Int>()
+        val mag = catalogMag()
+        for (star in StarCatalogData.stars) {
+            if (star.mag > mag) continue
+            val (X, Y) = tanXY(star.ra, star.dec, fp.ra0, fp.dec0)
+            if (X.isNaN() || Y.isNaN()) continue
+            val u = (fp.a * (X - fp.tx) + fp.b * (Y - fp.ty)) / det + cx
+            val v = (-fp.b * (X - fp.tx) + fp.a * (Y - fp.ty)) / det + cy
+            if (u < -20.0 || u > width + 20.0 || v < -20.0 || v > height + 20.0) continue
+            var bestI = -1
+            var bestD = ALIGN_TOL_PX
+            for (pi in detected.indices) {
+                if (used.contains(pi)) continue
+                val dd = maxOf(
+                    abs(u - detected[pi].x).toDouble(),
+                    abs(v - detected[pi].y).toDouble(),
+                ).toFloat()
+                if (dd < bestD) {
+                    bestD = dd
+                    bestI = pi
+                }
+            }
+            if (bestI >= 0) {
+                used.add(bestI)
+                out.add(bestI to star)
+            }
+        }
+        return if (out.size >= 3) out else null
     }
 
     /**
@@ -579,7 +923,7 @@ object LocalStarMatcher {
         multi: Boolean = false,
         pointingHint: PointingHint? = null,
     ): List<Pair<Int, StarEntry>> {
-        val idx = debugForceIndexMag?.let { buildIndex(it) } ?: index()
+        val idx = index()
 
         // 1) 照片局部三角形：只用亮度足以进入星表索引的亮星（阈值由调用方
         //    依据双通道方案传入，见 voteThresholds），取前 45 颗参与投票。
@@ -732,7 +1076,7 @@ object LocalStarMatcher {
                     }
                     val candidates = merged.values
                         .sortedBy { abs(it.r2 - r2) + abs(it.r3 - r3) }
-                        .take(18)
+                        .take(candidateCap())
 
                     // 3) 顶点对应投票：先做几何验证（第 4 星校验），只投验证通过的候选
                     val verified = candidates.filter { verifyCandidate(a, b, c, it, nbrs, work) }
@@ -761,23 +1105,29 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
     @Volatile
     private var cachedGrid: HashMap<Int, MutableList<StarEntry>>? = null
 
+    /** [cachedGrid] 构建时使用的星等上限（调试覆盖变化时用于失效重建） */
+    @Volatile
+    private var cachedGridMag: Float = Float.NaN
+
     /** 星表赤道网格（5°×5° 赤经/赤纬格），用于验证时的快速最近星查询 */
     private fun catGrid(): HashMap<Int, MutableList<StarEntry>> {
-        cachedGrid?.let { return it }
+        val mag = catalogMag()
+        cachedGrid?.let { if (cachedGridMag == mag) return it }
         synchronized(this) {
-            cachedGrid?.let { return it }
+            cachedGrid?.let { if (cachedGridMag == mag) return it }
             val grid = HashMap<Int, MutableList<StarEntry>>()
-            // 验证网格只收录照片可检测的亮星（mag<=4.0，与投票索引同域）：
+            // 验证网格只收录照片可检测的亮星（与投票索引同域，见 catalogMag）：
             // §0.42 扩容新增的暗星照片里检测不到，放进来会让假候选的"第 4 星
             // 外推撞星"通过率上升 → 假阳性回归（apod5/pleiades 实测），
             // 而真候选外推应命中的是可检测亮星，不受影响。
             for (star in StarCatalogData.stars) {
-                if (star.mag > 4.0f) continue
+                if (star.mag > mag) continue
                 val col = (((star.ra % 360.0) + 360.0) % 360.0 / 5.0).toInt()
                 val row = ((star.dec + 90.0) / 5.0).toInt().coerceIn(0, 35)
                 grid.getOrPut(col * 1000 + row) { ArrayList() }.add(star)
             }
             cachedGrid = grid
+            cachedGridMag = mag
             return grid
         }
     }
@@ -968,7 +1318,7 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
                     if (!strictHit) strictEmpty++
                     val candidates = merged.values
                         .sortedBy { abs(it.r2 - r2) + abs(it.r3 - r3) }
-                        .take(18)
+                        .take(candidateCap())
                     for (t in candidates) {
                         if (verifyCandidate(a, b, c, t, nbrs, work)) {
                             vote(votes, pi, t.hipA)
@@ -1320,11 +1670,12 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
 
     private fun countInliers(wcs: WcsTransform, detected: List<DetectedStar>, width: Int, height: Int): Int {
         var count = 0
-        // 只统计照片可检测的亮星（mag<=4.5，原 919 星域）——§0.42 扩容的暗星
-        // 在 2200px 照片里检测不到，遍历它们既虚增内点（假解更易过门槛）又拖慢
-        // 10 倍（实测单张 3~5s → 20~50s）。
+        // 只统计照片可检测的亮星（与投票索引/验证网格同域，见 catalogMag）——
+        // §0.42 扩容的暗星在 2200px 照片里检测不到，遍历它们既虚增内点
+        // （假解更易过门槛）又拖慢 10 倍（实测单张 3~5s → 20~50s）。
+        val mag = catalogMag()
         for (star in StarCatalogData.stars) {
-            if (star.mag > 4.5f) continue
+            if (star.mag > mag) continue
             val p = wcs.skyToScreen(star.ra, star.dec, width, height)
             if (p[0].isNaN() || p[1].isNaN()) continue
             for (d in detected) {

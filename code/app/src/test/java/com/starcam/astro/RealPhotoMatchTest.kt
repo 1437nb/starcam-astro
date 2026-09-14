@@ -90,6 +90,39 @@ class RealPhotoMatchTest {
     }
 
     /**
+     * 用户照片（小米 REDMI Turbo 5 Max 2026-09-12 于南宁拍摄，74° 秋季四边形）
+     * ——§0.62 宽场打分轮的锚点样本。
+     *
+     * 真值来自 astrometry.net nova 解算（独立于本项目引擎）：
+     * RA 0.676° / Dec 23.204° / 65.344″/px @4096px → 121.6″/px @2200px，
+     * logodds 1806、nmatch 424、parity +1、index 4116。
+     *
+     * 修复前：逐星投票在 60°+ 宽场失效（真 HIP 仅 4~11 票，伪 HIP 14~19 票
+     * 胜出）→ UNSOLVED。修复后：候选三角形逐个拟合打分（真候选对齐 16.8/25
+     * 颗，伪候选 1.0/25）→ SOLVED。
+     */
+    @Test
+    fun userPhotoNanningWideFieldGroundTruth() {
+        val res = solve(photo("user-nanning-20260912.gray"))
+        println("PHOTO user-nanning-20260912.gray ${describe(res)}")
+        assertNotNull("南宁宽场照片必须解出（当前 UNSOLVED —— 宽场打分轮回归）", res)
+        val s = res!!.solve
+        // 真值窗口按 2°（nova 解与自研解的差异实测 <0.02°）
+        assertTrue(
+            "南宁照片赤经偏出真值窗口：${s.raDeg}（期望 0.68±2）",
+            abs(s.raDeg - 0.68) < 2.0,
+        )
+        assertTrue(
+            "南宁照片赤纬偏出真值窗口：${s.decDeg}（期望 23.20±2）",
+            abs(s.decDeg - 23.20) < 2.0,
+        )
+        assertTrue(
+            "南宁照片视场偏出真值窗口：${s.fieldWidthDeg}°（期望 68°~82°）",
+            s.fieldWidthDeg in 68.0..82.0,
+        )
+    }
+
+    /**
      * 假阳性对照样本（修复前形态见验证报告 §0.4）：
      *  - apod3（船帆座 SNR，8.4°×6.3° 窄场）：曾解出 FOV≈627°（尺度坍缩）；
      *  - apod5（Sedna 发现图，~45°）：曾以 5 内点错误锁定不符天区；
