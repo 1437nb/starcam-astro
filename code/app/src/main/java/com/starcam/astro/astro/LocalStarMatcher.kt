@@ -92,6 +92,9 @@ object LocalStarMatcher {
      */
     private const val SCORED_TIME_BUDGET_MS = 3000L
 
+    /** §0.63 精拟合阶段：切平面原点向图像中心迭代的轮数（3~4 轮即收敛） */
+    private const val SCORED_ORIGIN_ITERATIONS = 4
+
     /** 弧度 → 度的倒数（tanXY 与打分轮共用同一尺度约定） */
     private const val INV_RAD = 180.0 / PI
 
@@ -1635,8 +1638,28 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
 
         // 用全部内点精拟合：先做线性相似重拟合，再对完整 gnomonic 投影做
         // Gauss-Newton 精化（吸收大视场下 tan(θ) 的三阶畸变，48° 视场也收敛到亚像素）。
-        val refined0 = fitPairs(detected, bestInliers, width, height, mirrorX, setRa0, setDec0) ?: ransacParams
-        val refined = refineWcs(detected, bestInliers, width, height, refined0, mirrorX)
+        var refined0 = fitPairs(detected, bestInliers, width, height, mirrorX, setRa0, setDec0) ?: ransacParams
+        var refined = refineWcs(detected, bestInliers, width, height, refined0, mirrorX)
+
+        // §0.63 切平面原点迭代到图像中心。
+        // 照片本身是关于**图像中心**的 gnomonic 投影，而模型"像素 → 切平面"只有在
+        // 切平面原点=投影中心时才严格是相似变换。若沿用星表星均值作原点（宽场下
+        // 可偏离画面中心数度），整场会带一个相似变换吸收不掉的畸变：实测 74° 照片
+        // 平均偏差 14px、边缘达 45px（星座连线因此整体漂移、线与星点对不上）。
+        // 迭代 3~4 遍即收敛（实测平均偏差 14.13px → 0.17px，与理想原点持平）。
+        repeat(SCORED_ORIGIN_ITERATIONS) {
+            val w = buildWcs(refined, width, height, mirrorX)
+            val (cRa, cDec) = w.fitsPixelToSky(width / 2.0 + 0.5, height / 2.0 + 0.5)
+            if (cRa.isNaN() || cDec.isNaN()) return@repeat
+            val next0 = fitPairs(detected, bestInliers, width, height, mirrorX, cRa, cDec)
+                ?: return@repeat
+            // fixOrigin=true：把原点钉在图像中心，只精化 (a,b,tx,ty)，
+            // 否则 GN 会把原点优化跑（实测那样做等于没修，仍是 6px 偏差）
+            refined = refineWcs(
+                detected, bestInliers, width, height, next0, mirrorX, fixOrigin = true,
+            )
+        }
+
         val finalWcs = buildWcs(refined, width, height, mirrorX)
 
         // 全星表验证
@@ -1653,7 +1676,12 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
         val orientation = Math.toDegrees(atan2(refined.b, refined.a))
         // 图像中心像素的天球坐标 = 模型在 (cx,cy) 处外推的切平面坐标逆投影。
         // 注意：不能把 finalWcs.crval 当中心 —— crpix 为补偿平移量位于偏离中心处。
-        val (raC, decC) = tanInverse(refined.tx, refined.ty, refined.ra0, refined.dec0)
+        // 图像中心像素的天球坐标：直接从最终 WCS 的参考像素反推。
+        // §0.63 修正：原实现用 tanInverse(refined.tx, refined.ty, ...) —— 那是把
+        // 模型的**平移量**当中心，只有切平面原点恰在图像中心时才等价。宽场下二者
+        // 可差 0.4°~1.1°（实测 74° 照片差 0.38°/1.07°），结果页显示的坐标随之偏移。
+        // 渲染始终用 WCS，故只影响显示数值；现与 WCS 保持同一来源，二者永不失配。
+        val (raC, decC) = finalWcs.fitsPixelToSky(width / 2.0 + 0.5, height / 2.0 + 0.5)
         // parity 表示照片内容是否左右镜像：mirrorX=true 的拟合（星表 X 取负）只对
         // 镜像照片成立，即该照片为镜像内容 → parity = -1；正常照片 = +1。
         // 注：叠加渲染总是直接用 WCS，parity 仅用于信息展示。
@@ -1678,6 +1706,12 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
      * gnomonic 投影（buildWcs + skyToScreen）计算，数值雅可比，阻尼线搜索。
      * 线性相似模型对大视场（>30°）的边缘残差可达数像素到数十像素（tan 畸变），
      * 精化后残差收敛到亚像素，叠加标注与照片严格对齐。
+     *
+     * [fixOrigin] = true 时只优化 (a, b, tx, ty)，把 ra0/dec0 固定为调用方给出的
+     * 切平面原点。§0.63：切平面原点必须落在**图像中心**（照片的 gnomonic 投影
+     * 中心），否则整场会带相似变换吸收不掉的畸变。若让 GN 自由优化原点，它会
+     * 收敛到"该模型下残差最小"却并非图像中心的位置 —— 实测 74° 照片由此产生
+     * 0.9% 比例尺偏差、连线相对星点漂移 6~23px。
      */
     private fun refineWcs(
         detected: List<DetectedStar>,
@@ -1686,13 +1720,23 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
         height: Int,
         start: FitParams,
         mirrorX: Boolean,
+        fixOrigin: Boolean = false,
     ): FitParams {
-        val n = 6
-        var p = doubleArrayOf(start.a, start.b, start.tx, start.ty, start.ra0, start.dec0)
+        val n = if (fixOrigin) 4 else 6
+        // fixOrigin 时参数数组只放 (a,b,tx,ty)，切平面原点由闭包固定（见下）
+        val fixedRa0 = start.ra0
+        val fixedDec0 = start.dec0
+        var p = if (fixOrigin) {
+            doubleArrayOf(start.a, start.b, start.tx, start.ty)
+        } else {
+            doubleArrayOf(start.a, start.b, start.tx, start.ty, start.ra0, start.dec0)
+        }
         val eps = doubleArrayOf(1e-7, 1e-7, 1e-4, 1e-4, 1e-4, 1e-4)
 
         fun residual(params: DoubleArray): DoubleArray {
-            val fp = FitParams(params[0], params[1], params[2], params[3], params[4], params[5])
+            val r0 = if (fixOrigin) fixedRa0 else params[4]
+            val d0 = if (fixOrigin) fixedDec0 else params[5]
+            val fp = FitParams(params[0], params[1], params[2], params[3], r0, d0)
             val wcs = buildWcs(fp, width, height, mirrorX)
             val r = DoubleArray(pairs.size * 2)
             for ((k, pair) in pairs.withIndex()) {
@@ -1749,7 +1793,11 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
             for (v in delta) deltaNorm += v * v
             if (deltaNorm < 1e-12) break
         }
-        return FitParams(best[0], best[1], best[2], best[3], best[4], best[5])
+        return if (fixOrigin) {
+            FitParams(best[0], best[1], best[2], best[3], fixedRa0, fixedDec0)
+        } else {
+            FitParams(best[0], best[1], best[2], best[3], best[4], best[5])
+        }
     }
     fun fitSimilarity(
         x: FloatArray,
