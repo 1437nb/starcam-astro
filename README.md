@@ -9,12 +9,12 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.53](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.53)** —
+最新版本 **[v1.5.55](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.55)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.53-overlay-align-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.53/StarCam-v1.5.53-overlay-align-fix-release.apk) | 15.7 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.53-overlay-align-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.53/StarCam-v1.5.53-overlay-align-fix-debug.apk) | 24.8 MB | 含调试日志 |
+| [StarCam-v1.5.55-native-extract-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.55/StarCam-v1.5.55-native-extract-fix-release.apk) | 15.7 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.55-native-extract-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.55/StarCam-v1.5.55-native-extract-fix-debug.apk) | 24.8 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
 
@@ -69,6 +69,19 @@
   宽场下可偏离画面中心数度，整场因此带上相似变换吸收不掉的畸变（实测平均偏差
   6.0 px、边缘达 23 px、比例尺偏 0.92%）。现在把切平面原点迭代到图像中心，
   偏差降到 **1.7 px**、内点数 15 → 25，连线与星点严格对齐。
+
+- **原生提星修复**（v1.5.55，**重要**）：修复官方引擎在 **所有** 真机上提星恒为 0 的
+  问题——三处 C 层缺陷叠加，此前被误判为「部分 ARM64 机型的数据竞争」，实测在 x86_64
+  同样 100% 复现：① `simplexy_set_defaults()` 内部是 `memset` 整个结构体，而桥**先**填
+  `image/nx/ny`、**后**调它，三个字段被清零；② `simplexy_free_contents()` 会
+  `free(s->image)`，而该指针来自 JNI `GetFloatArrayElements`（ART 堆，只能由
+  `Release...Elements` 归还）——①把指针清成 NULL 恰好掩盖了②；③ 提星成功判据写成
+  `if (rc != 0 || npeaks <= 0)`，而 `rc=0`（`dmask` 未标记任何超阈值像素）才是失败，
+  判据恒真导致 SEP 路径永远返回失败、Kotlin 侧「SEP 优先」的三级降级从未生效。
+  同版还修了 `maxStars` 按扫描序截断（改为按通量降序取前 k）、`thresholdBgMultiple`
+  被忽略、JNI 数组长度校验泄漏、超时三态判定与 `pthread_create` 失败被误报为超时、
+  join 无期限等待（改为 5s 宽限 + detach 保护）。
+  回归：全量单测 150/150，12 张演示照 12/12 TRUE-SOLVE，用户南宁照 25 内点（真值窗口内）。
 
 - **专业天文工具**：
   - 原图相册直接读取（绕过系统安全中心降采样，保留真实星点）；

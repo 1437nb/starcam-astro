@@ -46,6 +46,12 @@ typedef struct {
 } solve_job_t;
 
 static volatile int solve_done;
+/* 置位表示超时后线程仍未退出、已被 detach：调用方不得再 solver_free。
+ * （solve 调用从 JNI 串行进入，单标志足够。） */
+static int solve_thread_leaked;
+
+/* 静态存放：线程若被 detach，栈上 job 会随 run_with_timeout 返回而失效。 */
+static solve_job_t g_solve_job;
 
 static void* solve_thread_fn(void* arg) {
     solve_job_t* job = (solve_job_t*)arg;
@@ -60,39 +66,72 @@ static double mono_seconds(void) {
     return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
-/* 在独立线程运行 solver_run；超时置 quit_now 并等待线程退出。
- * 返回 0 表示正常结束（可能未解出），1 表示超时中止。 */
+/* 在独立线程运行 solver_run；超时置 quit_now 后 join 等它自己退出。
+ *
+ * 返回 RUN_OK(0) / RUN_TIMEOUT(1) / RUN_SPAWN_FAILED(-1)。
+ * 旧版把 -1 也当超时（`else if (timedout)` 里 -1 为真），且 join 无期限等待：
+ * 若 quit_now 不被 solver 采纳，超时保护形同虚设。现在 join 有上限，超上限
+ * 则分离线程不再等（线程仍在跑，但不再阻塞调用方返回）。 */
+#define RUN_OK 0
+#define RUN_TIMEOUT 1
+#define RUN_SPAWN_FAILED (-1)
+#define QUIT_JOIN_GRACE_SEC 5.0
+
 static int run_with_timeout(solver_t* sp, double seconds) {
     pthread_t th;
-    solve_job_t job;
-    job.sp = sp;
+    g_solve_job.sp = sp;
     solve_done = 0;
-    if (pthread_create(&th, NULL, solve_thread_fn, &job) != 0)
-        return -1;
+    solve_thread_leaked = 0;
+    if (pthread_create(&th, NULL, solve_thread_fn, &g_solve_job) != 0)
+        return RUN_SPAWN_FAILED;
     double deadline = mono_seconds() + seconds;
+    int timedout = 0;
     while (!solve_done) {
-        if (mono_seconds() >= deadline)
+        if (mono_seconds() >= deadline) {
+            timedout = 1;
             break;
+        }
         usleep(20000); /* 20ms 轮询 */
     }
-    if (!solve_done) {
-        sp->quit_now = TRUE;
-        pthread_join(th, NULL);
-        return 1;
+    if (timedout) {
+        sp->quit_now = TRUE; /* solver 在 quad 循环里轮询此标志 */
+        double grace = mono_seconds() + QUIT_JOIN_GRACE_SEC;
+        while (!solve_done && mono_seconds() < grace)
+            usleep(20000);
+        if (solve_done) {
+            pthread_join(th, NULL);
+        } else {
+            /* quit_now 未被采纳（solver 卡在不可中断段）：不能 join（会永久阻塞），
+             * 也不能让调用方 solver_free —— 线程还在读那块内存。 */
+            pthread_detach(th);
+            solve_thread_leaked = 1;
+        }
+        return RUN_TIMEOUT;
     }
     pthread_join(th, NULL);
-    return 0;
+    return RUN_OK;
 }
 
 /* ---------------- 星点提取（simplexy） ---------------- */
 
-/* simplexy 线程数控制。
- * 2026-08-30 真机实测（v1.3.5，12 张标准集）：arm64 手机上多线程并行时
- * simplexy_run 返回错误、提星 0 颗（官方引擎 7/7 秒败全灭）；服务器 x86
- * 未复现。疑 dsmooth 并行在 arm64 的数据竞争——正确性优先禁用并行，
- * 待专项排查后再启用。 */
-static void simplexy_enable_parallel(void) {
-    simplexy_set_nthreads(1);
+/* 注：曾用自打补丁的 simplexy_set_nthreads(1) 禁用 dsmooth 并行——真机 arm64
+ * 多线程提星 0 颗疑为数据竞争。现源码树改用上游原版（无该接口），dsmooth
+ * 本就串行，无需再调；若将来重新引入并行补丁，此处必须显式禁用。 */
+
+/* 释放 simplexy 的输出，但**不动** s->image。
+ * simplexy_free_contents() 会 free(s->image)/free(s->image_u8)，而我们把
+ * JNI 的 GetFloatArrayElements 指针（ART 堆，只能由 Release...Elements 归还）
+ * 直接挂在 s.image 上——调它等于对 ART 堆做非法 free，真机上表现为
+ * 提星后崩溃/结果异常。这里只回收 simplexy 自己 malloc 的那些数组。 */
+static void release_simplexy(simplexy_t* s) {
+    free(s->x);            s->x = NULL;
+    free(s->y);            s->y = NULL;
+    free(s->flux);         s->flux = NULL;
+    free(s->background);   s->background = NULL;
+    free(s->fluxL);        s->fluxL = NULL;
+    free(s->backgroundL);  s->backgroundL = NULL;
+    s->npeaks = 0;
+    /* image/image_u8 的所有权在调用方，此处刻意不置空也不释放 */
 }
 
 /* 返回 starxy_t*（带通量）；失败返回 NULL 并把诊断写入 err_rc/err_peaks。
@@ -101,13 +140,13 @@ static void simplexy_enable_parallel(void) {
 static starxy_t* detect_stars(const float* gray, int w, int h, double plim_override,
                               int* err_rc, int* err_peaks,
                               double* err_gmean, double* err_gmax) {
-    simplexy_enable_parallel();
     simplexy_t s;
-    memset(&s, 0, sizeof(s));
+    /* 顺序要紧：simplexy_set_defaults() 内部是 memset(整个结构体)，
+     * 必须在它之后填 image/nx/ny，否则会被清零（真机"提星 0 颗"根因）。 */
+    simplexy_set_defaults(&s);
     s.image = (float*)gray;
     s.nx = w;
     s.ny = h;
-    simplexy_set_defaults(&s);
     if (plim_override > 0.0)
         s.plim = (float)plim_override;
     /* 输入灰度统计（诊断：全 0/极低 → 输入管线问题；正常 → simplexy 内部问题） */
@@ -121,14 +160,16 @@ static starxy_t* detect_stars(const float* gray, int w, int h, double plim_overr
     int rc = simplexy_run(&s);
     *err_rc = rc;
     *err_peaks = (int)s.npeaks;
-    /* 注意：simplexy_run 恒返回 1（源码硬编码，非错误码，2026-08-30 真机+源码
-     * 双重验证：x86 复现提出 669 颗星时 rc 仍为 1）。成败只看 npeaks。 */
-    if (s.npeaks < 4)
+    /* rc=0 只表示 dmask 没找到任何超阈值像素（即真的一颗都没有），
+     * 所以 rc 可作辅助诊断；但成败判定以 npeaks 为准。 */
+    if (s.npeaks < 4) {
+        release_simplexy(&s);
         return NULL;
+    }
 
     starxy_t* field = starxy_new(s.npeaks, TRUE, FALSE);
     if (!field) {
-        simplexy_free_contents(&s);
+        release_simplexy(&s);
         return NULL;
     }
     for (int i = 0; i < s.npeaks; i++) {
@@ -136,7 +177,7 @@ static starxy_t* detect_stars(const float* gray, int w, int h, double plim_overr
         starxy_set_y(field, i, s.y[i]);
         starxy_set_flux(field, i, s.flux[i]);
     }
-    simplexy_free_contents(&s);
+    release_simplexy(&s);
     return field;
 }
 
@@ -283,14 +324,22 @@ static void run_solver(
             mo->nmatch, field->N, mo->indexid, mo->logodds,
             wcs->cd[0][0], wcs->cd[0][1], wcs->cd[1][0], wcs->cd[1][1],
             w * pixscale / 60.0, h * pixscale / 60.0);
-    } else if (timedout) {
+    } else if (timedout == RUN_TIMEOUT) {
         snprintf(out, outsz,
             "{\"ok\":false,\"error\":\"timeout\",\"nstars\":%d}", field->N);
+    } else if (timedout == RUN_SPAWN_FAILED) {
+        snprintf(out, outsz,
+            "{\"ok\":false,\"error\":\"spawn-failed\",\"nstars\":%d}", field->N);
     } else {
         snprintf(out, outsz,
             "{\"ok\":false,\"error\":\"no-solution\",\"nstars\":%d}", field->N);
     }
 
+    /* 线程已 detach 说明 solver_run 仍在跑（quit_now 未被采纳），此时
+     * solver_free 会释放它正在读的索引/星表内存 → 段错误。宁可泄漏
+     * 一次 solver（约百 KB + 共享索引），也不能崩在用户手机上。 */
+    if (solve_thread_leaked)
+        return;
     solver_free(sp);
 }
 
@@ -390,42 +439,90 @@ Java_com_starcam_astro_astro_StellarSolverNative_solvePriors(
     return (*env)->NewStringUTF(env, out);
 }
 
+/* 按 flux 降序取前 k 个（k < n 时的部分选择；simplexy 输出是扫描序，
+ * 直接截断会留下图像上半部分的星而丢掉亮星）。 */
+static void top_k_by_flux(const starxy_t* f, int k, int* out_idx) {
+    int n = f->N;
+    char* used = (char*)calloc(n, 1);
+    for (int i = 0; i < k; i++) {
+        int best = -1;
+        double bestf = -1e300;
+        for (int j = 0; j < n; j++) {
+            if (used[j]) continue;
+            double fj = starxy_get_flux(f, j);
+            if (fj > bestf) { bestf = fj; best = j; }
+        }
+        used[best] = 1;
+        out_idx[i] = best;
+    }
+    free(used);
+}
+
 /* simplexy 提星（兼容历史 extractStars：返回 x/y/flux JSON） */
 static jstring extract_stars_impl(JNIEnv* env, jfloatArray gray, jint w, jint h,
                                   jdouble thresholdBgMultiple, jint maxStars) {
     int n = 0;
     float* g = jfloat_array_to_c(env, gray, &n);
-    if (!g || n != w * h)
+    if (!g)
         return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"bad-input\"}");
+    if (n != (int)(w * h)) {
+        (*env)->ReleaseFloatArrayElements(env, gray, g, JNI_ABORT);
+        return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"bad-input\"}");
+    }
 
     simplexy_t s;
-    memset(&s, 0, sizeof(s));
-    simplexy_enable_parallel();
+    /* 顺序要紧：set_defaults 是 memset，必须先调再填 image/nx/ny。 */
+    simplexy_set_defaults(&s);
     s.image = g;
     s.nx = w;
     s.ny = h;
-    simplexy_set_defaults(&s);
-    int rc = simplexy_run(&s);
+    /* 阈值：调用方给的是「背景 sigma 倍数」，直接映射 plim（默认 8.0） */
+    if (thresholdBgMultiple > 0.0)
+        s.plim = (float)thresholdBgMultiple;
+    /* rc=0 表示 dmask 未标记任何超阈值像素（真无星）；成败以 npeaks 为准。
+     * 旧代码用 `rc != 0 || npeaks <= 0` 判失败，语义正好相反。 */
+    simplexy_run(&s);
 
     char* out = NULL;
-    if (rc != 0 || s.npeaks <= 0) {
+    if (s.npeaks <= 0) {
         out = strdup("{\"ok\":false,\"error\":\"extraction-failed\"}");
     } else {
-        int k = s.npeaks > maxStars ? maxStars : s.npeaks;
-        size_t sz = 128 + k * 64;
-        out = (char*)malloc(sz);
-        int pos = snprintf(out, sz, "{\"ok\":true,\"n\":%d,\"x\":[", k);
-        for (int i = 0; i < k; i++)
-            pos += snprintf(out + pos, sz - pos, "%s%.3f", i ? "," : "", s.x[i]);
-        pos += snprintf(out + pos, sz - pos, "],\"y\":[");
-        for (int i = 0; i < k; i++)
-            pos += snprintf(out + pos, sz - pos, "%s%.3f", i ? "," : "", s.y[i]);
-        pos += snprintf(out + pos, sz - pos, "],\"flux\":[");
-        for (int i = 0; i < k; i++)
-            pos += snprintf(out + pos, sz - pos, "%s%.4f", i ? "," : "", s.flux[i]);
-        snprintf(out + pos, sz - pos, "]}");
+        starxy_t* f = starxy_new(s.npeaks, TRUE, FALSE);
+        if (!f) {
+            out = strdup("{\"ok\":false,\"error\":\"oom\"}");
+        } else {
+            for (int i = 0; i < s.npeaks; i++) {
+                starxy_set_x(f, i, s.x[i]);
+                starxy_set_y(f, i, s.y[i]);
+                starxy_set_flux(f, i, s.flux[i]);
+            }
+            int k = s.npeaks > maxStars ? maxStars : s.npeaks;
+            int* idx = (int*)malloc(sizeof(int) * (k > 0 ? k : 1));
+            if (k == s.npeaks) {
+                for (int i = 0; i < k; i++) idx[i] = i;
+            } else {
+                top_k_by_flux(f, k, idx);
+            }
+            size_t sz = 160 + (size_t)k * 64;
+            out = (char*)malloc(sz);
+            int pos = snprintf(out, sz, "{\"ok\":true,\"n\":%d,\"x\":[", k);
+            for (int i = 0; i < k; i++)
+                pos += snprintf(out + pos, sz - pos, "%s%.3f", i ? "," : "",
+                                starxy_get_x(f, idx[i]));
+            pos += snprintf(out + pos, sz - pos, "],\"y\":[");
+            for (int i = 0; i < k; i++)
+                pos += snprintf(out + pos, sz - pos, "%s%.3f", i ? "," : "",
+                                starxy_get_y(f, idx[i]));
+            pos += snprintf(out + pos, sz - pos, "],\"flux\":[");
+            for (int i = 0; i < k; i++)
+                pos += snprintf(out + pos, sz - pos, "%s%.4f", i ? "," : "",
+                                starxy_get_flux(f, idx[i]));
+            snprintf(out + pos, sz - pos, "]}");
+            free(idx);
+            starxy_free(f);
+        }
     }
-    simplexy_free_contents(&s);
+    release_simplexy(&s);
     (*env)->ReleaseFloatArrayElements(env, gray, g, JNI_ABORT);
 
     jstring js = (*env)->NewStringUTF(env, out);
