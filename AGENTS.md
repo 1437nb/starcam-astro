@@ -109,6 +109,17 @@ gradle :app:assembleDebug                     # 构建 debug APK
   `indexes/` 会连带排除 `code/app/src/main/assets/indexes/` 的 8 个 FITS 离线索引
   （离线求解必需），必须写成 `/indexes/`；`/apk/` 同理。自查用 `git check-ignore -v <路径>`。
 - `.gitattributes` 必须保留：仓库含 `.so` / `.fits` / `.jpg`，缺 `binary` 标记会被换行转换损坏。
+- ⚠️ **`git push` 在本机不可用**（`github.com:443` 被阻断，实测 Connection reset /
+  timeout；`ssh.github.com:443` 能连通但 publickey 被拒）。两条可用通道：
+  1. **拉取**：`git fetch https://ghfast.top/https://github.com/1437nb/starcam-astro.git main:refs/remotes/origin/main --force`
+     （ghfast.top 代理只读，**不能 push**）；
+  2. **推送**：用 GitHub **Git Data API**（`api.github.com` 可达，凭据从
+     `git credential fill` 取）：blobs → tree(base_tree) → commit → PATCH refs/heads/main。
+     逐提交重建，先确认远端是本地祖先（fast-forward）。
+     **务必用 `git show <sha>:<path>` 读内容**——直接读工作区文件会带 CRLF
+     （`core.autocrlf=true`），把整仓库行尾污染成 CRLF（v1.5.55 踩过，已用
+     `git add --renormalize` 修回）。
+  发布 Release 同样走 API：`POST /releases` + `POST uploads.github.com/.../assets`。
 
 ## 5. 文档与交接约定
 
