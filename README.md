@@ -19,7 +19,7 @@
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
 
 **系统要求**：Android 8.0（API 26）及以上，**arm64-v8a** 真机
-（离线官方引擎仅提供 arm64 原生库；x86_64 模拟器会优雅回退到 JVM 星表引擎）。
+（离线官方引擎仅提供 arm64 原生库；x86_64 模拟器会回退到 JVM 星表引擎）。
 
 ---
 
