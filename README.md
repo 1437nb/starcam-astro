@@ -12,12 +12,12 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.58](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.58)** —
+最新版本 **[v1.5.59](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.59)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.58-engine-stars-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.58/StarCam-v1.5.58-engine-stars-fix-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.58-engine-stars-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.58/StarCam-v1.5.58-engine-stars-fix-debug.apk) | 26.9 MB | 含调试日志 |
+| [StarCam-v1.5.59-solve-log-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.59/StarCam-v1.5.59-solve-log-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.59-solve-log-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.59/StarCam-v1.5.59-solve-log-debug.apk) | 26.9 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
 
@@ -104,6 +104,13 @@
   （阈值选在此处而非更激进，避免用户连续识别时把索引丢掉、下次反而变慢）。
   释放前检查有无超时 detach 的线程仍在运行，有则拒绝释放 —— **宁可占内存也不崩**。
 
+- **识别日志**（v1.5.59）：识别失败时自动留下**可复现的现场**。以前排查「照片识别不出」
+  只能靠截图推断，现在会记录：每层引擎的结果与耗时、失败归因（提星失败 / 星点太少 /
+  星点够但匹配不上）、自研引擎的投票轮与打分轮统计，以及**匹配器实际吃到的原始像素**
+  （gzip 无损压缩，开发者可据此在本机精确重放）。失败页可一键复制技术细节；
+  设置页可查看/清空/关闭。只存本机、不上传，照片路径只记文件名。
+  像素现场压缩到 14.5%（13.8MB → 2.0MB），最多保留 10 份。
+
 - **广角照片识别修复**（v1.5.58，**重要**）：修复「原图识别不出、相册把对比度拉高
   后才能识别」。根因是内置官方引擎的**星点来源优先级**——它优先用 App 自检的 40 颗
   亮星、完全不跑引擎自带的 simplexy 提星器；而广角欠曝照片里这 40 颗几乎全是
@@ -137,7 +144,7 @@
 │   │   └── src/main/jniLibs/arm64-v8a/      # libstellar_solver.so 预编译引擎
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # 完整工程文档与 59 份验证增补报告（§0.11 ~ §0.69）
+├── docs/                   # 完整工程文档与 60 份验证增补报告（§0.11 ~ §0.70）
 ├── tools/                  # Python 星表生成器与离线工具集
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md

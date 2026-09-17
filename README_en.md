@@ -12,12 +12,12 @@ A pure offline Android application for astrophotography plate-solving and night 
 
 ## Download
 
-Latest release: **[v1.5.58](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.58)**
+Latest release: **[v1.5.59](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.59)**
 
 | Package | Size | Notes |
 |---|---|---|
-| [StarCam-v1.5.58-engine-stars-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.58/StarCam-v1.5.58-engine-stars-fix-release.apk) | 16.5 MB | **Recommended** — R8-minified signed build |
-| [StarCam-v1.5.58-engine-stars-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.58/StarCam-v1.5.58-engine-stars-fix-debug.apk) | 26.9 MB | Includes debug logging |
+| [StarCam-v1.5.59-solve-log-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.59/StarCam-v1.5.59-solve-log-release.apk) | 16.5 MB | **Recommended** — R8-minified signed build |
+| [StarCam-v1.5.59-solve-log-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.59/StarCam-v1.5.59-solve-log-debug.apk) | 26.9 MB | Includes debug logging |
 
 All versions: [Releases](https://github.com/1437nb/starcam-astro/releases).
 
@@ -65,6 +65,15 @@ back gracefully to the JVM catalog matcher).
 - **Native star extraction fix** (v1.5.55, **critical**): the native engine extracted **zero stars on every device**. Three compounding C-level defects had been misdiagnosed as "a data race on some ARM64 models" — they reproduce 100 % of the time on x86_64 as well: (1) `simplexy_set_defaults()` memsets the whole struct, but the bridge filled `image/nx/ny` *before* calling it, so those three fields were zeroed; (2) `simplexy_free_contents()` calls `free(s->image)`, yet that pointer comes from JNI `GetFloatArrayElements` (an ART heap pointer that only `Release...Elements` may hand back) — defect (1) nulled the pointer and conveniently masked (2); (3) the success test read `if (rc != 0 || npeaks <= 0)`, inverting the real semantics (`rc=0` means no pixel rose above threshold, i.e. failure), so the branch was always taken, the SEP path never succeeded, and the "SEP-first" three-tier fallback on the Kotlin side never ran. The same release also fixed `maxStars` truncating by scan order (now takes the top k by flux), a silently ignored `thresholdBgMultiple`, a JNI array-length leak, a three-state timeout misjudgement, `pthread_create` failure being reported as a timeout, and an unbounded `join` (now a 5 s grace period plus detach protection).
 - **Engineering hardening** (v1.5.56): user-supplied astrometry.net API keys are now stored with `EncryptedSharedPreferences` (previously plaintext; existing values migrate automatically on read); build scripts no longer hard-code local paths (`STARCAM_KEYSTORE` env var → `-PkeystoreProps` → `~/.starcam/`); a **GitHub Actions CI** workflow runs the unit tests plus a gitleaks credential scan; the camera analysis stream switched to `YUV_420_888` reading only the Y plane (eliminating 1.9 M `ByteBuffer.get()` calls per frame); the online client is hardened (HTTPS enforced, exponential backoff, upload de-duplication); debug switches were narrowed to `internal`.
 - **Reclaimable index memory** (v1.5.57): the ~11 MB catalog index cache is now handed back under memory pressure, reducing the chance of the app being killed in the background. Solver thread state moved from a **process-wide singleton** to **one instance per solve** (fixing a use-after-free latent in v1.5.55: if an earlier solve leaked a thread on timeout and the current one finished cleanly, the caller would `solver_free` memory still being read); a new `releaseIndexes()` JNI entry point plus an `Application.onTrimMemory` hook frees the indexes on `TRIM_MEMORY_RUNNING_LOW` — deliberately not a more aggressive threshold, so that back-to-back solves do not drop the cache and end up slower. Release is refused while a detached timeout thread may still be running: **rather hold 11 MB than crash**.
+- **Solve logs** (v1.5.59): a failed solve now leaves a **reproducible scene** behind.
+  Instead of guessing from a screenshot, the log records each engine tier's outcome and
+  timing, a failure attribution (star extraction failed / too few stars / plenty of stars
+  but no catalog match), the custom matcher's voting- and scoring-round statistics, and the
+  **exact pixels the matcher consumed** (gzip, lossless) so the developer can replay your
+  photo locally. The failure screen copies the technical detail in one tap; Settings can
+  view, clear, or disable it. Local-only, never uploaded; paths keep filenames only.
+  Pixel scenes compress to 14.5% (13.8 MB → 2.0 MB), capped at 10 scenes.
+
 - **Wide-field recognition fix** (v1.5.58, **critical**): fixes "the original photo
   will not solve, but raising the contrast in a gallery app makes it work". The cause
   was the built-in native engine's **star-source priority**: it preferred 40 stars from
@@ -99,7 +108,7 @@ back gracefully to the JVM catalog matcher).
 │   │   └── src/main/jniLibs/arm64-v8a/      # Prebuilt libstellar_solver.so native engine
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # Engineering architecture and 59 validation reports (§0.11 ~ §0.69)
+├── docs/                   # Engineering architecture and 60 validation reports (§0.11 ~ §0.70)
 ├── tools/                  # Python catalog generators and offline test utilities
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md               # Chinese documentation
