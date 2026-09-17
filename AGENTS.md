@@ -123,6 +123,13 @@ gradle :app:assembleDebug                     # 构建 debug APK
      （`core.autocrlf=true`），把整仓库行尾污染成 CRLF（v1.5.55 踩过，已用
      `git add --renormalize` 修回）。
   发布 Release 同样走 API：`POST /releases` + `POST uploads.github.com/.../assets`。
+  现成工具：`tools/gh_api_push.py`（`push` / `release` 两个子命令）。
+- ⚠️ **`.github/workflows/` 下的文件无法通过 API 推送**：写入这类路径要求 token
+  具备 `workflow` scope，当前凭据只有 `repo` scope，GitHub 对这类路径一律回
+  404（Contents API 与 Git Data API 都是）。改 workflow 只能：
+  ① 在 GitHub 网页上直接编辑（推荐），或
+  ② 换一个带 `workflow` scope 的 token 再跑 `gh_api_push.py push`。
+  脚本会自动跳过这类文件并明确提示，不会静默丢失。
 
 ## 5. 文档与交接约定
 
