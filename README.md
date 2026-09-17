@@ -12,16 +12,16 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.57](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.57)** —
+最新版本 **[v1.5.58](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.58)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.57-index-memory-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.57/StarCam-v1.5.57-index-memory-release.apk) | 15.8 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.57-index-memory-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.57/StarCam-v1.5.57-index-memory-debug.apk) | 25.7 MB | 含调试日志 |
+| [StarCam-v1.5.58-engine-stars-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.58/StarCam-v1.5.58-engine-stars-fix-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.58-engine-stars-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.58/StarCam-v1.5.58-engine-stars-fix-debug.apk) | 26.9 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
 
-> ⚠️ **v1.5.55 的 release 包未签名**（装不上），请直接使用 v1.5.57 —— 本版已修复签名与
+> ⚠️ **v1.5.55 的 release 包未签名**（装不上），请直接使用 v1.5.58 —— 本版已修复签名与
 > release 构建问题，证书与历史版本一致，可直接覆盖升级。
 
 **系统要求**：Android 8.0（API 26）及以上，**arm64-v8a** 真机
@@ -104,6 +104,13 @@
   （阈值选在此处而非更激进，避免用户连续识别时把索引丢掉、下次反而变慢）。
   释放前检查有无超时 detach 的线程仍在运行，有则拒绝释放 —— **宁可占内存也不崩**。
 
+- **广角照片识别修复**（v1.5.58，**重要**）：修复「原图识别不出、相册把对比度拉高
+  后才能识别」。根因是内置官方引擎的**星点来源优先级**——它优先用 App 自检的 40 颗
+  亮星、完全不跑引擎自带的 simplexy 提星器；而广角欠曝照片里这 40 颗几乎全是
+  mag ≲ 4 的亮星，引擎索引其实覆盖到更暗。同一张照片的对照实验：simplexy 全量
+  （4478 颗）**解出** 141 个匹配，只用最亮 40 颗**解不出**。改为「引擎提星优先、
+  App 星点仅兜底」并将兜底上限提到 200 后，simplexy 提星 **3225 颗**，广角照片恢复正常。
+
 - **release 构建修复**（v1.5.57）：v1.5.56 与 v1.5.57 此前**都打不出 release 包**
   （日常只构建 debug，所以一直没暴露）。根因是 v1.5.56 引入加密存储后，Tink 引用的
   `com.google.errorprone.annotations.*` 是编译期注解、不随运行时依赖发布，R8 的
@@ -130,7 +137,7 @@
 │   │   └── src/main/jniLibs/arm64-v8a/      # libstellar_solver.so 预编译引擎
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # 完整工程文档与 58 份验证增补报告（§0.11 ~ §0.68）
+├── docs/                   # 完整工程文档与 59 份验证增补报告（§0.11 ~ §0.69）
 ├── tools/                  # Python 星表生成器与离线工具集
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md
