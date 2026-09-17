@@ -158,6 +158,14 @@ object LocalStarMatcher {
     var debugScoredStats: String? = null
 
     /**
+     * §0.70 调试：逐星投票轮统计（参与投票的星数 / 得到票的星数 / 最高票 / 平均领先比）。
+     * 用于区分「真信号缺失」与「阈值把关太严」两类失败 ——
+     * 在识别失败页与日志里展示，也是用户反馈问题时的关键证据。
+     */
+    @Volatile
+    var debugVoteStats: String? = null
+
+    /**
      * §0.62 打分轮的星表星缓存：只存一次（按 [catalogMag] 过滤），
      * 每颗星预算好单位向量 (ux, uy, uz)。
      *
@@ -290,17 +298,27 @@ object LocalStarMatcher {
     fun detectStars(bitmap: Bitmap, maxStars: Int = 100): List<DetectedStar> {
         val w = bitmap.width
         val h = bitmap.height
+        val gray = bitmapToGray(bitmap)
+        return detectStarsGray(w, h, gray, maxStars)
+    }
+
+    /**
+     * Bitmap → 灰度数组（0..255，与 [detectStars] 内部同一套系数）。
+     * §0.70：识别失败时把匹配器实际吃到的像素落盘，开发机才能精确重放。
+     */
+    fun bitmapToGray(bitmap: Bitmap): FloatArray {
+        val w = bitmap.width
+        val h = bitmap.height
         val pixels = IntArray(w * h)
         bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
         val gray = FloatArray(w * h)
         for (i in pixels.indices) {
             val c = pixels[i]
-            val r = (c shr 16) and 0xFF
-            val g = (c shr 8) and 0xFF
-            val b = c and 0xFF
-            gray[i] = 0.299f * r + 0.587f * g + 0.114f * b
+            gray[i] = 0.299f * ((c shr 16) and 0xFF) +
+                0.587f * ((c shr 8) and 0xFF) +
+                0.114f * (c and 0xFF)
         }
-        return detectStarsGray(w, h, gray, maxStars)
+        return gray
     }
 
     /**
@@ -1153,6 +1171,23 @@ object LocalStarMatcher {
             val photoIdx = (key shr 20).toInt()
             val hip = (key and 0xFFFFF).toInt()
             byPhoto.getOrPut(photoIdx) { HashMap() }[hip] = v
+        }
+        // §0.70 诊断：投票是否被伪三角形淹没，看这两个数最直接 ——
+        // top 票数高但分散（runnerUp 接近 top）说明真信号缺失；
+        // 参与投票的星数过少（work 小）说明亮度阈值把关太严。
+        run {
+            var topV = 0
+            var sumMargin = 0.0
+            var nPhoto = 0
+            for ((_, m) in byPhoto) {
+                if (m.isEmpty()) continue
+                nPhoto++
+                val s = m.values.sortedDescending()
+                topV = maxOf(topV, s[0])
+                if (s.size > 1) sumMargin += s[0].toDouble() / s[1]
+            }
+            debugVoteStats = "work=${work.size} votedStars=$nPhoto topVote=$topV " +
+                "avgMargin=${if (nPhoto > 0) "%.2f".format(sumMargin / nPhoto) else "-"}"
         }
         val pairs = ArrayList<Pair<Int, StarEntry>>()
         for ((photoIdx, m) in byPhoto) {

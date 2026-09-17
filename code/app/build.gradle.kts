@@ -28,13 +28,13 @@ android {
         applicationId = "com.starcam.astro"
         minSdk = 26
         targetSdk = 34
-        versionCode = 78
-        versionName = "1.5.58"
+        versionCode = 79
+        versionName = "1.5.59"
     }
 
     // 每版更新内容简述（用户规则：在 APK 文件名上带上更新内容）
     val updateDesc = project.findProperty("updateDesc") as? String
-        ?: "修复官方引擎星点来源优先级"
+        ?: "识别日志：失败原因与现场"
 
     // APK 产物自动带版本号、更新内容与变体名（用户规则：文件名标注版本与更新内容）
     applicationVariants.all {
@@ -143,4 +143,9 @@ dependencies {
 
     // 测试
     testImplementation("junit:junit:4.13.2")
+    // §0.70：单测里 `org.json`（Android 内置）是「未实现桩」——调用任何方法都抛
+    // RuntimeException("not mocked")。识别日志的组装与摘要渲染正是围绕 JSON 的，
+    // 于是测试期补一个**真实实现**（org.json:json，与 Android 的 API 同源）。
+    // 只进测试 classpath，不进 APK。
+    testImplementation("org.json:json:20240303")
 }
