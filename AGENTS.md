@@ -128,6 +128,14 @@ gradle :app:assembleDebug                     # 构建 debug APK
      `git add --renormalize` 修回）。
   发布 Release 同样走 API：`POST /releases` + `POST uploads.github.com/.../assets`。
   现成工具：`tools/gh_api_push.py`（`push` / `release` 两个子命令）。
+- **更省事的通道（2026-09-17 起）**：经构建服务器中转的 SOCKS 隧道能让
+  **原生 git** 直连 GitHub，不必再走 API 逐提交重建：
+  ```bash
+  python _socks_proxy.py &          # 监听 127.0.0.1:1080（仅回环）
+  git -c http.proxy=socks5h://127.0.0.1:1080 push origin main
+  ```
+  隧道依赖 paramiko + 服务器 SSH（凭据见 `ssh_helper.py`）。
+  注意：隧道是前台进程，shell 会话结束即断；用 nohup 起。
 - ⚠️ **`.github/workflows/` 下的文件无法通过 API 推送**：写入这类路径要求 token
   具备 `workflow` scope，当前凭据只有 `repo` scope，GitHub 对这类路径一律回
   404（Contents API 与 Git Data API 都是）。改 workflow 只能：

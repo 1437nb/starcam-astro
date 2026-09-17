@@ -224,12 +224,18 @@
 
 ## 三、阻塞 / 待开发者处理
 
-- [ ] **`.github/workflows/ci.yml` 需手动添加到 GitHub**（v1.5.56 §0.66）——
-      文件已在仓库里，但推送时被 GitHub 拒绝：写 `.github/workflows/` 要求 token
-      具备 `workflow` scope，当前凭据只有 `repo` scope。
-      **操作**：GitHub 网页 → 仓库 → Add file → Create new file →
-      路径填 `.github/workflows/ci.yml` → 把本地该文件内容粘进去 → 提交。
-      完成后 CI 即生效（push / PR 自动跑 150 项单测 + gitleaks 凭据扫描）。
+- [x] ~~**`.github/workflows/ci.yml` 需手动添加到 GitHub**~~ —— **已解决**
+      （2026-09-17）：用户在 GitHub 上给 token 补了 `workflow` scope，推送成功。
+      顺带发现并解决了两件事：
+      ① **网络**：本机 github.com 间歇不可达，已用「经构建服务器中转的 SOCKS
+         隧道」打通（`_socks_proxy.py`，仅监听回环 1080）。推送用
+         `git -c http.proxy=socks5h://127.0.0.1:1080 push`。
+      ② **CI 自身缺陷**：首跑失败于 `android-actions/setup-android@v3`
+         （runner 上报 "Wrong version in preinstalled sdkmanager" 后
+         `sdkmanager tools` exit 1）。该 action 多余——GitHub runner 本就预装
+         Android SDK。已删除并直接指向预装 SDK；同时补上缺失的 Gradle wrapper
+         （仓库此前没有 wrapper，CI 无 gradle 可用）。
+      **现状**：CI 全绿（run #2，145 项单测 0 失败 + gitleaks 通过）。
 - [ ] **astrometry.net API key 轮换** —— 该 key 自开源首发提交 `511c825` 起就在公开历史中，
       改历史无用，只能去 nova 侧作废并更换。
 - [ ] **真实照片回归素材不在工程内** —— `RealPhotoMatchTest` / `Photo12RegressionTest` 依赖
