@@ -44,9 +44,27 @@ data class LocalMatchResult(
  */
 object LocalStarMatcher {
 
-    /** 调试：仅调试强制固定投票亮度门槛（模拟旧版行为）；App 运行时为 null，不影响生产 */
+    /**
+     * ===== 调试开关（仅用于算法标定与 A/B 对照）=====
+     *
+     * 这 6 个开关的标定依据是一组互相牵制的常量（星表域 4.0 / 对齐率 0.20 /
+     * 提前退出 12 与 0.5），改一个就得重调全部 —— 它们的存在本身就是参数敏感
+     * 的证据。生产路径（App 自身）**从不写入**任何一个，全部保持 null/false。
+     *
+     * 可见性一律 internal：防止被其他模块误写导致识别行为静默改变。
+     * 字段名刻意保持不变 —— 离线验证台（C:\dev\harness 的 Sweep / ScoreDetail /
+     * FailCost 等）用 `getDeclaredField("debugXxx")` 反射读写，改名会让它们失效。
+     * 待「内角索引」落地、伪三角形污染降低后，这些开关应连同打分轮一起清理
+     * （见 PROGRESS「下一步」）。
+     */
+
+    /**
+     * 调试：强制固定投票亮度门槛（模拟旧版行为）。
+     * 曾为 public var —— 意味着任何模块都能写，且无标注、无日志，误写难排查；
+     * 现收为 internal（外部验证台走反射，不受影响）。
+     */
     @Volatile
-    var debugForceVoteThreshold: Float? = null
+    internal var debugForceVoteThreshold: Float? = null
 
     /**
      * §0.62 调试：强制**星表域**星等上限——索引 / 第四星验证网格 / 内点统计

@@ -610,8 +610,15 @@ object StarSolver {
                         val onlineDisplay = ImageUtils.decodeSampledBitmap(upload.absolutePath, 2200)
                             ?: continue
                         currentDisplay = onlineDisplay
-                        val client = PlateSolveClient(settings.serverUrl)
-                        val solve = client.solve(upload, key) { msg -> onProgress(msg) }
+                        // 构造器校验服务器地址（强制 HTTPS）并可能抛 PlateSolveException；
+                        // 捕获后转为进度提示，避免整个求解流程异常退出。
+                        val solve = try {
+                            val client = PlateSolveClient(settings.serverUrl)
+                            client.solve(upload, key) { msg -> onProgress(msg) }
+                        } catch (e: PlateSolveException) {
+                            onProgress(e.message ?: "在线识别不可用")
+                            continue
+                        }
                         val detail = listOfNotNull(
                             solve.subId?.let { "任务 #$it" },
                             "在线定标",

@@ -19,8 +19,11 @@
   **已于 2026-09-12 合并为本仓库**，旧副本全部归档到 `C:\star\_archive\`。
 - **不要再从别处开发、不要手工同步副本。** 改代码只在这里改。
 - 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），分支 `main`。
-- 当前基线：**v1.5.55**（versionCode 75）；v1.5.49/51/52/53 已发布到 GitHub Releases，
-  v1.5.54 未发布（被 v1.5.55 取代）。
+- 当前基线：**v1.5.56**（versionCode 76）；v1.5.49/51/52/53/55 已发布到 GitHub Releases，
+  v1.5.54 未发布（其内容已并入 v1.5.55）。
+- v1.5.56 为工程健壮性批次（§0.66）：API Key 加密存储、构建脚本可移植（去
+  `C:/dev/` 硬编码）、GitHub Actions CI（单测 + gitleaks）、相机 Y 平面灰度、
+  在线客户端加固（HTTPS/退避/去重）、6 个调试开关收为 internal。
   **v1.5.55 修复了「官方引擎提星恒为 0」的三处 C 层缺陷**（详见 `docs/63-…§0.65…`）：
   ① `simplexy_set_defaults` 会 memset 整个结构体，而桥先填 `image/nx/ny` 后调它 → 字段清零；
   ② `simplexy_free_contents` 会 `free(s->image)`，而该指针来自 JNI `GetFloatArrayElements`
@@ -63,7 +66,7 @@ AGENTS.md  本文件
 
 ```bash
 cd C:\starword\code
-gradle :app:testDebugUnitTest --rerun-tasks   # 全量单测（142 项）
+gradle :app:testDebugUnitTest --rerun-tasks   # 全量单测（150 项）
 gradle :app:assembleDebug                     # 构建 debug APK
 ```
 
