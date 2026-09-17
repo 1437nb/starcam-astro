@@ -130,6 +130,10 @@ def upload_commit(local_sha, parent_sha):
         blob = gh("POST", f"/repos/{OWNER}/{REPO}/git/blobs",
                   {"content": base64.b64encode(content).decode(), "encoding": "base64"})
         items.append({"path": path, "mode": newmode, "type": "blob", "sha": blob["sha"]})
+    if not items:
+        # 本次提交只改了 .github/workflows/ 下的文件（全被跳过）→ 无可上传内容，
+        # 直接复用 parent，不产生空提交（GitHub 不允许 base_tree 配空 tree）。
+        return parent_sha, 0, skipped_workflow
     tree = gh("POST", f"/repos/{OWNER}/{REPO}/git/trees",
               {"base_tree": base_tree, "tree": items})
     msg = subprocess.run((GIT, "log", "-1", "--format=%B", local_sha), cwd=WD,
