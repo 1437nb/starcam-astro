@@ -1,0 +1,67 @@
+name: CI
+
+# 回归自动化：任何 push / PR 都跑一遍纯 JVM 单测。
+# 本机历史上全靠手工执行「150 项 0 失败」，这个 workflow 把它变成硬保证。
+#
+# 注意：真值回归台（RealPhotoMatchTest / Photo12RegressionTest）依赖不入库的
+# 真实照片素材（testdata/，含私拍原图），在 CI 里自动跳过（素材缺失时那些
+# 测试类自身的 File 检查会失败，故此处按标签排除）。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # --rerun-tasks 必须保留：否则 Gradle 可能 FROM-CACHE 复用旧结果，
+      # 等于没跑（AGENTS.md §2 记录的坑）。
+      # -PskipPhotoTests=true：真值回归台依赖不入库的真实照片素材，CI 无此素材。
+      - name: Unit tests
+        working-directory: code
+        run: |
+          gradle --no-daemon --console=plain :app:testDebugUnitTest \
+            --rerun-tasks \
+            -PskipPhotoTests=true
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            code/app/build/reports/tests/testDebugUnitTest/
+            code/app/build/test-results/testDebugUnitTest/
+          retention-days: 14
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 防止 nova API key 那类凭据再次进入公开历史。
+      - name: Scan for leaked credentials
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
