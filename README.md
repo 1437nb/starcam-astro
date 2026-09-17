@@ -1,7 +1,10 @@
 # StarCam / 星空识星
 
+[**简体中文**](README.md) | [**English**](README_en.md)
+
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
 [![Android](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com)
+[![CI](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml/badge.svg)](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml)
 
 一款纯离线运行的 Android 天文摄影与星空识别 App。拍摄或导入夜空照片，本地盲解天区坐标（RA / Dec / 视场 / 旋转），在照片上精确叠加星座连线、恒星专名与梅西耶深空天体标注。
 
@@ -9,14 +12,17 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.55](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.55)** —
+最新版本 **[v1.5.57](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.57)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.55-native-extract-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.55/StarCam-v1.5.55-native-extract-fix-release.apk) | 15.7 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.55-native-extract-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.55/StarCam-v1.5.55-native-extract-fix-debug.apk) | 24.8 MB | 含调试日志 |
+| [StarCam-v1.5.57-index-memory-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.57/StarCam-v1.5.57-index-memory-release.apk) | 15.8 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.57-index-memory-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.57/StarCam-v1.5.57-index-memory-debug.apk) | 25.7 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
+
+> ⚠️ **v1.5.55 的 release 包未签名**（装不上），请直接使用 v1.5.57 —— 本版已修复签名与
+> release 构建问题，证书与历史版本一致，可直接覆盖升级。
 
 **系统要求**：Android 8.0（API 26）及以上，**arm64-v8a** 真机
 （离线官方引擎仅提供 arm64 原生库；x86_64 模拟器会回退到 JVM 星表引擎）。
@@ -83,6 +89,27 @@
   join 无期限等待（改为 5s 宽限 + detach 保护）。
   回归：全量单测 150/150，12 张演示照 12/12 TRUE-SOLVE，用户南宁照 25 内点（真值窗口内）。
 
+- **工程健壮性批次**（v1.5.56）：用户自配的 astrometry.net API Key 改用
+  `EncryptedSharedPreferences` **加密存储**（此前为明文，且读取时自动迁移旧值）；
+  构建脚本去掉硬编码路径（`STARCAM_KEYSTORE` 环境变量 → `-PkeystoreProps` →
+  `~/.starcam/` 三级查找）；新增 **GitHub Actions CI**（单元测试 + gitleaks 凭据扫描）；
+  相机分析流改用 YUV_420_888 并只读 Y 平面（消除每帧 190 万次 `ByteBuffer.get()`）；
+  在线客户端加固（强制 HTTPS、指数退避、上传去重）；调试开关收为 `internal`。
+
+- **索引内存可归还**（v1.5.57）：系统内存紧张时主动归还约 11MB 的星表索引缓存，
+  降低被系统杀后台的概率。求解线程状态从**全局单例**改为**每次求解一个实例**
+  （修掉 v1.5.55 遗留的 use-after-free 隐患：上次超时泄漏线程、本次正常结束时，
+  调用方会对仍被读取的内存执行 `solver_free`）；新增 `releaseIndexes()` JNI 接口 +
+  `Application.onTrimMemory` 钩子，在系统报 `TRIM_MEMORY_RUNNING_LOW` 时释放索引
+  （阈值选在此处而非更激进，避免用户连续识别时把索引丢掉、下次反而变慢）。
+  释放前检查有无超时 detach 的线程仍在运行，有则拒绝释放 —— **宁可占内存也不崩**。
+
+- **release 构建修复**（v1.5.57）：v1.5.56 与 v1.5.57 此前**都打不出 release 包**
+  （日常只构建 debug，所以一直没暴露）。根因是 v1.5.56 引入加密存储后，Tink 引用的
+  `com.google.errorprone.annotations.*` 是编译期注解、不随运行时依赖发布，R8 的
+  "Missing classes" 检查把它当**致命错误**。已补 `-dontwarn` 规则修复，
+  并修正了构建服务器上签名密钥缺失导致产物**静默未签名**的问题。
+
 - **专业天文工具**：
   - 原图相册直接读取（绕过系统安全中心降采样，保留真实星点）；
   - 双图层全屏缩放查看器（原图 vs 标注图对比）；
@@ -103,7 +130,7 @@
 │   │   └── src/main/jniLibs/arm64-v8a/      # libstellar_solver.so 预编译引擎
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # 完整工程文档与 55 份验证增补报告（§0.11 ~ §0.65）
+├── docs/                   # 完整工程文档与 58 份验证增补报告（§0.11 ~ §0.68）
 ├── tools/                  # Python 星表生成器与离线工具集
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md
@@ -129,7 +156,7 @@ cd code
 # 编译 Debug APK
 ./gradlew :app:assembleDebug
 
-# 运行全量单元测试（含星表完整性、天文数学、太阳系历表、跨引擎验证、真实照片回归，150 项全绿）
+# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；150 项全绿）
 ./gradlew :app:testDebugUnitTest
 
 # 产物位置
@@ -139,6 +166,9 @@ cd code
 ./gradlew :app:assembleRelease -x lintVitalRelease
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
+
+> CI（GitHub Actions）跑的是 145 项 —— 它带 `-PskipPhotoTests=true` 跳过 5 项需要
+> 实拍素材的照片回归；本地素材齐备时为 150 项。
 
 ### 真实照片回归（可选）
 

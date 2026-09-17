@@ -4,6 +4,7 @@
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
 [![Android](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com)
+[![CI](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml/badge.svg)](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml)
 
 A pure offline Android application for astrophotography plate-solving and night sky identification. Capture or import night sky photos to perform on-device blind plate-solving (RA, Dec, FOV, orientation, parity), with precise overlays of constellation lines, proper star names, and Messier deep-sky objects.
 
@@ -11,14 +12,18 @@ A pure offline Android application for astrophotography plate-solving and night 
 
 ## Download
 
-Latest release: **[v1.5.53](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.53)**
+Latest release: **[v1.5.57](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.57)**
 
 | Package | Size | Notes |
 |---|---|---|
-| [StarCam-v1.5.53-overlay-align-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.53/StarCam-v1.5.53-overlay-align-fix-release.apk) | 15.7 MB | **Recommended** — R8-minified signed build |
-| [StarCam-v1.5.53-overlay-align-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.53/StarCam-v1.5.53-overlay-align-fix-debug.apk) | 24.8 MB | Includes debug logging |
+| [StarCam-v1.5.57-index-memory-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.57/StarCam-v1.5.57-index-memory-release.apk) | 15.8 MB | **Recommended** — R8-minified signed build |
+| [StarCam-v1.5.57-index-memory-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.57/StarCam-v1.5.57-index-memory-debug.apk) | 25.7 MB | Includes debug logging |
 
 All versions: [Releases](https://github.com/1437nb/starcam-astro/releases).
+
+> ⚠️ **The v1.5.55 release APK is unsigned** and cannot be installed — use v1.5.57
+> instead. Signing and the release build are fixed in v1.5.57, and the signing
+> certificate matches previous versions, so it installs as an in-place upgrade.
 
 **Requirements**: Android 8.0 (API 26) or newer on an **arm64-v8a** device
 (the bundled native solver ships arm64 libraries only; x86_64 emulators fall
@@ -57,6 +62,10 @@ back gracefully to the JVM catalog matcher).
   - **Realtime Moon and planet labels** (v1.5.48): the Sun, Moon and planets are computed for the moment encoded in the photo's EXIF timestamp + GPS (JPL approximate Keplerian elements plus a Meeus lunar series, with topocentric parallax correction); the Sun and Moon are drawn at their true apparent diameter, and tapping them shows magnitude, elongation, illuminated fraction and apparent size.
 - **Weak-EXIF fallback** (v1.5.49): when a photo carries no GPS, the device's current location is used to estimate the imaged sky region, so the native solver no longer has to start from a full-sky blind search; the Sun/Moon/planet labels and batch export benefit as well. Three hard boundaries: **EXIF GPS always wins and is never overridden**, no fallback without a capture timestamp, and a half-populated GPS pair is treated as missing and completed as a pair. The location source (EXIF vs. current fix) is stated on the solving progress and result screen, together with a "may be inaccurate" note.
 - **Portrait photo solving fix** (v1.5.50): corrected the field-of-view estimate for portrait shots (EXIF Orientation=6/8). The estimator previously used the short side of the 35 mm-equivalent frame when computing the long-edge FOV, which shrank the solver's pixel-scale prior and made **portrait photos fail to solve**. The long-edge FOV is now always computed from the 36 mm long side, identical for portrait and landscape.
+- **Native star extraction fix** (v1.5.55, **critical**): the native engine extracted **zero stars on every device**. Three compounding C-level defects had been misdiagnosed as "a data race on some ARM64 models" — they reproduce 100 % of the time on x86_64 as well: (1) `simplexy_set_defaults()` memsets the whole struct, but the bridge filled `image/nx/ny` *before* calling it, so those three fields were zeroed; (2) `simplexy_free_contents()` calls `free(s->image)`, yet that pointer comes from JNI `GetFloatArrayElements` (an ART heap pointer that only `Release...Elements` may hand back) — defect (1) nulled the pointer and conveniently masked (2); (3) the success test read `if (rc != 0 || npeaks <= 0)`, inverting the real semantics (`rc=0` means no pixel rose above threshold, i.e. failure), so the branch was always taken, the SEP path never succeeded, and the "SEP-first" three-tier fallback on the Kotlin side never ran. The same release also fixed `maxStars` truncating by scan order (now takes the top k by flux), a silently ignored `thresholdBgMultiple`, a JNI array-length leak, a three-state timeout misjudgement, `pthread_create` failure being reported as a timeout, and an unbounded `join` (now a 5 s grace period plus detach protection).
+- **Engineering hardening** (v1.5.56): user-supplied astrometry.net API keys are now stored with `EncryptedSharedPreferences` (previously plaintext; existing values migrate automatically on read); build scripts no longer hard-code local paths (`STARCAM_KEYSTORE` env var → `-PkeystoreProps` → `~/.starcam/`); a **GitHub Actions CI** workflow runs the unit tests plus a gitleaks credential scan; the camera analysis stream switched to `YUV_420_888` reading only the Y plane (eliminating 1.9 M `ByteBuffer.get()` calls per frame); the online client is hardened (HTTPS enforced, exponential backoff, upload de-duplication); debug switches were narrowed to `internal`.
+- **Reclaimable index memory** (v1.5.57): the ~11 MB catalog index cache is now handed back under memory pressure, reducing the chance of the app being killed in the background. Solver thread state moved from a **process-wide singleton** to **one instance per solve** (fixing a use-after-free latent in v1.5.55: if an earlier solve leaked a thread on timeout and the current one finished cleanly, the caller would `solver_free` memory still being read); a new `releaseIndexes()` JNI entry point plus an `Application.onTrimMemory` hook frees the indexes on `TRIM_MEMORY_RUNNING_LOW` — deliberately not a more aggressive threshold, so that back-to-back solves do not drop the cache and end up slower. Release is refused while a detached timeout thread may still be running: **rather hold 11 MB than crash**.
+- **Release build fix** (v1.5.57): v1.5.56 and v1.5.57 could not produce a release package at all (daily work only builds debug, so it went unnoticed). After v1.5.56 introduced encrypted storage, the Tink library referenced `com.google.errorprone.annotations.*` — compile-time annotations not shipped with the runtime dependency — and R8's "Missing classes" check treated them as fatal. Fixed with `-dontwarn` rules; also corrected a silent failure where a missing signing key on the build server produced an **unsigned** APK.
 - **Bilingual UI**: One-tap switching between Simplified Chinese and English across the entire app, including constellation, star, and deep-sky object names.
 - **Professional Astrophotography Tools**:
   - Camera Pro manual exposure (ISO / shutter control for light pollution and faint star fields) with a bubble level;
@@ -80,7 +89,7 @@ back gracefully to the JVM catalog matcher).
 │   │   └── src/main/jniLibs/arm64-v8a/      # Prebuilt libstellar_solver.so native engine
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # Engineering architecture and 55 validation reports (§0.11 ~ §0.65)
+├── docs/                   # Engineering architecture and 58 validation reports (§0.11 ~ §0.68)
 ├── tools/                  # Python catalog generators and offline test utilities
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md               # Chinese documentation
@@ -108,7 +117,7 @@ cd code
 ./gradlew :app:assembleDebug
 
 # Run full unit tests (astronomical math, catalog integrity, solar-system
-# ephemerides, cross-engine checks, real-photo regression — 150/150 passing)
+# ephemerides, cross-engine checks — 150/150 passing)
 ./gradlew :app:testDebugUnitTest
 
 # Output path
@@ -118,6 +127,10 @@ cd code
 ./gradlew :app:assembleRelease -x lintVitalRelease
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
+
+> CI (GitHub Actions) runs 145 of these — it passes `-PskipPhotoTests=true` to skip
+> the 5 photo-regression tests that need real captures. With the material present
+> locally the count is 150.
 
 ### Real-Photo Regression (optional)
 
