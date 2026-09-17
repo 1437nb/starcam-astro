@@ -19,7 +19,11 @@
   **已于 2026-09-12 合并为本仓库**，旧副本全部归档到 `C:\star\_archive\`。
 - **不要再从别处开发、不要手工同步副本。** 改代码只在这里改。
 - 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），分支 `main`。
-- 当前基线：**v1.5.56**（versionCode 76）；v1.5.49/51/52/53/55 已发布到 GitHub Releases，
+- 当前基线：**v1.5.57**（versionCode 77）；v1.5.49/51/52/53/55 已发布到 GitHub Releases，
+  v1.5.56 未发布（被 v1.5.57 取代）。
+- v1.5.57 为「索引内存可归还」（§0.67）：求解线程状态从全局单例改为 job 实例级
+  （修掉 §0.65 遗留的 use-after-free 隐患），新增 `releaseIndexes()` JNI 接口 +
+  `StarCamApplication.onTrimMemory` 钩子，系统内存紧张时归还 11MB 索引缓存。
   v1.5.54 未发布（其内容已并入 v1.5.55）。
 - v1.5.56 为工程健壮性批次（§0.66）：API Key 加密存储、构建脚本可移植（去
   `C:/dev/` 硬编码）、GitHub Actions CI（单测 + gitleaks）、相机 Y 平面灰度、

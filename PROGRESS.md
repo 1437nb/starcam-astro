@@ -6,7 +6,7 @@
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
 **最后更新**：2026-09-17
-**当前基线**：v1.5.56（versionCode 76）— 工程健壮性批次（§0.66，待发版）
+**当前基线**：v1.5.57（versionCode 77）— 索引内存可归还（§0.67，待发版）
 **工作区**：`C:\starword`（唯一，详见 `AGENTS.md` §0）
 
 ---
@@ -30,6 +30,32 @@
 6. 可选细节：木星伽利略卫星、土星环倾角对星等的影响（v1.5.48 遗留）。
 
 ## 二、最近完成
+
+- **2026-09-17（v1.5.57，待发版）** — 索引内存可归还 + 求解线程状态实例化（§0.67）：
+  - **前置修复**（§0.65 遗留）：`solve_done` / `solve_thread_leaked` 原是进程级
+    单例，正确性依赖「solve 串行进入」。且有真实缺陷：`run_with_timeout` 每次
+    进入都清零泄漏标志，若上次泄漏线程、本次正常结束，调用方就会对**仍被读取的
+    内存**执行 `solver_free`（use-after-free）。现改为 job 堆分配 + out 参数返回
+    本次泄漏状态，并加 `g_leaked_threads` 原子计数。
+  - **新增 JNI 接口**：`releaseIndexes()` 归还 8 档索引（~11MB）；
+    `indexCacheStats()` 返回 `{cached, loads, leakedThreads}`。释放前检查
+    `g_leaked_threads == 0`，有 detach 线程在跑就拒绝释放（宁可占内存也不崩）。
+  - **Kotlin 侧**：新增 `StarCamApplication`（manifest 注册），在
+    `onTrimMemory(>= TRIM_MEMORY_RUNNING_LOW)` 时调 `trimIndexCache()`。
+    阈值选 RUNNING_LOW 是避免用户连续识别时把索引丢掉导致下次变慢。
+  - **顺带修**：`get_or_load_index` 缓存满 16 档时原静默 `return NULL`，现打
+    stderr 说明原因（调用方原本无法区分「没打包索引」和「缓存满了」）。
+  - **验证**（x86_64 主机，真实桥源码）六项全通过：释放 8 档 → cached 归 0 →
+    再求解自动重建（loads 8→16）→ 并发 3 线程各返回不同 nstars
+    （2076/1964/2049，证明 job 实例化生效）。arm64 `.so` 五个导出 + 两个新导出
+    全部就位。
+  - 回归：**145 项单测 0 失败**（40 + 105 两批）；12 张演示照 **12/12 TRUE-SOLVE**；
+    南宁照 SOLVED（25 内点）。
+  - **已知取舍**：`g_leaked_threads` 只增不减（detach 后无法观测线程何时结束），
+    因此一旦发生过超时 detach，索引释放就永久失效。这是刻意的保守选择——
+    宁可少还 11MB 也不 use-after-free。超时 detach 是罕见路径，正常识别不受影响。
+  - 详见 `docs/65-验证报告增补-§0.67-索引内存可归还与线程状态实例化v1.5.57.md`。
+
 
 - **2026-09-17（v1.5.56，待发版）** — 工程健壮性批次（§0.66）：
   - **凭据保护**：API Key 从普通 SharedPreferences 迁到

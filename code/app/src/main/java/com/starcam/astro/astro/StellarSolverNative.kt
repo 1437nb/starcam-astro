@@ -101,6 +101,33 @@ object StellarSolverNative {
         maxStars: Int,
     ): String
 
+    /** 归还进程级索引缓存（§0.67）。原生侧在「有超时 detach 线程可能仍在使用
+     *  索引」时会拒绝释放并返回 0。 */
+    @JvmStatic
+    private external fun releaseIndexes(): Int
+
+    /** 诊断：索引缓存状态 JSON（cached / loads / leakedThreads）。 */
+    @JvmStatic
+    private external fun indexCacheStats(): String
+
+    /**
+     * 系统内存紧张时归还索引占用的 ~11MB（§0.67）。
+     * 返回实际释放的档数（0 = 未释放：有泄漏线程在跑，或本来就未加载）。
+     * 释放后下次求解会重新加载，首次多花一次磁盘读取。
+     */
+    fun trimIndexCache(): Int = try {
+        releaseIndexes()
+    } catch (e: Throwable) {
+        0
+    }
+
+    /** 索引缓存状态（诊断用；原生库不可用时返回 null）。 */
+    fun indexCacheInfo(): String? = try {
+        indexCacheStats()
+    } catch (e: Throwable) {
+        null
+    }
+
     /** 用 SEP 提取星点（不求解）。返回 null 表示原生库不可用或提取失败。 */
     fun sepDetectStars(
         bitmap: Bitmap,
