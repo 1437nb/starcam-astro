@@ -103,7 +103,7 @@
 │   │   └── src/main/jniLibs/arm64-v8a/      # libstellar_solver.so 预编译引擎
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # 完整工程文档与 51 份验证增补报告（§0.11 ~ §0.62）
+├── docs/                   # 完整工程文档与 55 份验证增补报告（§0.11 ~ §0.65）
 ├── tools/                  # Python 星表生成器与离线工具集
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md

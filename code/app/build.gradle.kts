@@ -7,11 +7,17 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// release 签名凭据（本机 C:\dev\starcam-keystore.properties，不入库/不入包；
-// 文件缺失时 release 产物为未签名 APK）
-val keystorePropsFile = File("C:/dev/starcam-keystore.properties")
+// release 签名凭据（不入库/不入包；缺失时 release 产物为未签名 APK）。
+// 查找顺序：环境变量 STARCAM_KEYSTORE → -PkeystoreProps=<路径> → 本机默认位置。
+// 前两者供 CI / 其他开发机使用，避免把开发者目录结构写死在公开仓库里。
+val keystorePropsFile: File? =
+    (System.getenv("STARCAM_KEYSTORE")
+        ?: (project.findProperty("keystoreProps") as? String)
+        ?: "${System.getProperty("user.home")}/.starcam/starcam-keystore.properties")
+        .let { File(it) }
+        .takeIf { it.exists() }
 val keystoreProps = Properties().apply {
-    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+    keystorePropsFile?.inputStream()?.use { load(it) }
 }
 
 android {
@@ -22,13 +28,13 @@ android {
         applicationId = "com.starcam.astro"
         minSdk = 26
         targetSdk = 34
-        versionCode = 75
-        versionName = "1.5.55"
+        versionCode = 76
+        versionName = "1.5.56"
     }
 
     // 每版更新内容简述（用户规则：在 APK 文件名上带上更新内容）
     val updateDesc = project.findProperty("updateDesc") as? String
-        ?: "修复原生提星恒为0（rc语义/内存所有权）"
+        ?: "工程健壮性：加密存储/CI/构建可移植"
 
     // APK 产物自动带版本号、更新内容与变体名（用户规则：文件名标注版本与更新内容）
     applicationVariants.all {
@@ -42,7 +48,7 @@ android {
 
     signingConfigs {
         create("release") {
-            if (keystorePropsFile.exists()) {
+            keystorePropsFile?.let {
                 storeFile = file(keystoreProps.getProperty("storeFile"))
                 storePassword = keystoreProps.getProperty("storePassword")
                 keyAlias = keystoreProps.getProperty("keyAlias")
@@ -58,9 +64,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = if (keystorePropsFile.exists()) {
-                signingConfigs.getByName("release")
-            } else null
+            signingConfig = keystorePropsFile?.let { signingConfigs.getByName("release") }
         }
     }
 
@@ -85,6 +89,15 @@ android {
     // 本机 4 逻辑核（2026-09-01）：两个测试 worker 并行跑测试类，全量回归减半
     tasks.withType<Test>().configureEach {
         maxParallelForks = 2
+        // 真值回归台依赖不入库的真实照片素材（testdata/，含私拍原图）；
+        // CI 里没有这批素材，用 -PskipPhotoTests=true 排除。
+        // 本机照常执行——这是宽场/暗星等修复的唯一真值保护，务必保留。
+        if (project.findProperty("skipPhotoTests") == "true") {
+            filter {
+                excludeTestsMatching("com.starcam.astro.RealPhotoMatchTest")
+                excludeTestsMatching("com.starcam.astro.Photo12RegressionTest")
+            }
+        }
     }
 }
 
@@ -124,6 +137,9 @@ dependencies {
 
     // EXIF 方向修正
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+
+    // 加密存储（在线求解 API Key；MODE_PRIVATE 挡不住 root/取证）
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // 测试
     testImplementation("junit:junit:4.13.2")

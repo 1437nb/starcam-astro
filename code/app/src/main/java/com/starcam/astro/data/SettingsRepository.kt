@@ -1,6 +1,10 @@
 package com.starcam.astro.data
 
 import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.starcam.astro.astro.EngineMode
 import com.starcam.astro.ui.theme.AppThemeMode
 
@@ -13,16 +17,55 @@ enum class AppLanguage(val key: String, val labelZh: String, val labelEn: String
     fun label(isEnglish: Boolean = false): String = if (isEnglish) labelEn else labelZh
 }
 
-/** 应用设置（SharedPreferences 持久化） */
+/** 应用设置（普通项 SharedPreferences；API Key 走加密存储） */
 class SettingsRepository(context: Context) {
 
-    private val prefs = context.applicationContext
+    private val appContext = context.applicationContext
+    private val prefs = appContext
         .getSharedPreferences("starcam_settings", Context.MODE_PRIVATE)
+
+    /**
+     * API Key 专用加密存储。
+     *
+     * API Key 是可计费凭据，MODE_PRIVATE 只挡其他应用，挡不住 root / 取证
+     * （AndroidManifest 已设 allowBackup=false，adb backup 这条路径已封）。
+     * 加密存储初始化失败时回退普通 prefs——宁可降级也不能让用户配不了 key。
+     */
+    private val securePrefs: SharedPreferences by lazy {
+        try {
+            val masterKey = MasterKey.Builder(appContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                appContext,
+                "starcam_secure_settings",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        } catch (e: Throwable) {
+            Log.w(TAG, "加密存储不可用，API Key 回退普通存储", e)
+            prefs
+        }
+    }
 
     /** astrometry.net API Key（到 https://nova.astrometry.net/api_help 免费注册获取） */
     var apiKey: String
-        get() = prefs.getString(KEY_API_KEY, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_API_KEY, value.trim()).apply()
+        get() {
+            val fromSecure = securePrefs.getString(KEY_API_KEY, "") ?: ""
+            if (fromSecure.isNotEmpty()) return fromSecure
+            // 迁移：旧版本明文存的 key 读出来改写进加密存储，并清掉明文项
+            val legacy = prefs.getString(KEY_API_KEY, "") ?: ""
+            if (legacy.isNotEmpty() && securePrefs !== prefs) {
+                securePrefs.edit().putString(KEY_API_KEY, legacy).apply()
+                prefs.edit().remove(KEY_API_KEY).apply()
+            }
+            return legacy
+        }
+        set(value) {
+            securePrefs.edit().putString(KEY_API_KEY, value.trim()).apply()
+            if (securePrefs !== prefs) prefs.edit().remove(KEY_API_KEY).apply()
+        }
 
     /** 服务器地址（默认 nova.astrometry.net，可改自建服务） */
     var serverUrl: String
@@ -86,6 +129,7 @@ class SettingsRepository(context: Context) {
         set(value) = prefs.edit().putFloat(KEY_AR_FOV, value.coerceIn(40f, 90f)).apply()
 
     companion object {
+        private const val TAG = "SettingsRepository"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_SERVER = "server_url"
         private const val KEY_ENGINE_MODE = "engine_mode"

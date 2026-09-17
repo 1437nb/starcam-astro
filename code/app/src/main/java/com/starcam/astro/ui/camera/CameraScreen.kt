@@ -147,13 +147,19 @@ fun CameraScreen(
     // §0.41：点击对焦点（相对预览的归一化坐标，null=未对焦）
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
     var focusHint by remember { mutableStateOf(true) }
-    // §0.42：实时预览认星 MVP——分析流每 5 秒本地匹配，把星座线叠加到预览
+    // §0.42：实时预览认星 MVP——分析流按间隔本地匹配，把星座线叠加到预览
     var livePreview by remember { mutableStateOf(true) }
     val livePreviewFlag = remember { java.util.concurrent.atomic.AtomicBoolean(true) }
     var previewOverlay by remember { mutableStateOf<Bitmap?>(null) }
     var previewLabel by remember { mutableStateOf("") }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val lastAnalyzeMs = remember { AtomicLong(0) }
+    // §0.66：节流间隔改为运行时可调——低端机可降到 8~10 秒减轻负载，
+    // 原先硬编码 5000 无法自适应。芯片核数少时默认放宽。
+    val analyzeIntervalMs = remember {
+        val cores = Runtime.getRuntime().availableProcessors()
+        if (cores <= 4) 8_000L else 5_000L
+    }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     // 传感器粗定标与定位辅助
@@ -324,12 +330,14 @@ fun CameraScreen(
             // 命中后把星座连线叠加到预览（KEEP_ONLY_LATEST 丢帧，不阻塞相机）
             val analysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                // §0.66：YUV_420_888 的 Y 平面即亮度，单平面读取；
+                // 原 RGBA_8888 要读 4 个平面再转灰度（4 倍搬运）。
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .setTargetResolution(android.util.Size(800, 600))
                 .build()
             analysis.setAnalyzer(analysisExecutor) { image ->
                 val now = System.currentTimeMillis()
-                if (!livePreviewFlag.get() || now - lastAnalyzeMs.get() < 5000) {
+                if (!livePreviewFlag.get() || now - lastAnalyzeMs.get() < analyzeIntervalMs) {
                     image.close()
                     return@setAnalyzer
                 }
@@ -337,9 +345,8 @@ fun CameraScreen(
                 var decoded: Bitmap? = null
                 var oriented: Bitmap? = null
                 try {
-                    // RGBA_8888 输出模式：planes[0..3] 为 R/G/B/A 单通道 →
-                    // 逐行拼装 Bitmap（CameraX 1.3.x 无 JPEG 输出格式）
-                    decoded = bitmapFromRgbaPlanes(image)
+                    // YUV_420_888 输出模式：planes[0] 为亮度 Y，直接装灰度位图
+                    decoded = bitmapFromYuvPlanes(image)
                     val rot = image.imageInfo.rotationDegrees
                     val source = decoded ?: return@setAnalyzer
                     oriented = if (rot != 0) {
@@ -1488,34 +1495,35 @@ private fun renderLiveOverlay(frame: Bitmap, wcs: WcsTransform): Bitmap {
 
 
 /**
- * §0.42：把 ImageAnalysis 的 RGBA_8888 四平面帧拼装为 Bitmap。
- * CameraX 保证 planes[0..3] 为 R/G/B/A 单通道，pixelStride=1；
- * 仅做 rowStride 对齐处理，容量不足时返回 null 跳过该帧。
+ * §0.42/§0.66：把 ImageAnalysis 的 YUV_420_888 帧的 **Y 平面** 装成灰度 Bitmap。
+ *
+ * 此前用 RGBA_8888 输出：单帧要读 4 个平面、逐字节拼 R/G/B/A（800×600 =
+ * 192 万次 ByteBuffer.get），而识别链路最终要的只是灰度（LocalStarMatcher
+ * 内部也是 0.299R+0.587G+0.114B）——等于先花 4 倍代价搬运、再转回灰度。
+ *
+ * YUV_420_888 的 plane[0] 就是亮度 Y，读一个平面即可，顺带省掉 RGB→gray
+ * 转换。Y 平面由 CameraX 保证 pixelStride=1，仅需处理 rowStride 对齐。
+ * 3 个通道写成同一个 Y 值，得到的就是标准灰度图（数值上与原路径一致）。
  */
-private fun bitmapFromRgbaPlanes(proxy: ImageProxy): Bitmap? {
+private fun bitmapFromYuvPlanes(proxy: ImageProxy): Bitmap? {
     val w = proxy.width
     val h = proxy.height
-    if (proxy.planes.size < 4) return null
     val planes = proxy.planes
-    if (planes[0].pixelStride != 1) return null
-    val bufs = arrayOf(planes[0].buffer, planes[1].buffer, planes[2].buffer, planes[3].buffer)
-    val rowStrides = intArrayOf(planes[0].rowStride, planes[1].rowStride, planes[2].rowStride, planes[3].rowStride)
-    for (i in 0 until 4) {
-        if (bufs[i].capacity() < rowStrides[i] * (h - 1) + w) return null
-    }
+    if (planes.isEmpty()) return null
+    val yPlane = planes[0]
+    if (yPlane.pixelStride != 1) return null
+    val buf = yPlane.buffer
+    val rowStride = yPlane.rowStride
+    if (buf.capacity() < rowStride * (h - 1) + w) return null
+
     val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val pixels = IntArray(w * h)
     var idx = 0
     for (row in 0 until h) {
-        bufs[0].position(row * rowStrides[0])
-        bufs[1].position(row * rowStrides[1])
-        bufs[2].position(row * rowStrides[2])
-        bufs[3].position(row * rowStrides[3])
+        buf.position(row * rowStride)
         for (col in 0 until w) {
-            pixels[idx++] = ((bufs[3].get().toInt() and 0xFF) shl 24) or
-                ((bufs[0].get().toInt() and 0xFF) shl 16) or
-                ((bufs[1].get().toInt() and 0xFF) shl 8) or
-                (bufs[2].get().toInt() and 0xFF)
+            val y = buf.get().toInt() and 0xFF
+            pixels[idx++] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
         }
     }
     bmp.setPixels(pixels, 0, w, 0, 0, w, h)
