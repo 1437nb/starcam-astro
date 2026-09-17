@@ -76,6 +76,31 @@ def remote_head():
     return gh("GET", f"/repos/{OWNER}/{REPO}/git/ref/heads/{BRANCH}")["object"]["sha"]
 
 
+def find_local_base(remote_sha, remote_tree):
+    """找出远端 head 在本地对应的提交，作为 diff 基线。
+
+    两种匹配方式（依次尝试）：
+      1. tree sha 完全相同 —— 常规情况（本地与远端内容一致）；
+      2. commit message 首行相同 —— 远端含本地推不上去的文件时（如
+         .github/workflows/，见下方 workflow scope 说明），tree 必然不同，
+         此时按提交信息认领。若二者都找不到则报错，避免用错误基线推送。
+    """
+    lines = git("log", "--format=%H %T", "-200", "HEAD").splitlines()
+    for line in lines:
+        h, t = line.split()
+        if t == remote_tree:
+            return h, "tree"
+    remote_msg = gh("GET", f"/repos/{OWNER}/{REPO}/git/commits/{remote_sha}")["message"]
+    remote_first = remote_msg.strip().splitlines()[0].strip()
+    for line in lines:
+        h = line.split()[0]
+        msg = subprocess.run((GIT, "log", "-1", "--format=%s", h), cwd=WD,
+                             capture_output=True, text=True).stdout.strip()
+        if msg == remote_first:
+            return h, "message"
+    return None, None
+
+
 def upload_commit(local_sha, parent_sha):
     """把一个本地提交重建到远端（parent 为远端提交 sha）。"""
     base_tree = gh("GET", f"/repos/{OWNER}/{REPO}/git/commits/{parent_sha}")["tree"]["sha"]
@@ -123,17 +148,13 @@ def cmd_push():
     if remote == local:
         print("已同步，无需推送")
         return
-    # 远端 sha 可能不在本地（API 创建的提交）→ 用 tree sha 找本地等价提交
+    # 远端 sha 可能不在本地（API 创建的提交）→ 用 tree sha / 提交信息找本地等价提交
     remote_tree = gh("GET", f"/repos/{OWNER}/{REPO}/git/commits/{remote}")["tree"]["sha"]
-    base = None
-    for line in git("log", "--format=%H %T", "-100", "HEAD").splitlines():
-        h, t = line.split()
-        if t == remote_tree:
-            base = h
-            break
+    base, how = find_local_base(remote, remote_tree)
     if base is None:
         sys.exit(f"远端 {remote[:9]} 在本地找不到等价提交；请先 "
                  f"git fetch https://ghfast.top/https://github.com/{OWNER}/{REPO}.git")
+    print(f"基线匹配方式：{how}")
     todo = git("rev-list", "--reverse", f"{base}..HEAD").split()
     if not todo:
         print("没有待推送的提交（远端可能含本地没有的 API 提交）")
