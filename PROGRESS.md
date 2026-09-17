@@ -198,6 +198,12 @@
 
 ## 三、阻塞 / 待开发者处理
 
+- [ ] **`.github/workflows/ci.yml` 需手动添加到 GitHub**（v1.5.56 §0.66）——
+      文件已在仓库里，但推送时被 GitHub 拒绝：写 `.github/workflows/` 要求 token
+      具备 `workflow` scope，当前凭据只有 `repo` scope。
+      **操作**：GitHub 网页 → 仓库 → Add file → Create new file →
+      路径填 `.github/workflows/ci.yml` → 把本地该文件内容粘进去 → 提交。
+      完成后 CI 即生效（push / PR 自动跑 150 项单测 + gitleaks 凭据扫描）。
 - [ ] **astrometry.net API key 轮换** —— 该 key 自开源首发提交 `511c825` 起就在公开历史中，
       改历史无用，只能去 nova 侧作废并更换。
 - [ ] **真实照片回归素材不在工程内** —— `RealPhotoMatchTest` / `Photo12RegressionTest` 依赖
