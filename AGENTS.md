@@ -19,8 +19,14 @@
   **已于 2026-09-12 合并为本仓库**，旧副本全部归档到 `C:\star\_archive\`。
 - **不要再从别处开发、不要手工同步副本。** 改代码只在这里改。
 - 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），分支 `main`。
-- 当前基线：**v1.5.57**（versionCode 77）**已发版**（签名 APK 在 GitHub Releases）；
-  v1.5.49/51/52/53/55 已发布，v1.5.54/56 未单独发布（内容并入后续版本）。
+- 当前基线：**v1.5.58**（versionCode 78）**已发版**；
+  v1.5.49/51/52/53/55/57 已发布，v1.5.54/56 未单独发布（内容并入后续版本）。
+- **v1.5.58 修复「官方引擎星点来源优先级」缺陷（§0.69，用户报告）**：
+  §0.65 修好 simplexy 后，为绕开旧 bug 而加的「外部星点优先」兜底逻辑没撤掉，
+  导致只要 Kotlin 侧传了 ≥4 颗星，`.so` 里 simplexy 提出的**数千颗星被 40 颗挡在门外**
+  → 广角欠曝照片的 mag 4.5~6 暗星全丢，quad 建不起来，官方引擎必然失败。
+  官方对照实验：同图 simplexy 全量（4478 源）解出 nmatch=141；`--objs 40` 解不出。
+  修复后 simplexy 提出 3225 颗（host 实测）。详见 `docs/67-…§0.69…`。
 - v1.5.57 为「索引内存可归还」（§0.67）：求解线程状态从全局单例改为 job 实例级
   （修掉 §0.65 遗留的 use-after-free 隐患），新增 `releaseIndexes()` JNI 接口 +
   `StarCamApplication.onTrimMemory` 钩子，系统内存紧张时归还 11MB 索引缓存。
@@ -67,12 +73,40 @@ indexes/   8 个 FITS 索引副本（服务端 solve-field 定标用，git 忽�
 AGENTS.md  本文件
 ```
 
-## 2. 构建与测试（本机 Windows 实测结论）
+## 2. 构建与测试（**全部在本机 Windows 完成**，2026-09-17 起）
+
+> **铁律（开发者 2026-09-17 明确要求）：所有编译必须在本机运行。**
+> 不再依赖远端构建服务器。下方命令均在本机实测通过。
 
 ```bash
 cd C:\starword\code
-gradle :app:testDebugUnitTest --rerun-tasks   # 全量单测（150 项）
-gradle :app:assembleDebug                     # 构建 debug APK
+gradle :app:testDebugUnitTest --rerun-tasks   # 全量单测（本机素材齐时 150 项）
+gradle :app:assembleDebug                     # 构建 debug APK（约 3 分钟）
+```
+
+### 2.0 native 库（`.so`）也本机构建
+
+```bash
+cd C:\starword
+tools\build_so.bat                            # 重建 libstellar_solver.so（<1 分钟）
+tools\build_so.bat <自定义输出路径>            # 可选
+```
+
+产物 `code/app/src/main/jniLibs/arm64-v8a/libstellar_solver.so`（约 5.07MB，
+6 个 JNI 导出符号）。改动 `code/app/src/main/cpp/astro_bridge.c` 后必须重跑它。
+
+**关键事实（打通本机构建的前提）**：Windows 版 NDK clang **能直接链接 Linux ELF
+格式的 `.a` 静态库** —— 不需要 WSL / 虚拟机 / Linux 机器。
+
+依赖放在工程外（不入库，需在换机时重新准备）：
+
+```
+C:\dev\astrometry-local\
+  ├── src\include\astrometry\   astrometry 0.97 头文件
+  ├── lib\…\*.a                 8 个静态库（solver/util×3/catalogs/libkd/qfits-an/gsl-an）
+  ├── cross\{lib,include}\      cfitsio 3.47 交叉产物
+  └── out\                      构建产物临时目录
+C:\dev\android-ndk-r26d\        NDK r26d（Windows 原生 clang 17）
 ```
 
 - 环境：OpenJDK 17、Android SDK 34、Gradle 8.12.1。
@@ -83,35 +117,32 @@ gradle :app:assembleDebug                     # 构建 debug APK
   两者都读写 `app/build/tmp/kotlin-classes/debug`，并行会互锁并报
   `dexBuilderDebug` / `mergeDebugJavaResource` 失败（极易误判成环境限制）。
 - ⚠️ **不要并行发起多个 gradle 任务**，会抢守护进程互相拖死。
-- 一次全量 Kotlin 编译约 11~14 分钟（4 核 8G）；增量约 1~5 分钟。
 - native 仅 arm64-v8a；x86 模拟器走 JVM 引擎回退。
-- 本机历史上无法完成 release 打包（写 `.dex`/`.jar` 被安全策略拒绝），
-  编译与单测正常；正式发版在构建服务器上做（见 `docs/02-远端构建测试环境.md`）。
+- `.bat` 构建脚本必须是 **CRLF 行尾**（LF 会被 CMD 逐行解析失败）。
+- 本机 2026-09-17 实测：debug APK 3 分 16 秒、单测 57 秒、`.so` <1 分钟，
+  均远快于服务器（后者 1.8GB 内存，R8/全量重编译多次 OOM）。
 
 ### 2.1 发版（release）必读 —— 2026-09-17 实测（§0.68）
 
-发版在构建服务器（1.8GB 内存）上做，三个坑都踩过，照下面做：
+发版在本机做，要点：
 
-1. **签名密钥必须先在位**：`~/.starcam/starcam-release.jks` +
-   `~/.starcam/starcam-keystore.properties`（600 权限；properties 里的
-   `storeFile` 要指向服务器路径）。**缺了不会报错** —— `signingConfig` 静默变
-   null，产物是**未签名 APK**（装不上）。**发版后必须验证签名**：
+1. **签名密钥必须先在位**：`C:\dev\starcam-release.jks` +
+   `C:\dev\starcam-keystore.properties`（后者里的 `storeFile` 指向 jks）。
+   三级查找顺序见 `code/app/build.gradle.kts`：环境变量 `STARCAM_KEYSTORE` →
+   `-PkeystoreProps` → `~/.starcam/…`。**缺了不会报错** —— `signingConfig` 静默
+   变 null，产物是**未签名 APK**（装不上）。**发版后必须验证签名**：
    ```bash
-   apksigner verify --print-certs <apk>   # 期望 CN=StarCam，SHA-256 b04a854f…
+   java -jar C:\dev\android-sdk\build-tools\34.0.0\lib\apksigner.jar verify --print-certs <apk>
+   # 期望 CN=StarCam，SHA-256 b04a854f…
    ```
-   本机 jks 在 `C:\dev\starcam-release.jks`（不入库）。
-2. **release 构建要显式给堆**：默认/800m 会让 R8
-   `OutOfMemoryError: Java heap space`（**Java 堆溢出，不是物理 OOM**）。用：
+2. **release 构建要显式给堆**：默认堆可能让 R8 `OutOfMemoryError: Java heap space`
+   （**Java 堆溢出，不是物理 OOM**）。用：
    ```bash
-   gradle -Dorg.gradle.jvmargs="-Xmx1400m -XX:MaxMetaspaceSize=400m -XX:+UseSerialGC" \
+   gradle -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=512m" \
           --no-daemon --console=plain :app:assembleRelease
    ```
-   R8 是单线程任务，SerialGC 省内存。实测 3m13s 成功。
-3. **测试不要加 `--rerun-tasks`**（服务器上会触发全量 Kotlin 重编译 → 被内核
-   OOM-kill）。**分两步**：先让编译产物就绪，再单独跑 `:app:testDebugUnitTest`
-   （复用产物，45 秒跑完 145 项）。
 
-另有：R8 若报 `Missing class xxx` → **不是 OOM，是缺 keep 规则**。R8 会把建议规则
+R8 若报 `Missing class xxx` → **不是 OOM，是缺 keep 规则**。R8 会把建议规则
 写到 `app/build/outputs/mapping/release/missing_rules.txt`，照抄进
 `code/app/proguard-rules.pro` 即可（§0.68 就是这么修的 Tink/errorprone 注释类）。
 
