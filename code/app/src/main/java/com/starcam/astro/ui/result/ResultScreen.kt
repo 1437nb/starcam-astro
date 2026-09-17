@@ -77,6 +77,7 @@ import com.starcam.astro.astro.AstroTips
 import com.starcam.astro.astro.DemoSolver
 import com.starcam.astro.astro.LayerFlags
 import com.starcam.astro.astro.LayeredRenderer
+import com.starcam.astro.astro.LocalStarMatcher
 import com.starcam.astro.astro.OverlayRenderer
 import com.starcam.astro.astro.PlateSolveException
 import com.starcam.astro.astro.SkyRegion
@@ -552,6 +553,9 @@ private fun ErrorContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                 textAlign = TextAlign.Center,
             )
+            // §0.70 技术细节（可折叠）：把引擎尝试轨迹与内部统计摊开。
+            // 用户反馈「识别不了」时，复制这段就能让开发者定位 —— 比截图可靠。
+            SolveLogDetails(diagnostics)
         } else {
             Spacer(Modifier.height(12.dp))
             Text(
@@ -1281,4 +1285,87 @@ private fun formatDec(decDeg: Double): String {
     val m = ((a - d) * 60.0).toInt()
     val s = (((a - d) * 60.0 - m) * 60.0).toInt()
     return "%s%02d° %02d′ %02d″".format(sign, d, m, s)
+}
+
+/**
+ * §0.70 识别失败的技术细节（可折叠）。
+ *
+ * 为什么要有它：用户报「识别不了」时，截图只能看到「星点充足但未匹配」这类
+ * 笼统结论，无法定位。这里把**引擎尝试轨迹**与**自研引擎内部统计**
+ * （投票轮/打分轮）摊开，并可一键复制 —— 开发者据此就能判断是提星、
+ * 投票、尺度还是星表域的问题。
+ *
+ * 完整的失败现场（含匹配器实际吃到的像素）落在应用日志目录，
+ * 见 [com.starcam.astro.data.SolveLogStore]，设置页可导出。
+ */
+@Composable
+private fun SolveLogDetails(diagnostics: SolveDiagnostics?) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var expanded by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    val detail = androidx.compose.runtime.remember {
+        buildString {
+            appendLine("检星 ${diagnostics?.starCount ?: 0} 颗")
+            appendLine("引擎轨迹：${diagnostics?.enginesTried?.joinToString(" → ") ?: "-"}")
+            appendLine("投票轮：${LocalStarMatcher.debugVoteStats ?: "-"}")
+            appendLine("打分轮：${LocalStarMatcher.debugScoredStats ?: "-"}")
+            LocalStarMatcher.debugScoredBest?.let { appendLine("打分轮最优对齐：$it 颗") }
+            LocalStarMatcher.debugScoredInFrame?.let { appendLine("画面内星表星：$it 颗") }
+        }
+    }
+    Spacer(Modifier.height(14.dp))
+    TextButton(onClick = { expanded = !expanded }) {
+        Text(
+            if (expanded) "▾ 隐藏技术细节" else "▸ 查看技术细节（反馈问题时可复制）",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    if (expanded) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            ),
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AssistChip(
+                        onClick = {
+                            val clip = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            clip.setPrimaryClip(
+                                android.content.ClipData.newPlainText("StarCam 诊断", detail),
+                            )
+                        },
+                        label = { Text("复制") },
+                    )
+                    AssistChip(
+                        onClick = {
+                            val dir = com.starcam.astro.data.SolveLogStore.logDir(ctx)
+                            val clip = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            clip.setPrimaryClip(
+                                android.content.ClipData.newPlainText("StarCam 日志路径", dir.absolutePath),
+                            )
+                        },
+                        label = { Text("复制日志路径") },
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "完整现场（含匹配器输入的像素）已存于应用日志目录，" +
+                        "可在「设置 → 识别日志」导出。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                )
+            }
+        }
+    }
 }

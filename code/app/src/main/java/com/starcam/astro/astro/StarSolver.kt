@@ -327,6 +327,24 @@ object StarSolver {
         // 本地弱解被官方复核拒绝后，用自研视场作为官方流程的 scale 先验
         // （避免复核不一致后再走 12s+16s 盲解两段，§0.33.3 性能修复）
         var fovOverride: Double? = null
+        // §0.70 识别日志：记录本次识别的完整过程。
+        // 与 §0.64 的调试转储的关键区别：**release 构建也生效** —— 用户装的是
+        // release 包，旧转储只在 debug 写盘，所以一直没派上用场。
+        val logT0 = System.currentTimeMillis()
+        val report = com.starcam.astro.data.SolveLogStore.newReport(
+            context, imagePath, display.width, display.height,
+        )
+        // §0.70：失败现场要落一份「匹配器实际吃到的像素」，才可能在开发机精确重放。
+        // 在本地引擎分支检测星点时顺手抓取（该分支本来就要算灰度）。
+        var lastGraySnapshot: FloatArray? = null
+        var lastGrayW = 0
+        var lastGrayH = 0
+        com.starcam.astro.data.SolveLogStore.line(
+            context,
+            "=== 开始识别 ${java.io.File(imagePath).name} ${display.width}x${display.height} " +
+                "计划=${steps.joinToString(",")} " +
+                "fov=${fov?.let { "%.1f°".format(it) } ?: "无EXIF"}",
+        )
         for (engine in steps) {
             when (engine) {
                 SolveEngine.ASTROMETRY_NATIVE -> {
@@ -519,7 +537,32 @@ object StarSolver {
                             nativeSolve.indexId?.let { append(" · index-$it") }
                             nativeSolve.nMatch?.let { append(" · 匹配 $it 星") }
                         }
+                        com.starcam.astro.data.SolveLogStore.line(
+                            context,
+                            "官方引擎成功：$detail logodds=${nativeSolve.logodds} " +
+                                "耗时=${System.currentTimeMillis() - logT0}ms",
+                        )
+                        com.starcam.astro.data.SolveLogStore.addStep(
+                            report, "官方引擎", "solved",
+                            "index-${nativeSolve.indexId} nmatch=${nativeSolve.nMatch} " +
+                                "logodds=${nativeSolve.logodds} $nativeDetail",
+                            System.currentTimeMillis() - logT0,
+                        )
+                        writeSuccessLog(context, report, imagePath, "官方引擎", detail)
                         return@withContext EngineResult(nativeSolve, engine, detail, currentDisplay)
+                    } else {
+                        // §0.70 失败诊断：把原生层留下的提星信息（nstars/rc/gmean）
+                        // 一并记下来 —— 这是判断「是提星失败还是匹配失败」的关键
+                        val diag = "nstars=${StellarSolverNative.lastFailNStars} " +
+                            "rc=${StellarSolverNative.lastFailRc} " +
+                            "gmean=${StellarSolverNative.lastFailGMean}"
+                        com.starcam.astro.data.SolveLogStore.line(
+                            context, "官方引擎失败（所有轮次）：$diag",
+                        )
+                        com.starcam.astro.data.SolveLogStore.addStep(
+                            report, "官方引擎", "unsolved", diag,
+                            System.currentTimeMillis() - logT0,
+                        )
                     }
                 }
 
@@ -575,10 +618,53 @@ object StarSolver {
                             null
                         }
                     } else null
+                    // §0.70：自研引擎的内部状态（投票轮/打分轮）是排查「为什么匹配不上」
+                    // 最直接的证据，全部记入日志与失败现场
+                    if (stars != null) {
+                        com.starcam.astro.data.SolveLogStore.setStars(report, stars)
+                        // §0.70：抓一份匹配器实际吃到的像素（失败时落盘，开发机可重放）
+                        if (lastGraySnapshot == null) {
+                            try {
+                                lastGraySnapshot = LocalStarMatcher.bitmapToGray(currentDisplay)
+                                lastGrayW = currentDisplay.width
+                                lastGrayH = currentDisplay.height
+                            } catch (_: Throwable) {
+                            }
+                        }
+                    }
                     if (matched != null && acceptLocalSolve(context, currentDisplay, matched)) {
                         val detail = "内置星表 · 内点 ${matched.inlierCount} 颗"
+                        com.starcam.astro.data.SolveLogStore.line(
+                            context,
+                            "内置星表成功：$detail scale=%.2f\" 耗时=%dms"
+                                .format(matched.solve.pixScaleArcsec, System.currentTimeMillis() - logT0),
+                        )
+                        com.starcam.astro.data.SolveLogStore.addStep(
+                            report, "内置星表", "solved",
+                            "内点=${matched.inlierCount} scale=%.2f".format(matched.solve.pixScaleArcsec),
+                            System.currentTimeMillis() - logT0,
+                        )
+                        writeSuccessLog(context, report, imagePath, "内置星表", detail)
                         return@withContext EngineResult(matched.solve, engine, detail, currentDisplay)
                     }
+                    // §0.70 失败归因：区分三种情形，直接写进用户能看到的摘要
+                    val why = when {
+                        stars == null -> "提星失败（原生与回退检测器均未给出星点）"
+                        stars.size < 5 -> "星点太少（${stars.size} 颗，匹配需 ≥5）"
+                        matched == null -> buildString {
+                            append("星点 ${stars.size} 颗但未匹配")
+                            append("；投票候选=${LocalStarMatcher.debugVoteStats}")
+                            append("；打分轮=${LocalStarMatcher.debugScoredStats}")
+                            append("（best=${LocalStarMatcher.debugScoredBest}")
+                            append(" inFrame=${LocalStarMatcher.debugScoredInFrame}）")
+                        }
+                        else -> "有解但内点仅 ${matched.inlierCount} 颗，被官方复核拒绝"
+                    }
+                    com.starcam.astro.data.SolveLogStore.line(context, "内置星表失败：$why")
+                    com.starcam.astro.data.SolveLogStore.addStep(
+                        report, "内置星表", "unsolved", why,
+                        System.currentTimeMillis() - logT0,
+                    )
                     // §0.64 诊断：本地匹配失败（或低内点被官方复核拒绝）时落盘实际像素
                     // 与检出星点，供开发机精确重放（仅 debug 构建，见 dumpLocalFail）
                     if (stars != null) {
@@ -623,6 +709,14 @@ object StarSolver {
                             solve.subId?.let { "任务 #$it" },
                             "在线定标",
                         ).joinToString(" · ")
+                        com.starcam.astro.data.SolveLogStore.line(
+                            context, "在线识别成功：$detail 耗时=${System.currentTimeMillis() - logT0}ms",
+                        )
+                        com.starcam.astro.data.SolveLogStore.addStep(
+                            report, "在线识别", "solved", detail,
+                            System.currentTimeMillis() - logT0,
+                        )
+                        writeSuccessLog(context, report, imagePath, "在线识别", detail)
                         return@withContext EngineResult(solve, engine, detail, currentDisplay)
                     } finally {
                         // 仅在内存中保留渲染基准；上传副本不应继续留在缓存目录。
@@ -652,6 +746,42 @@ object StarSolver {
                     enginesTried = enginesTried,
                 ),
             )
+            // §0.70 失败落盘：报告 + 匹配器实际吃到的像素（可在开发机精确重放）。
+            // 这是「识别不出」类问题唯一的现场证据，release 也写。
+            val failVerdict = SolveDiagnostics(
+                starCount = last?.size ?: 0,
+                stars = emptyList(),
+                enginesTried = enginesTried,
+            ).let { "${it.verdict}（引擎：${enginesTried.joinToString("→")}）" }
+            try {
+                report.put("verdict", failVerdict)
+                report.put("totalMs", System.currentTimeMillis() - logT0)
+                val dir = com.starcam.astro.data.SolveLogStore.dumpFailure(
+                    context, report, lastGraySnapshot, lastGrayW, lastGrayH,
+                )
+                com.starcam.astro.data.SolveLogStore.line(
+                    context,
+                    "=== 识别失败（$failVerdict）总耗时=${System.currentTimeMillis() - logT0}ms" +
+                        (dir?.let { " 现场=${it.name}" } ?: ""),
+                )
+            } catch (_: Throwable) {
+            }
             null
+        }
+    }
+
+    /** §0.70：成功时也留一条可追溯记录（失败现场不写，避免占空间） */
+    private fun writeSuccessLog(
+        context: Context,
+        report: org.json.JSONObject,
+        imagePath: String,
+        engine: String,
+        detail: String,
+    ) {
+        try {
+            report.put("engine", engine)
+            report.put("detail", detail)
+            report.put("verdict", "成功（$engine）")
+        } catch (_: Throwable) {
         }
     }

@@ -2,6 +2,7 @@ package com.starcam.astro.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -63,6 +64,16 @@ fun SettingsScreen(
     var appLanguage by remember { mutableStateOf(LocaleState.language) }
     var sensorPointing by remember { mutableStateOf(settings.sensorAssistedPointing) }
     var saved by remember { mutableStateOf(false) }
+    // §0.70 识别日志
+    var logEnabled by remember {
+        mutableStateOf(com.starcam.astro.data.SolveLogStore.isEnabled(context))
+    }
+    var logStats by remember {
+        mutableStateOf(com.starcam.astro.data.SolveLogStore.stats(context))
+    }
+    fun refreshStats() {
+        logStats = com.starcam.astro.data.SolveLogStore.stats(context)
+    }
     val isEn = LocaleState.isEnglish
 
     Scaffold(
@@ -188,6 +199,62 @@ fun SettingsScreen(
                     },
                 )
             }
+
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            Spacer(Modifier.height(20.dp))
+
+            // §0.70 识别日志：用户报告「识别不了」时，这里是取证据的入口
+            Text("识别日志", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("记录识别过程", fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "记录每次识别的引擎轨迹与失败原因；识别不出的照片会额外保存" +
+                            "现场数据。只存本机、不上传，可随时清空。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(16.dp))
+                Switch(
+                    checked = logEnabled,
+                    onCheckedChange = { checked ->
+                        logEnabled = checked
+                        com.starcam.astro.data.SolveLogStore.setEnabled(context, checked)
+                        refreshStats()
+                    },
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                logStats,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { refreshStats() }) { Text("刷新统计") }
+                OutlinedButton(
+                    onClick = {
+                        com.starcam.astro.data.SolveLogStore.clearAll(context)
+                        refreshStats()
+                    },
+                ) { Text("清空日志") }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "日志目录：${com.starcam.astro.data.SolveLogStore.logDir(context).absolutePath}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
 
             Spacer(Modifier.height(20.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
