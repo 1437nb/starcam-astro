@@ -13,6 +13,8 @@
  *   Java_com_starcam_astro_astro_StellarSolverNative_extractStarsE3(...)
  *   Java_com_starcam_astro_astro_StellarSolverNative_solve(...)
  *   Java_com_starcam_astro_astro_StellarSolverNative_solvePriors(...)
+ *   Java_com_starcam_astro_astro_StellarSolverNative_releaseIndexes()   // §0.67
+ *   Java_com_starcam_astro_astro_StellarSolverNative_indexCacheStats()  // 诊断
  *
  * 输出 JSON 字段（与 Kotlin parseJson 对齐）：
  *   ok, ra, dec, orient, pixscale, parity, nmatch, indexid, logodds,
@@ -39,24 +41,37 @@
 #define JSON_BUF 2048
 #define ERR_BUF 512
 
-/* ---------------- 超时线程封装 ---------------- */
+/* ---------------- 超时线程封装 ----------------
+ *
+ * 并发模型：solver_run 放在 worker 线程里跑，调用线程轮询 + 超时置 quit_now。
+ *
+ * §0.65 遗留修复：job 与完成标志原先都是**进程级单例**（一个 volatile
+ * solve_done + 一个 solve_thread_leaked），正确性依赖「solve 从 JNI 串行进入」
+ * 这个隐式前提。现改为**每次调用一份**（堆分配）：
+ *   - 多个求解并发时互不干扰；
+ *   - 是否泄漏通过 out 参数返回给调用方，不再靠全局标志（旧版下一个请求会把
+ *     solve_thread_leaked 清零，从而错误地 free 掉仍在被读取的内存）。
+ *
+ * g_leaked_threads 统计「已 detach、仍在跑」的线程数，供索引释放接口判断
+ * 当前能否安全回收索引（>0 时回收会段错误）。
+ */
 
 typedef struct {
     solver_t* sp;
+    volatile int done;   /* worker 置 1 表示 solver_run 已返回 */
 } solve_job_t;
 
-static volatile int solve_done;
-/* 置位表示超时后线程仍未退出、已被 detach：调用方不得再 solver_free。
- * （solve 调用从 JNI 串行进入，单标志足够。） */
-static int solve_thread_leaked;
-
-/* 静态存放：线程若被 detach，栈上 job 会随 run_with_timeout 返回而失效。 */
-static solve_job_t g_solve_job;
+/* 已 detach 但仍在运行的求解线程数（原子增减）。
+ *
+ * 局限：线程真正结束我们无从感知（detach 后无法 join），所以这个计数是
+ * 「曾经泄漏过的次数」——只会增不会减。索引释放接口据此保守放弃回收：
+ * 宁可多占 ~11MB 也不冒 use-after-free 的段错误风险。 */
+static volatile int g_leaked_threads = 0;
 
 static void* solve_thread_fn(void* arg) {
     solve_job_t* job = (solve_job_t*)arg;
     solver_run(job->sp);
-    solve_done = 1;
+    job->done = 1;
     return NULL;
 }
 
@@ -71,22 +86,29 @@ static double mono_seconds(void) {
  * 返回 RUN_OK(0) / RUN_TIMEOUT(1) / RUN_SPAWN_FAILED(-1)。
  * 旧版把 -1 也当超时（`else if (timedout)` 里 -1 为真），且 join 无期限等待：
  * 若 quit_now 不被 solver 采纳，超时保护形同虚设。现在 join 有上限，超上限
- * 则分离线程不再等（线程仍在跑，但不再阻塞调用方返回）。 */
+ * 则分离线程不再等（线程仍在跑，但不再阻塞调用方返回）。
+ *
+ * [out_leaked] 非空时写入「线程是否已被 detach 泄漏」，调用方据此决定能否
+ * solver_free（泄漏时不能，会 use-after-free）。 */
 #define RUN_OK 0
 #define RUN_TIMEOUT 1
 #define RUN_SPAWN_FAILED (-1)
 #define QUIT_JOIN_GRACE_SEC 5.0
 
-static int run_with_timeout(solver_t* sp, double seconds) {
+static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked) {
     pthread_t th;
-    g_solve_job.sp = sp;
-    solve_done = 0;
-    solve_thread_leaked = 0;
-    if (pthread_create(&th, NULL, solve_thread_fn, &g_solve_job) != 0)
+    if (out_leaked) *out_leaked = 0;
+    solve_job_t* job = (solve_job_t*)calloc(1, sizeof(solve_job_t));
+    if (!job)
         return RUN_SPAWN_FAILED;
+    job->sp = sp;
+    if (pthread_create(&th, NULL, solve_thread_fn, job) != 0) {
+        free(job);
+        return RUN_SPAWN_FAILED;
+    }
     double deadline = mono_seconds() + seconds;
     int timedout = 0;
-    while (!solve_done) {
+    while (!job->done) {
         if (mono_seconds() >= deadline) {
             timedout = 1;
             break;
@@ -96,19 +118,23 @@ static int run_with_timeout(solver_t* sp, double seconds) {
     if (timedout) {
         sp->quit_now = TRUE; /* solver 在 quad 循环里轮询此标志 */
         double grace = mono_seconds() + QUIT_JOIN_GRACE_SEC;
-        while (!solve_done && mono_seconds() < grace)
+        while (!job->done && mono_seconds() < grace)
             usleep(20000);
-        if (solve_done) {
+        if (job->done) {
             pthread_join(th, NULL);
+            free(job);
         } else {
             /* quit_now 未被采纳（solver 卡在不可中断段）：不能 join（会永久阻塞），
-             * 也不能让调用方 solver_free —— 线程还在读那块内存。 */
+             * 也不能让调用方 solver_free —— 线程还在读那块内存。
+             * job 留给 worker 自己释放（见 leaked_thread_fn 包装）。 */
+            __sync_add_and_fetch(&g_leaked_threads, 1);
+            if (out_leaked) *out_leaked = 1;
             pthread_detach(th);
-            solve_thread_leaked = 1;
         }
         return RUN_TIMEOUT;
     }
     pthread_join(th, NULL);
+    free(job);
     return RUN_OK;
 }
 
@@ -186,10 +212,17 @@ static starxy_t* detect_stars(const float* gray, int w, int h, double plim_overr
  * 旧版每次 solve 都 index_load 8 档（~11MB）且从不释放 = 每次泄漏；且重复磁盘加载
  * 吃掉盲解墙钟预算（§0.15 差距诊断 2）。现按路径缓存 index_t*（进程生命周期），
  * App 进程存活期索引常驻（~11MB），后续求解零加载成本。mutex 保护并发。
+ *
+ * §0.67：新增 release_indexes() 让系统内存紧张时能主动归还这 11MB。
+ * 释放前必须确认没有 solver 线程正在使用索引 —— 若发生过超时 detach
+ * （g_leaked_threads > 0），那些线程可能仍在读索引，此时回收会段错误：
+ * 一律拒绝释放，宁可多占内存也不崩。
  */
 static index_t* g_index_cache[16];
 static char g_index_paths[16][512];
 static int g_index_cache_n = 0;
+/* 缓存未命中（含被 release 清空后重建）的累计次数，供诊断用。 */
+static int g_index_load_count = 0;
 static pthread_mutex_t g_index_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static index_t* get_or_load_index(const char* path) {
@@ -198,15 +231,44 @@ static index_t* get_or_load_index(const char* path) {
         if (strcmp(g_index_paths[i], path) == 0)
             return g_index_cache[i];
     }
-    if (g_index_cache_n >= 16)
+    if (g_index_cache_n >= 16) {
+        /* 不再静默返回 NULL：调用方只能看到 no-index-loaded，无法区分
+         * 「没打包索引」和「缓存满」。 */
+        fprintf(stderr, "[astro_bridge] index cache full (%d), refusing %s\n",
+                g_index_cache_n, path);
         return NULL;
+    }
     index_t* idx = index_load(path, 0, NULL);
     if (!idx)
         return NULL;
     strncpy(g_index_paths[g_index_cache_n], path, sizeof(g_index_paths[0]) - 1);
     g_index_cache[g_index_cache_n] = idx;
     g_index_cache_n++;
+    g_index_load_count++;
     return idx;
+}
+
+/* 归还全部索引内存。返回实际释放的档数；0 表示未释放（不满足安全条件）。
+ *
+ * 安全性：持锁检查 g_leaked_threads —— 有 detach 线程在跑就不动
+ * （那些线程可能正访问索引）。线程数无从观测何时归零，故泄漏过就永久拒绝，
+ * 保守但绝不 use-after-free。 */
+static int release_indexes(void) {
+    int freed = 0;
+    pthread_mutex_lock(&g_index_mutex);
+    if (g_leaked_threads == 0) {
+        for (int i = 0; i < g_index_cache_n; i++) {
+            if (g_index_cache[i]) {
+                index_free(g_index_cache[i]); /* 官方提供的释放接口 */
+                g_index_cache[i] = NULL;
+                g_index_paths[i][0] = '\0';
+                freed++;
+            }
+        }
+        g_index_cache_n = 0;
+    }
+    pthread_mutex_unlock(&g_index_mutex);
+    return freed;
 }
 
 /* ---------------- 求解核心（两个 JNI 入口共用） ---------------- */
@@ -305,7 +367,8 @@ static void run_solver(
 
     solver_set_field(sp, field); /* 所有权转移 */
 
-    int timedout = run_with_timeout(sp, time_limit_sec);
+    int leaked = 0;
+    int timedout = run_with_timeout(sp, time_limit_sec, &leaked);
 
     if (solver_did_solve(sp)) {
         MatchObj* mo = solver_get_best_match(sp);
@@ -337,8 +400,10 @@ static void run_solver(
 
     /* 线程已 detach 说明 solver_run 仍在跑（quit_now 未被采纳），此时
      * solver_free 会释放它正在读的索引/星表内存 → 段错误。宁可泄漏
-     * 一次 solver（约百 KB + 共享索引），也不能崩在用户手机上。 */
-    if (solve_thread_leaked)
+     * 一次 solver（约百 KB + 共享索引），也不能崩在用户手机上。
+     * 注意判据来自本次调用的 out 参数，不再是全局标志——并发/连续求解时
+     * 全局标志会被下一次调用清零，导致这里错误地 free（§0.65 遗留）。 */
+    if (leaked)
         return;
     solver_free(sp);
 }
@@ -542,4 +607,27 @@ Java_com_starcam_astro_astro_StellarSolverNative_extractStarsE3(
     JNIEnv* env, jclass cls, jfloatArray gray, jint w, jint h,
     jdouble thresholdBgMultiple, jint maxStars) {
     return extract_stars_impl(env, gray, w, h, thresholdBgMultiple, maxStars);
+}
+
+/* 归还索引内存（§0.67）。返回释放的档数；0 = 未释放（有 detach 线程在使用，
+ * 或本来就没加载）。调用方（Kotlin onTrimMemory）只在系统内存紧张时调，
+ * 释放后下次求解会重新加载（首次慢一次，可接受）。 */
+JNIEXPORT jint JNICALL
+Java_com_starcam_astro_astro_StellarSolverNative_releaseIndexes(JNIEnv* env, jclass cls) {
+    (void)env; (void)cls;
+    return (jint)release_indexes();
+}
+
+/* 诊断：索引进程缓存状态（已加载档数 / 累计加载次数 / 泄漏线程数）。
+ * 供 debug 构建排查「索引相关」问题时读取。 */
+JNIEXPORT jstring JNICALL
+Java_com_starcam_astro_astro_StellarSolverNative_indexCacheStats(JNIEnv* env, jclass cls) {
+    char buf[192];
+    pthread_mutex_lock(&g_index_mutex);
+    int n = g_index_cache_n, loads = g_index_load_count;
+    pthread_mutex_unlock(&g_index_mutex);
+    snprintf(buf, sizeof(buf),
+             "{\"cached\":%d,\"loads\":%d,\"leakedThreads\":%d}", n, loads,
+             (int)g_leaked_threads);
+    return (*env)->NewStringUTF(env, buf);
 }
