@@ -19,12 +19,13 @@
   **已于 2026-09-12 合并为本仓库**，旧副本全部归档到 `C:\star\_archive\`。
 - **不要再从别处开发、不要手工同步副本。** 改代码只在这里改。
 - 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），分支 `main`。
-- 当前基线：**v1.5.57**（versionCode 77）；v1.5.49/51/52/53/55 已发布到 GitHub Releases，
-  v1.5.56 未发布（被 v1.5.57 取代）。
+- 当前基线：**v1.5.57**（versionCode 77）**已发版**（签名 APK 在 GitHub Releases）；
+  v1.5.49/51/52/53/55 已发布，v1.5.54/56 未单独发布（内容并入后续版本）。
 - v1.5.57 为「索引内存可归还」（§0.67）：求解线程状态从全局单例改为 job 实例级
   （修掉 §0.65 遗留的 use-after-free 隐患），新增 `releaseIndexes()` JNI 接口 +
   `StarCamApplication.onTrimMemory` 钩子，系统内存紧张时归还 11MB 索引缓存。
-  v1.5.54 未发布（其内容已并入 v1.5.55）。
+  发版时额外修掉一个 §0.66 回归（§0.68）：Tink 引用的 errorprone 注解类缺失导致
+  `minifyReleaseWithR8` 失败，**v1.5.56/57 此前都打不出 release 包**。
 - v1.5.56 为工程健壮性批次（§0.66）：API Key 加密存储、构建脚本可移植（去
   `C:/dev/` 硬编码）、GitHub Actions CI（单测 + gitleaks）、相机 Y 平面灰度、
   在线客户端加固（HTTPS/退避/去重）、6 个调试开关收为 internal。
@@ -86,6 +87,34 @@ gradle :app:assembleDebug                     # 构建 debug APK
 - native 仅 arm64-v8a；x86 模拟器走 JVM 引擎回退。
 - 本机历史上无法完成 release 打包（写 `.dex`/`.jar` 被安全策略拒绝），
   编译与单测正常；正式发版在构建服务器上做（见 `docs/02-远端构建测试环境.md`）。
+
+### 2.1 发版（release）必读 —— 2026-09-17 实测（§0.68）
+
+发版在构建服务器（1.8GB 内存）上做，三个坑都踩过，照下面做：
+
+1. **签名密钥必须先在位**：`~/.starcam/starcam-release.jks` +
+   `~/.starcam/starcam-keystore.properties`（600 权限；properties 里的
+   `storeFile` 要指向服务器路径）。**缺了不会报错** —— `signingConfig` 静默变
+   null，产物是**未签名 APK**（装不上）。**发版后必须验证签名**：
+   ```bash
+   apksigner verify --print-certs <apk>   # 期望 CN=StarCam，SHA-256 b04a854f…
+   ```
+   本机 jks 在 `C:\dev\starcam-release.jks`（不入库）。
+2. **release 构建要显式给堆**：默认/800m 会让 R8
+   `OutOfMemoryError: Java heap space`（**Java 堆溢出，不是物理 OOM**）。用：
+   ```bash
+   gradle -Dorg.gradle.jvmargs="-Xmx1400m -XX:MaxMetaspaceSize=400m -XX:+UseSerialGC" \
+          --no-daemon --console=plain :app:assembleRelease
+   ```
+   R8 是单线程任务，SerialGC 省内存。实测 3m13s 成功。
+3. **测试不要加 `--rerun-tasks`**（服务器上会触发全量 Kotlin 重编译 → 被内核
+   OOM-kill）。**分两步**：先让编译产物就绪，再单独跑 `:app:testDebugUnitTest`
+   （复用产物，45 秒跑完 145 项）。
+
+另有：R8 若报 `Missing class xxx` → **不是 OOM，是缺 keep 规则**。R8 会把建议规则
+写到 `app/build/outputs/mapping/release/missing_rules.txt`，照抄进
+`code/app/proguard-rules.pro` 即可（§0.68 就是这么修的 Tink/errorprone 注释类）。
+
 
 ## 3. 硬性约束（用户要求，不可违反）
 
