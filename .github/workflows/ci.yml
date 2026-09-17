@@ -1,11 +1,11 @@
 name: CI
 
-# 回归自动化：任何 push / PR 都跑一遍纯 JVM 单测。
+# 回归自动化：任何 push / PR 都跑一遍纯 JVM 单测 + 凭据扫描。
 # 本机历史上全靠手工执行「150 项 0 失败」，这个 workflow 把它变成硬保证。
 #
 # 注意：真值回归台（RealPhotoMatchTest / Photo12RegressionTest）依赖不入库的
-# 真实照片素材（testdata/，含私拍原图），在 CI 里自动跳过（素材缺失时那些
-# 测试类自身的 File 检查会失败，故此处按标签排除）。
+# 真实照片素材（testdata/，含私拍原图），在 CI 里用 -PskipPhotoTests=true 跳过。
+# 该 flag 只影响 CI；本机照常执行（那是宽场/暗星等修复的唯一真值保护）。
 
 on:
   push:
@@ -27,19 +27,27 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # 不用 android-actions/setup-android：
+      # 该 action 的 v3 会检测 runner 预装的 cmdline-tools 版本并跑
+      # `sdkmanager tools`，在 ubuntu-latest 上以 exit code 1 失败
+      # （实测日志：Wrong version in preinstalled sdkmanager）。
+      # GitHub 的 ubuntu runner 本就预装 Android SDK（含 platform-34 与
+      # build-tools），直接指向它即可，无需第三方 action。
+      - name: Point Gradle at the preinstalled Android SDK
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "SDK = $SDK"
+          ls "$SDK/platforms" "$SDK/build-tools" || true
+          echo "sdk.dir=$SDK" > code/local.properties
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v3
-
+      # gradlew 在仓库里（code/gradlew），无需额外安装 Gradle。
       # --rerun-tasks 必须保留：否则 Gradle 可能 FROM-CACHE 复用旧结果，
       # 等于没跑（AGENTS.md §2 记录的坑）。
-      # -PskipPhotoTests=true：真值回归台依赖不入库的真实照片素材，CI 无此素材。
       - name: Unit tests
         working-directory: code
         run: |
-          gradle --no-daemon --console=plain :app:testDebugUnitTest \
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --console=plain :app:testDebugUnitTest \
             --rerun-tasks \
             -PskipPhotoTests=true
 
