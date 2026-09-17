@@ -310,12 +310,14 @@ object StellarSolverNative {
                 0.114f * (c and 0xFF)
         }
         val indexes = ensureIndexes(context)
-        // 跨引擎星点复用：v1.5.55 之前 .so 内 simplexy 恒提星 0 颗（根因是
-        // simplexy_set_defaults 会 memset 整个结构体，而桥在它之前填了
-        // image/nx/ny → 全被清零，已在 §0.65 修复）。保留 JVM 提星作为
-        // 兜底：它对真机灰度差异更鲁棒，且 40 颗亮星足够官方引擎建 quad。
+        // 跨引擎星点复用（**兜底**用途，不是首选）：
+        // .so 内 simplexy 现在优先（§0.69 修正了星点来源优先级——此前外部星点
+        // 一旦 ≥4 颗就完全跳过 simplexy，而这里只传 40 颗 → 引擎拿不到广角
+        // 欠曝照片的 mag 4.5~6 暗星，quad 建不起来，官方引擎必然失败）。
+        // 只有 simplexy 真的给不出星点（≥4 颗）时，桥才会回退到这批外部星点。
+        // 上限取 200：与 sepDetectStars 的默认值同量级，避免兜底路径星点过少。
         val extStars = try {
-            com.starcam.astro.astro.LocalStarMatcher.detectStars(bitmap, 40)
+            com.starcam.astro.astro.LocalStarMatcher.detectStars(bitmap, 200)
                 .takeIf { it.size >= 4 }?.let { stars ->
                 FloatArray(1 + stars.size * 3).also { a ->
                     a[0] = stars.size.toFloat()

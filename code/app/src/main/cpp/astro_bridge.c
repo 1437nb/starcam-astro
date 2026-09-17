@@ -285,30 +285,56 @@ static void run_solver(
     out[0] = '\0';
     snprintf(out, outsz, "{\"ok\":false,\"error\":\"init\"}");
 
-    /* 星点来源优先级：外部星点（Kotlin 侧 SEP 提星，坐标 0 起 y 向下，与
-     * simplexy 约定一致）→ simplexy。
-     * 2026-08-30 真机：部分机型 ROM 上 .so 内 simplexy 提星 0 颗
-     * （rc=0 nstars=0，独立 arm64 可执行同算法却提出 462 颗——调用上下文
-     * 相关），用跨引擎星点复用绕开。 */
+    /* 星点来源优先级：**simplexy 优先，外部星点仅作兜底**。
+     *
+     * 历史沿革（勿再改回）：2026-08-30 真机观察到部分 ROM 上 .so 内 simplexy
+     * 提星 0 颗（rc=0 nstars=0），当时为绕开该问题把外部星点（Kotlin 侧 JVM
+     * 检测）放在**前面**——只要外部给了 ≥4 颗就不跑 simplexy。
+     *
+     * §0.65 已查明那次「提星 0 颗」的真因是 simplexy_set_defaults() 会 memset
+     * 整个结构体、而桥在它之前填了 image/nx/ny（三处 C 层缺陷叠加），修复后
+     * simplexy 恢复正常。但「外部星点优先」这条**遗留逻辑没跟着撤**，于是：
+     *   - Kotlin 侧只传 40 颗星（StellarSolverNative.extStars 上限），
+     *   - 引擎拿到 40 颗就再也不看 simplexy 提出的数千颗，
+     *   - 广角欠曝照片的 mag 4.5~6 暗星全被丢掉，quad 建不起来 → 解不出。
+     * 实测对照（用户 2026-09-12 南宁 74° 竖拍原图）：
+     *   simplexy 4478 源 → solve-field 解出（nmatch=141、log-odds 765）；
+     *   --objs 40        → did not solve。
+     * 故恢复「simplexy 优先」，外部星点仅在 simplexy 真的给不出星点时兜底。 */
     starxy_t* field = NULL;
     int ext_n = 0;
+    int ext_rc = -1, ext_peaks = -1;
+    double ext_gmean = 0, ext_gmax = 0;
+    starxy_t* ext_field = NULL;
     if (ext_stars) {
         ext_n = (int)ext_stars[0];
         if (ext_n >= 4) {
-            field = starxy_new(ext_n, TRUE, FALSE);
+            ext_field = starxy_new(ext_n, TRUE, FALSE);
             for (int i = 0; i < ext_n; i++) {
-                starxy_set_x(field, i, ext_stars[1 + i*3]);
-                starxy_set_y(field, i, ext_stars[2 + i*3]);
-                starxy_set_flux(field, i, ext_stars[3 + i*3]);
+                starxy_set_x(ext_field, i, ext_stars[1 + i*3]);
+                starxy_set_y(ext_field, i, ext_stars[2 + i*3]);
+                starxy_set_flux(ext_field, i, ext_stars[3 + i*3]);
             }
-            snprintf(out, outsz, "{\"ok\":false,\"error\":\"ext-stars-loaded\"}");
         }
     }
-    int ext_rc = -1, ext_peaks = -1;
-    double ext_gmean = 0, ext_gmax = 0;
-    if (!field) {
-        field = detect_stars(gray, w, h, plim_override, &ext_rc, &ext_peaks,
-                             &ext_gmean, &ext_gmax);
+    field = detect_stars(gray, w, h, plim_override, &ext_rc, &ext_peaks,
+                         &ext_gmean, &ext_gmax);
+    if (field && field->N >= 4) {
+        /* simplexy 成功：丢弃外部星点，避免两套星点混用 */
+        if (ext_field) {
+            starxy_free(ext_field);
+            ext_field = NULL;
+        }
+    } else {
+        /* simplexy 失败/星点太少：退回外部星点（若可用） */
+        if (field) {
+            starxy_free(field);
+            field = NULL;
+        }
+        if (ext_field) {
+            field = ext_field;
+            ext_field = NULL;
+        }
     }
     if (!field) {
         snprintf(out, outsz,
