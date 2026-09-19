@@ -12,17 +12,22 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.59](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.59)** —
+最新版本 **[v1.5.60](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.60)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.59-solve-log-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.59/StarCam-v1.5.59-solve-log-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.59-solve-log-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.59/StarCam-v1.5.59-solve-log-debug.apk) | 26.9 MB | 含调试日志 |
+| [StarCam-v1.5.60-wide-field-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.60/StarCam-v1.5.60-wide-field-fix-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.60-wide-field-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.60/StarCam-v1.5.60-wide-field-fix-debug.apk) | 26.9 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
 
-> ⚠️ **v1.5.55 的 release 包未签名**（装不上），请直接使用 v1.5.58 —— 本版已修复签名与
-> release 构建问题，证书与历史版本一致，可直接覆盖升级。
+> **v1.5.60 修复「星空照片识别不出来」**（2026-09-17 用户报告）：四层缺陷叠加
+> —— 投票阈值量纲错配、打分轮镜像方向写死、打分轮投影中心与展开不一致、
+> 赤经跨 0° 接缝求平均出错；并顺带修掉**识别结果的跨运行随机翻转**。
+> 实测新拍照片与旧照片全部识别成功（内点 25），离线演示 12 张 12/12，
+> 假阳性对照 8 张全部正确拒绝。签名与历史版本一致，可直接覆盖升级。
+
+> ⚠️ **v1.5.55 的 release 包未签名**（装不上），请使用 v1.5.56 及之后的版本。
 
 **系统要求**：Android 8.0（API 26）及以上，**arm64-v8a** 真机
 （离线官方引擎仅提供 arm64 原生库；x86_64 模拟器会回退到 JVM 星表引擎）。
@@ -103,6 +108,16 @@
   `Application.onTrimMemory` 钩子，在系统报 `TRIM_MEMORY_RUNNING_LOW` 时释放索引
   （阈值选在此处而非更激进，避免用户连续识别时把索引丢掉、下次反而变慢）。
   释放前检查有无超时 detach 的线程仍在运行，有则拒绝释放 —— **宁可占内存也不崩**。
+
+- **照片识别失败修复 + 结果确定性**（v1.5.60，**重要**）：修复 2026-09-17 用户报告的
+  「星空照片识别不出来」，以及修复过程中暴露的旧照片回归。根因是**四层缺陷叠加**：
+  ① 投票亮度阈值按旧检测器量纲标定（阈值绝对值不匹配 → 投票轮直接空转）；
+  ② 宽场打分轮的镜像方向写死（照片横拍/竖拍的镜像奇偶性不同，写死必错一类）；
+  ③ 打分轮胜出模型的投影中心与后续展开不一致（内点 24 的解被整体作废）；
+  ④ 赤经跨 0° 接缝处求平均出错（偏出 120°+，投影全部失败）。
+  另修掉**同一张照片多次运行结果随机翻转**（索引键未规范化导致并列项按哈希序截断）。
+  实测：新拍照片与旧照片全部识别成功（内点 25）、离线演示 12 张 12/12、
+  假阳性对照 8 张全部正确拒绝、连续 4 次运行结果完全一致。
 
 - **识别日志**（v1.5.59）：识别失败时自动留下**可复现的现场**。以前排查「照片识别不出」
   只能靠截图推断，现在会记录：每层引擎的结果与耗时、失败归因（提星失败 / 星点太少 /
