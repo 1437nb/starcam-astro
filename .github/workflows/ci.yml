@@ -68,8 +68,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 防止 nova API key 那类凭据再次进入公开历史。
+      # 防止凭据进入公开历史。
+      #
+      # 2026-09-20 事故：tools/gh_socks_tunnel.py 硬编码服务器 root 口令并提交到
+      # 公开仓库，暴露 2 天。本步骤当时**每次都报 success** —— 因为 gitleaks
+      # 走默认规则集，而默认规则只匹配「已知凭据格式」（AWS AKIA…、ghp_… 等），
+      # 「自定义变量名 = 任意口令」不在覆盖范围。
+      # 现改用仓库内 .gitleaks.toml（在默认规则之上补 SSH口令/服务器IP/root账户
+      # 三条项目专属规则 + 占位符白名单）。
       - name: Scan for leaked credentials
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: ${{ github.workspace }}/.gitleaks.toml
