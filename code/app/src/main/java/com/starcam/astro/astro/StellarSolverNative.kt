@@ -44,6 +44,15 @@ object StellarSolverNative {
     }
 
     /**
+     * §0.72 SEP 检出点的边界剔除带宽（像素）。
+     * simplexy 的背景估计在图像边缘失效，会把边界噪声判成峰值；实测失败样本
+     * 73% 的"星点"落在 30px 边界带内（该带面积仅占 6.3%，富集 11.6 倍），
+     * 而正常样本只有 1~5%。取 16px 折中：足以清掉伪影带，又不误杀真实边缘星
+     * （广角照片即便有星贴边，剔掉也无碍——投票仍需 ≥5 颗且只用画面内部星）。
+     */
+    private const val EDGE_MARGIN_PX = 16f
+
+    /**
      * 求解入口（原生实现）。[gray] 为灰度 float 像素（0..255），
      * [indexPaths] 为索引 fits 完整路径列表，[fovLoDeg]/[fovHiDeg] 为
      * 视场宽度估计范围（度），[timeLimitSec] 为求解时间上限。
@@ -128,11 +137,22 @@ object StellarSolverNative {
         null
     }
 
-    /** 用 SEP 提取星点（不求解）。返回 null 表示原生库不可用或提取失败。 */
+    /**
+     * 用 SEP 提取星点（不求解）。返回 null 表示原生库不可用或提取失败。
+     *
+     * §0.72：[thresholdBgMultiple] 是「背景 sigma 倍数」的真实语义（C 层换算成
+     * simplexy 的 plim：plim = N × 2√π × dpsf）。历史上该值被直接当作 plim
+     * 使用，2.0 实际只相当于 0.56σ，导致检出限低于噪声、提星结果全是边界伪影
+     * （用户 2026-09-17 原图识别失败根因，见 astro_bridge.c §0.72）。
+     *
+     * [lastDiag] 回填提星诊断（供识别日志记录"提星过程"）：总数、边界过滤数、
+     * flux 范围、边缘占比。
+     */
     fun sepDetectStars(
         bitmap: Bitmap,
         thresholdBgMultiple: Double = 2.0,
         maxStars: Int = 200,
+        lastDiag: StringBuilder? = null,
     ): List<DetectedStar>? {
         val w = bitmap.width
         val h = bitmap.height
@@ -148,21 +168,45 @@ object StellarSolverNative {
         val json = try {
             extractStars(gray, w, h, thresholdBgMultiple, maxStars)
         } catch (e: Throwable) {
+            lastDiag?.append("sep=${thresholdBgMultiple}σ 原生库不可用；")
             return null
         }
         return try {
             val o = JSONObject(json)
-            if (!o.optBoolean("ok", false)) return null
+            if (!o.optBoolean("ok", false)) {
+                lastDiag?.append("sep=${thresholdBgMultiple}σ 失败(${o.optString("error")})；")
+                return null
+            }
             val n = o.optInt("n", 0)
-            if (n <= 0) return null
+            if (n <= 0) {
+                lastDiag?.append("sep=${thresholdBgMultiple}σ 0 颗；")
+                return null
+            }
             val xs = o.getJSONArray("x")
             val ys = o.getJSONArray("y")
             val fs = o.getJSONArray("flux")
-            val out = ArrayList<DetectedStar>(n)
+            val raw = ArrayList<DetectedStar>(n)
             for (i in 0 until n) {
-                out.add(DetectedStar(xs.getDouble(i).toFloat(), ys.getDouble(i).toFloat(), fs.getDouble(i).toFloat()))
+                raw.add(DetectedStar(xs.getDouble(i).toFloat(), ys.getDouble(i).toFloat(), fs.getDouble(i).toFloat()))
             }
-            out
+            // §0.72 边界过滤：simplexy 在图像边界（背景估计失效区）会产生大量伪影。
+            // 实测失败样本 73% 的星点落在 30px 边界带（面积占比仅 6.3%，富集 11.6 倍），
+            // 而正常样本仅 1~5%。这些伪影会挤占 work 集并污染投票，直接剔除。
+            val margin = EDGE_MARGIN_PX
+            val out = raw.filter {
+                it.x >= margin && it.y >= margin && it.x <= w - margin && it.y <= h - margin
+            }
+            if (lastDiag != null) {
+                val border = raw.size - out.size
+                val fl = raw.map { it.brightness }.sortedDescending()
+                lastDiag.append(
+                    "sep=${thresholdBgMultiple}σ 检出${raw.size}颗".format() +
+                        "（边界剔除${border}颗→${out.size}颗）" +
+                        " flux=${"%.1f".format(fl.lastOrNull() ?: 0f)}~${"%.1f".format(fl.firstOrNull() ?: 0f)}" +
+                        " 边缘占比=${"%.0f".format(100.0 * border / raw.size)}%；",
+                )
+            }
+            out.takeIf { it.size >= 5 }
         } catch (e: Exception) {
             null
         }

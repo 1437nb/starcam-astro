@@ -549,7 +549,20 @@ static void top_k_by_flux(const starxy_t* f, int k, int* out_idx) {
     free(used);
 }
 
-/* simplexy 提星（兼容历史 extractStars：返回 x/y/flux JSON） */
+/* simplexy 提星（兼容历史 extractStars：返回 x/y/flux JSON）
+ *
+ * §0.72 阈值语义修正（用户 2026-09-17 原图识别失败根因）：
+ * 参数 [thresholdBgMultiple] 历史上被当作「背景 sigma 倍数」直接写进 plim，
+ * 但 simplexy 的 plim 是**峰值显著度**，检出限公式为
+ *     limit = sigma / (2*sqrt(pi)*dpsf) * plim
+ * dpsf 默认 1.0 时系数 1/(2√π) ≈ 0.282，即 plim=2.0 只相当于 **0.56σ** ——
+ * 远低于噪声，整幅图的噪声起伏全部过阈；dmask 把大片区域连成一块后
+ * 超过 maxsize=2000 被判为延展天体丢弃，最终只剩**图像边界**（背景估计
+ * 失效区）的伪影。实测用户 report.json：172 颗星里 73% 落在 30px 边界带
+ * （面积占比仅 6.3%，富集 11.6 倍），0/172 落在真实亮源上，最大 flux 96.7
+ * （同一设备正常输出为 4143），且有 3 颗负 flux。
+ * 换算：调用方语义「N sigma」→ plim = N * 2*sqrt(pi)*dpsf = N * 3.5449。
+ */
 static jstring extract_stars_impl(JNIEnv* env, jfloatArray gray, jint w, jint h,
                                   jdouble thresholdBgMultiple, jint maxStars) {
     int n = 0;
@@ -567,9 +580,13 @@ static jstring extract_stars_impl(JNIEnv* env, jfloatArray gray, jint w, jint h,
     s.image = g;
     s.nx = w;
     s.ny = h;
-    /* 阈值：调用方给的是「背景 sigma 倍数」，直接映射 plim（默认 8.0） */
-    if (thresholdBgMultiple > 0.0)
-        s.plim = (float)thresholdBgMultiple;
+    /* 阈值换算：调用方给「背景 sigma 倍数」→ plim（见上方 §0.72 说明）。
+     * 下限 4.0 防止调用方传过小的值把检出限压回噪声（历史 2.0 的教训）。 */
+    if (thresholdBgMultiple > 0.0) {
+        double plim = thresholdBgMultiple * 2.0 * sqrt(M_PI) * SIMPLEXY_DEFAULT_DPSF;
+        if (plim < 4.0) plim = 4.0;
+        s.plim = (float)plim;
+    }
     /* rc=0 表示 dmask 未标记任何超阈值像素（真无星）；成败以 npeaks 为准。
      * 旧代码用 `rc != 0 || npeaks <= 0` 判失败，语义正好相反。 */
     simplexy_run(&s);

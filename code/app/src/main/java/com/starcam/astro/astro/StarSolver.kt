@@ -572,9 +572,13 @@ object StarSolver {
                     val stars = try {
                         // SEP 弱星提取优先（分块背景估计+卷积滤波，检出能力更强），
                         // 2σ 阈值星太少时降级 1.5σ；原生库不可用回退 box-blur 检测器
+                        // §0.72：提星诊断写入识别日志（用户要求"记录识别过程"）——
+                        // 提星是识别链最上游，一旦它返回噪声，后面所有环节都白跑。
+                        val extractDiag = StringBuilder()
                         fun sepStars(sigma: Double): List<DetectedStar>? = try {
-                            StellarSolverNative.sepDetectStars(currentDisplay, sigma, 200)
+                            StellarSolverNative.sepDetectStars(currentDisplay, sigma, 200, extractDiag)
                         } catch (e: Throwable) {
+                            extractDiag.append("sep=${sigma}σ 异常(${e.javaClass.simpleName})；")
                             null
                         }
                         var s = sepStars(2.0)
@@ -582,13 +586,45 @@ object StarSolver {
                             val looser = sepStars(1.5)
                             if (looser != null && looser.size > (s?.size ?: 0)) s = looser
                         }
+                        // §0.72 提星质量核验：SEP 结果若与 box-blur 的重合率过低，
+                        // 说明 SEP 这一轮不可信（典型：阈值失配导致全是边界伪影）。
+                        // 用 box-blur 结果兜底，避免"上游提星退化 → 整个引擎白跑"。
+                        val sepCandidate = s
+                        if (sepCandidate != null && sepCandidate.size >= 5) {
+                            val bb = try {
+                                LocalStarMatcher.detectStars(currentDisplay)
+                            } catch (e: Throwable) {
+                                null
+                            }
+                            if (bb != null && bb.size >= 5) {
+                                val bbTop = bb.take(30)
+                                val hits = bbTop.count { b ->
+                                    sepCandidate.any { p ->
+                                        kotlin.math.abs(p.x - b.x) < 8f && kotlin.math.abs(p.y - b.y) < 8f
+                                    }
+                                }
+                                val rate = hits.toFloat() / bbTop.size
+                                extractDiag.append(
+                                    "与box-blur重合=${hits}/${bbTop.size}(${"%.0f".format(rate * 100)}%)；",
+                                )
+                                // 重合率 <30%：SEP 没检出 box-blur 看到的亮星 → 不可信
+                                if (rate < 0.30f) {
+                                    extractDiag.append("→SEP不可信，回退box-blur；")
+                                    s = bb
+                                }
+                            }
+                        }
                         if (s == null || s.size < 5) {
                             s = try {
                                 LocalStarMatcher.detectStars(currentDisplay)
                             } catch (e: Throwable) {
                                 null
                             }
+                            extractDiag.append("回退box-blur=${s?.size ?: 0}颗；")
                         }
+                        com.starcam.astro.data.SolveLogStore.line(
+                            context, "提星：$extractDiag",
+                        )
                         s?.takeIf { it.isNotEmpty() }?.let { det ->
                             lastLocalStars = det
                             val maxB = det.maxOfOrNull { it.brightness } ?: 0f
