@@ -49,6 +49,8 @@ if errorlevel 1 ( echo [错误] 编译失败 & rmdir /s /q "%WORK%" & exit /b 1 
 echo [2/2] 链接 libstellar_solver.so...
 call "%CC%" -shared -o "%OUT%" "%WORK%\astro_bridge.o" ^
   -Wl,--allow-multiple-definition ^
+  -Wl,-z,max-page-size=16384 ^
+  -Wl,-z,common-page-size=16384 ^
   "%AN%\lib\solver\libastrometry.a" ^
   "%AN%\lib\util\libanutils.a" ^
   "%AN%\lib\util\libanfiles.a" ^
