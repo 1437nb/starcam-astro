@@ -12,18 +12,27 @@ A pure offline Android application for astrophotography plate-solving and night 
 
 ## Download
 
-Latest release: **[v1.5.59](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.59)**
+Latest release: **[v1.5.60](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.60)**
 
 | Package | Size | Notes |
 |---|---|---|
-| [StarCam-v1.5.59-solve-log-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.59/StarCam-v1.5.59-solve-log-release.apk) | 16.5 MB | **Recommended** — R8-minified signed build |
-| [StarCam-v1.5.59-solve-log-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.59/StarCam-v1.5.59-solve-log-debug.apk) | 26.9 MB | Includes debug logging |
+| [StarCam-v1.5.60-wide-field-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.60/StarCam-v1.5.60-wide-field-fix-release.apk) | 16.5 MB | **Recommended** — R8-minified signed build |
+| [StarCam-v1.5.60-wide-field-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.60/StarCam-v1.5.60-wide-field-fix-debug.apk) | 26.9 MB | Includes debug logging |
 
 All versions: [Releases](https://github.com/1437nb/starcam-astro/releases).
 
-> ⚠️ **The v1.5.55 release APK is unsigned** and cannot be installed — use v1.5.58
-> instead. Signing and the release build are fixed in v1.5.57, and the signing
-> certificate matches previous versions, so it installs as an in-place upgrade.
+> **v1.5.60 fixes "star photos fail to solve"** (reported 2026-09-17): four
+> independent defects stacked on top of each other — a brightness-threshold unit
+> mismatch, a hard-coded mirror direction in the scoring round, a tangent-plane
+> origin mismatch between scoring and pair expansion, and an RA=0° seam bug in
+> origin averaging; it also fixes **run-to-run randomness in the solve result**.
+> Both the newly shot and the older photos now solve (25 inliers), all 12 demo
+> photos solve, and all 8 false-positive controls are still correctly rejected.
+> The signing certificate matches previous versions, so it upgrades in place.
+
+> ⚠️ **The v1.5.55 release APK is unsigned** and cannot be installed — use v1.5.56
+> or newer instead. Signing and the release build were fixed in v1.5.57, and the
+> signing certificate matches previous versions, so it installs as an in-place upgrade.
 
 **Requirements**: Android 8.0 (API 26) or newer on an **arm64-v8a** device
 (the bundled native solver ships arm64 libraries only; x86_64 emulators fall
@@ -65,6 +74,20 @@ back gracefully to the JVM catalog matcher).
 - **Native star extraction fix** (v1.5.55, **critical**): the native engine extracted **zero stars on every device**. Three compounding C-level defects had been misdiagnosed as "a data race on some ARM64 models" — they reproduce 100 % of the time on x86_64 as well: (1) `simplexy_set_defaults()` memsets the whole struct, but the bridge filled `image/nx/ny` *before* calling it, so those three fields were zeroed; (2) `simplexy_free_contents()` calls `free(s->image)`, yet that pointer comes from JNI `GetFloatArrayElements` (an ART heap pointer that only `Release...Elements` may hand back) — defect (1) nulled the pointer and conveniently masked (2); (3) the success test read `if (rc != 0 || npeaks <= 0)`, inverting the real semantics (`rc=0` means no pixel rose above threshold, i.e. failure), so the branch was always taken, the SEP path never succeeded, and the "SEP-first" three-tier fallback on the Kotlin side never ran. The same release also fixed `maxStars` truncating by scan order (now takes the top k by flux), a silently ignored `thresholdBgMultiple`, a JNI array-length leak, a three-state timeout misjudgement, `pthread_create` failure being reported as a timeout, and an unbounded `join` (now a 5 s grace period plus detach protection).
 - **Engineering hardening** (v1.5.56): user-supplied astrometry.net API keys are now stored with `EncryptedSharedPreferences` (previously plaintext; existing values migrate automatically on read); build scripts no longer hard-code local paths (`STARCAM_KEYSTORE` env var → `-PkeystoreProps` → `~/.starcam/`); a **GitHub Actions CI** workflow runs the unit tests plus a gitleaks credential scan; the camera analysis stream switched to `YUV_420_888` reading only the Y plane (eliminating 1.9 M `ByteBuffer.get()` calls per frame); the online client is hardened (HTTPS enforced, exponential backoff, upload de-duplication); debug switches were narrowed to `internal`.
 - **Reclaimable index memory** (v1.5.57): the ~11 MB catalog index cache is now handed back under memory pressure, reducing the chance of the app being killed in the background. Solver thread state moved from a **process-wide singleton** to **one instance per solve** (fixing a use-after-free latent in v1.5.55: if an earlier solve leaked a thread on timeout and the current one finished cleanly, the caller would `solver_free` memory still being read); a new `releaseIndexes()` JNI entry point plus an `Application.onTrimMemory` hook frees the indexes on `TRIM_MEMORY_RUNNING_LOW` — deliberately not a more aggressive threshold, so that back-to-back solves do not drop the cache and end up slower. Release is refused while a detached timeout thread may still be running: **rather hold 11 MB than crash**.
+- **Solve-failure fix + deterministic results** (v1.5.60, **critical**): fixes the
+  "star photo will not solve" report of 2026-09-17 and a regression in the older photo
+  that surfaced while fixing it. Four independent defects were stacked: (1) vote
+  brightness thresholds were calibrated for a different detector's units, leaving the
+  voting round idle; (2) the wide-field scoring round hard-coded one mirror direction,
+  but real photos come in both parities, so it was guaranteed to fail one of them;
+  (3) the scoring round's winning model used a different tangent-plane origin than the
+  subsequent pair expansion, discarding a 24-inlier solution; (4) origin averaging
+  across the RA = 0° seam produced a 120°-off direction and every projection failed.
+  It also removes **run-to-run randomness in the solve result** (index keys were not
+  canonicalised, so ties were cut in HashMap order). Measured: both the new and older
+  photos solve (25 inliers), all 12 demo photos solve, all 8 false-positive controls
+  are still rejected, and four consecutive full runs agree exactly.
+
 - **Solve logs** (v1.5.59): a failed solve now leaves a **reproducible scene** behind.
   Instead of guessing from a screenshot, the log records each engine tier's outcome and
   timing, a failure attribution (star extraction failed / too few stars / plenty of stars
