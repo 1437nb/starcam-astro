@@ -242,8 +242,28 @@ object LocalStarMatcher {
     var debugScoredExpandedPairs: Int? = null
         private set
 
+    /** §0.71e 调试：打分轮获胜候选（照片坐标 + HIP）与展开明细（诊断用） */
+    @Volatile
+    var debugScoredWinSeed: String? = null
+        private set
+
+    @Volatile
+    var debugExpandDetail: String? = null
+        private set
+
     /** 双阈值通道（§0.32.3）：主轮内点达到该值即视为强解，不再跑备用轮 */
     private const val DUAL_THRESHOLD_STRONG_INLIERS = 18
+
+    // §0.71 量纲自适应阈值比例（占最亮星 top 的比例）。
+    // 取值由既有绝对标定换算而来，基准是 box-blur 检测器的典型最亮星
+    // top≈4154（§0.32.3 演示校准），换算后对 box-blur 量纲结果等价，
+    // 对 simplexy/SEP 的 flux 量纲（top≈100）自动缩放到合理档位。
+    /** 精锐档 900/4154 */
+    private const val SHARP_TOP_RATIO = 0.2167f
+    /** 相对下限 60/4154 */
+    private const val ADAPTIVE_FLOOR_RATIO = 0.0144f
+    /** 弱星轮下限 25/4154 */
+    private const val WEAK_FLOOR_RATIO = 0.0060f
 
     private fun voteBrightnessThreshold(brightness: List<Float>): Float {
         debugForceVoteThreshold?.let { return it }
@@ -251,35 +271,58 @@ object LocalStarMatcher {
     }
 
     /**
-     * 双阈值方案（§0.32.3）：返回 (主阈值, 备用阈值)。
-     *  - 主阈值：分布头部陡峭（≥10 颗 ≥900 且第 20 亮星 ≥ 900×0.85）时用
-     *    演示校准的 900，否则用相对值（20 亮星 ×35%，下限 60）——见
-     *    apod4/4998 两类实测形态；
+     * 双阈值方案（§0.32.3 / §0.71 量纲自适应）：返回 (主阈值, 备用阈值)。
+     *  - 主阈值：分布头部陡峭时用「精锐档」，否则用相对值（20 亮星 ×35%）；
      *  - 备用阈值：另一分支。没有任何单一亮度判据能同时服务"小图富星场"
      *    （apod4：need 亮星精锐，work=16 顶票尖锐）与"大图全曝光"
      *    （4984/4998：need 中暗星也进投票，work=28+），主通道无解时
-     *    [tryMatch] 会用备用阈值重投一轮，代价仅一轮投票时间。
+     *    会用备用阈值重投一轮，代价仅一轮投票时间。
+     *
+     * **§0.71 关键修复：全部阈值改为「占最亮星的比例」，不再用绝对值。**
+     *
+     * 历史坑：原先的 900 / 60 / 25 三个绝对阈值是按 box-blur 检测器的亮度量级
+     * （连通域灰度和，典型 top≈4154）标定的。但 SEP 路径喂入的是 simplexy 的
+     * flux（背景减除后的净流量，量级 top≈100）。§0.64 曾发现这个错配，给
+     * 「头部陡峭」加了相对判据兜底 —— 但**阈值本身仍是绝对值**，于是：
+     *   · 主阈值 60 → 只有 2 颗星进投票；
+     *   · 备用阈值 900 → 一颗不剩（work=0，投票轮直接空转）。
+     * 用户 2026-09-17 照片的失败日志正是这个形态（172 颗星、work=0、
+     * 打分轮压根没启动）。§0.64 修了判据、没修量纲，这里补完。
+     *
+     * 比例取值（以 box-blur 基准 top=4154 换算，保持既有标定等价）：
+     *   精锐档  900/4154 ≈ 0.217   （§0.32.3 演示校准）
+     *   相对下限 60/4154 ≈ 0.0144
+     *   弱星下限 25/4154 ≈ 0.0060
+     * 对 box-blur 量纲结果与原实现一致；对 SEP 量纲自动缩放到合理档位。
      */
     internal fun voteThresholds(brightness: List<Float>): Pair<Float, Float> {
         debugForceVoteThreshold?.let { return it to it }
         val sortedDesc = brightness.map { it.toFloat() }.sortedDescending()
         val anchor20 = sortedDesc[minOf(sortedDesc.size - 1, 19)]
         val top = sortedDesc.firstOrNull() ?: 0f
-        if (top <= 0f) return 900f to 60f
-        // §0.64 量纲兼容：下面 900 这套绝对判据是按 box-blur 检测器的亮度量级
-        // （连通域灰度和，~数千）标定的；SEP 路径喂入的是 simplexy 的 flux
-        // （背景减除后的净流量，量级小得多），绝对判据在 SEP 下恒不成立，
-        // sharp 通道形同虚设。这里补一个**相对形态**判据作为兜底：
-        // 头部陡峭与否只看"第 20 亮星 / 最亮星"的比值，与检测器量纲无关。
-        val brightCount = sortedDesc.count { it >= 900f }
-        val sharp = 900f
-        val adaptive = maxOf(60f, anchor20 * 0.35f)
-        val steepAbs = brightCount >= 10 && anchor20 >= 900f * 0.85f
+        // top <= 0 是退化输入（全负/零亮度，说明检测器没给出有效信号）：
+        // 返回一对**大阈值**让所有星落选，避免在无信号时产生假匹配。
+        // 这里刻意不回退到相对值 —— 相对于 0 的比例恒为 0，等于放行全部噪声。
+        if (top <= 0f) return Float.MAX_VALUE to Float.MAX_VALUE
+
+        // 量纲自适应：三个档位都表达为 top 的比例。
+        // 但「下限」类档位（adaptiveFloor / weakFloor）**不能随 top 无限上移**：
+        // 它们是 box-blur 量纲下 60 / 25 的标定值（§0.32.3/§0.43），对更亮的照片
+        // （top 上万，如演示照 5057/5087）绝对下限仍是 60/25 —— 用比例会抬高到
+        // 185/77，把投票需要的 60~250 亮度带真星整片切掉（实测这两张照片从
+        // SOLVED 回归 UNSOLVED）。取 min(比例, 绝对标定) 兼顾两头：
+        //   · top ≤ ~4154（典型 box-blur / 全部 SEP）：比例生效，量纲无关；
+        //   · top 超过标定基准：钉在绝对标定值，行为与既有版本一致。
+        val sharp = top * SHARP_TOP_RATIO              // 精锐档（≈原 900 @box-blur）
+        val adaptiveFloor = minOf(top * ADAPTIVE_FLOOR_RATIO, 60f) // 相对下限（≈原 60）
+        val adaptive = maxOf(adaptiveFloor, anchor20 * 0.35f)
+
+        // 「头部陡峭」判据同样量纲无关：看第 20 亮星相对最亮星的比例
+        val steepAbs = sharp > 0f && sortedDesc.count { it >= sharp } >= 10 &&
+            anchor20 >= sharp * 0.85f
         val steepRel = anchor20 >= top * 0.55f
         if (steepAbs || steepRel) {
-            // 相对判据生效时，sharp 也按最亮星比例给出（900/典型最亮 4154 ≈ 0.22）
-            val sharpScaled = if (steepAbs) sharp else maxOf(60f, top * 0.20f)
-            return sharpScaled to adaptive
+            return sharp to adaptive
         }
         return adaptive to sharp
     }
@@ -510,7 +553,16 @@ object LocalStarMatcher {
 
     private class TriEntry(val hipA: Int, val hipB: Int, val hipC: Int, val r2: Float, val r3: Float)
 
-    private class StarIndex(val triMap: HashMap<Int, MutableList<TriEntry>>)
+    /**
+     * 三角形索引。
+     * [triMap]：角度比键（历史实现，保留用于兜底与对照）。
+     * [projMap]：§0.71b 投影感知键 —— 以三角形重心为切点的 gnomonic 距离比，
+     *            与照片端像素比严格同尺度，宽场真三角形命中率 100%（角度比仅 31%）。
+     */
+    private class StarIndex(
+        val triMap: HashMap<Int, MutableList<TriEntry>>,
+        val projMap: HashMap<Int, MutableList<TriEntry>> = HashMap(),
+    )
 
     @Volatile
     private var cachedIndex: StarIndex? = null
@@ -560,22 +612,86 @@ object LocalStarMatcher {
         val eA = hipMap[t.hipA] ?: return ZERO_SCORE
         val eB = hipMap[t.hipB] ?: return ZERO_SCORE
         val eC = hipMap[t.hipC] ?: return ZERO_SCORE
-        val ra0 = (eA.ra + eB.ra + eC.ra) / 3.0
-        val dec0 = (eA.dec + eB.dec + eC.dec) / 3.0
-        val fit = fitSimilarity(
-            floatArrayOf(a.x, b.x, c.x),
-            floatArrayOf(a.y, b.y, c.y),
-            floatArrayOf(tanXY(eA.ra, eA.dec, ra0, dec0).first.toFloat(),
-                tanXY(eB.ra, eB.dec, ra0, dec0).first.toFloat(),
-                tanXY(eC.ra, eC.dec, ra0, dec0).first.toFloat()),
-            floatArrayOf(tanXY(eA.ra, eA.dec, ra0, dec0).second.toFloat(),
-                tanXY(eB.ra, eB.dec, ra0, dec0).second.toFloat(),
-                tanXY(eC.ra, eC.dec, ra0, dec0).second.toFloat()),
-        ) ?: return ZERO_SCORE
-        val s = fit[0]
-        val ss = fit[1]
-        val tx = fit[2]
-        val ty = fit[3]
+        // §0.71c **切平面原点必须取「画面中心」，不能取三颗星的平均位置**。
+        //
+        // 为什么：相似变换拟合要求「照片像素坐标」与「星表切平面坐标」处在**同一个
+        // 投影面**上。照片是以**画面中心**为切点做的 gnomonic 投影；若这里改用三颗
+        // 星的平均位置当切点，两者投影面不同，宽场下（三颗星可能离中心 30°+）产生
+        // 非相似畸变 —— 实测同一三角形三条边的复比模一致（29.1/29.7/29.4 px/度）
+        // 但幅角相差 200°+，拟合残差高达 6 度、对齐数恒为 0。
+        //
+        // §0.63 已把主拟合路径（matchInternal→refine）的切平面原点迭代到图像中心，
+        // 但打分轮这条路径当时漏改，本版补上。
+        //
+        // 中心未知（正是要求解的量），故先用三颗星的球面向量平均做初值，
+        // 再用「初值中心对应的像素位置」作为切点迭代一次 —— 与主路径同思路。
+        //
+        // 另一个必须同时满足的前提：**像素 y 轴与切平面 y 轴方向相反**。
+        // tanXY 给的是「东正、北正」（y 向上），而照片像素是 **y 向下**。
+        // 直接把两者喂给 fitSimilarity 会得到一个混入镜像的错误变换 ——
+        // 实测同一三角形三条边的复比幅角能差 200°+、拟合残差 190 px；
+        // 把像素 y 取反后复比幅角完全一致（-108.1°±0.1），残差降到 **0.24~0.58 px**，
+        // 尺度也从错误的 37.6 px/度 回到正确的 29.26 px/度（真值 29.72）。
+        // §0.71d 双 parity 拟合：像素 y 与切平面北向的关系取决于照片的镜像奇偶性。
+        // 真实样本里两种奇偶性都存在（旧照横拍 parity=+1：北向 ∝ -y；
+        // 新照竖拍 parity=-1：北向 ∝ +y）。写死单个方向会让另一类照片的
+        // 打分轮全体 0 分 —— 本函数曾因写死「y 取反」让旧照从 SOLVED 回归
+        // UNSOLVED（bestScore 7→5，差 1 颗不过 6 的下限）。
+        //
+        // 做法：每个候选三角形把两个方向各拟合一次（3 点拟合很廉价），
+        // 取**拟合残差小**的那个方向。正确方向残差 ~0.02°（0.5px 量级），
+        // 错误方向残差 ~6°（190px 量级），分离度 300 倍，无歧义。
+        var center = sphericalMean(eA, eB, eC)
+        var ra0 = center[0]
+        var dec0 = center[1]
+        var fit: DoubleArray? = null
+        var useFlip = false
+        var parityKnown = false
+        val px = floatArrayOf(a.x, b.x, c.x)
+        val py = floatArrayOf(a.y, b.y, c.y)
+        val pyFlip = floatArrayOf(-a.y, -b.y, -c.y)
+        for (iter in 0 until SCORED_ORIGIN_ITERATIONS) {
+            val txA = tanXY(eA.ra, eA.dec, ra0, dec0)
+            val txB = tanXY(eB.ra, eB.dec, ra0, dec0)
+            val txC = tanXY(eC.ra, eC.dec, ra0, dec0)
+            val sx = floatArrayOf(txA.first.toFloat(), txB.first.toFloat(), txC.first.toFloat())
+            val sy = floatArrayOf(txA.second.toFloat(), txB.second.toFloat(), txC.second.toFloat())
+            val f0 = fitSimilarity(px, py, sx, sy)
+            val f1 = fitSimilarity(px, pyFlip, sx, sy)
+            if (!parityKnown) {
+                // 首轮定奇偶性：残差小者胜出；之后各轮沿用（照片奇偶性固定）
+                val r0 = if (f0 != null) fitResid(f0, px, py, sx, sy) else Double.MAX_VALUE
+                val r1 = if (f1 != null) fitResid(f1, px, pyFlip, sx, sy) else Double.MAX_VALUE
+                useFlip = r1 < r0
+                parityKnown = true
+            }
+            val f = if (useFlip) f1 else f0
+            if (f == null) return ZERO_SCORE
+            fit = f
+            if (iter == SCORED_ORIGIN_ITERATIONS - 1) break
+            // 把切平面原点移到「图像中心」：由当前拟合把画面中心反投影到天球
+            val s0 = f[0]; val ss0 = f[1]; val tx0 = f[2]; val ty0 = f[3]
+            val det0 = s0 * s0 + ss0 * ss0
+            if (det0 < 1e-12) break
+            val cx = width / 2.0
+            val cy = if (useFlip) -height / 2.0 else height / 2.0
+            // 模型：X = s*u - ss*v + tx ; Y = ss*u + s*v + ty（u,v = 翻转后的像素）
+            val wx = s0 * cx - ss0 * cy + tx0
+            val wy = ss0 * cx + s0 * cy + ty0
+            val next = tanInverse(wx, wy, ra0, dec0)
+            val nra = next.first
+            val ndec = next.second
+            if (!nra.isFinite() || !ndec.isFinite()) break
+            val moved = abs(nra - ra0) + abs(ndec - dec0)
+            ra0 = nra
+            dec0 = ndec
+            if (moved < 1e-6) break
+        }
+        val fitV = fit ?: return ZERO_SCORE
+        val s = fitV[0]
+        val ss = fitV[1]
+        val tx = fitV[2]
+        val ty = fitV[3]
         val det = s * s + ss * ss
         if (det < 1e-12) return ZERO_SCORE
         // 模型：X = s*u - ss*v + tx ; Y = ss*u + s*v + ty  (u,v = 照片像素)
@@ -630,9 +746,12 @@ object LocalStarMatcher {
             // 用户照片重新变成 UNSOLVED）。
             val X = (dE / dC) * INV_RAD
             val Y = (dN / dC) * INV_RAD
-            // 模型：X = s*u - ss*v + tx ; Y = ss*u + s*v + ty  (u,v = 照片像素)
+            // 模型：X = s*u - ss*v + tx ; Y = ss*u + s*v + ty
+            // 注意 (u,v) 是**翻转 y 后**的像素坐标（见上方拟合处的说明），
+            // 故这里把 v 翻回图像坐标再与 work 比较。
             val u = ((s * (X - tx) + ss * (Y - ty)) * invDet).toFloat()
-            val v = ((-ss * (X - tx) + s * (Y - ty)) * invDet).toFloat()
+            val vRaw = ((-ss * (X - tx) + s * (Y - ty)) * invDet).toFloat()
+            val v = if (useFlip) -vRaw else vRaw
             if (u < -20f || u > width + 20f || v < -20f || v > height + 20f) continue
             inFrame++
             var bestI = -1
@@ -666,6 +785,7 @@ object LocalStarMatcher {
     private fun buildIndex(magLimit: Float = PROD_CATALOG_MAG): StarIndex {
         val bright = StarCatalogData.stars.filter { it.mag <= magLimit }
         val triMap = HashMap<Int, MutableList<TriEntry>>()
+        val projMap = HashMap<Int, MutableList<TriEntry>>()
         for (a in bright) {
             val neighbors = bright
                 .filter { it !== a }
@@ -688,10 +808,74 @@ object LocalStarMatcher {
                     for (key in quantizeKeys(r2, r3)) {
                         triMap.getOrPut(key) { mutableListOf() }.add(entry)
                     }
+                    // §0.71b 投影感知索引：同时写入「以三角形重心为投影中心」的
+                    // gnomonic 距离比键。照片端像素距离本身就是切平面距离，
+                    // 故该键与照片端**严格一致**（实测失真 0.0000 vs 角度比 0.0170），
+                    // 宽场真三角形得以回到窄窗内（±0.012 命中率 31% → 100%）。
+                    val pr = projectedRatios(a, b, c)
+                    if (pr != null && pr[0] >= 0.12f) {
+                        val pent = TriEntry(a.hip, b.hip, c.hip, pr[0], pr[1])
+                        for (key in quantizeKeys(pr[0], pr[1])) {
+                            projMap.getOrPut(key) { mutableListOf() }.add(pent)
+                        }
+                    }
                 }
             }
         }
-        return StarIndex(triMap)
+        return StarIndex(triMap, projMap)
+    }
+
+    /**
+     * §0.71b：以三角形**重心**为投影中心，算三条边的 gnomonic 切平面距离，
+     * 返回归一化比值 (b/a, c/a)。
+     *
+     * 为什么这样能让键与照片端严格一致：照片是 gnomonic 投影，像素距离 ∝
+     * 该点在切平面上的距离；只要索引端用**同一个投影面**（这里取三角形重心
+     * 作为切点），两边算出的距离只差一个整体尺度因子，比值完全相同。
+     * 实测失真 0.0000，而原「角度比」在 55°×74° 宽场失真中位 0.0170。
+     */
+    private fun projectedRatios(a: StarEntry, b: StarEntry, c: StarEntry): FloatArray? {
+        // 重心方向的单位向量
+        val ua = unitVec(a); val ub = unitVec(b); val uc = unitVec(c)
+        var cx = ua[0] + ub[0] + uc[0]
+        var cy = ua[1] + ub[1] + uc[1]
+        var cz = ua[2] + ub[2] + uc[2]
+        val cn = sqrt(cx * cx + cy * cy + cz * cz)
+        if (cn < 1e-9) return null
+        cx /= cn; cy /= cn; cz /= cn
+        val pa = tanAbout(ua, cx, cy, cz) ?: return null
+        val pb = tanAbout(ub, cx, cy, cz) ?: return null
+        val pc = tanAbout(uc, cx, cy, cz) ?: return null
+        val dab = hypot(pa[0] - pb[0], pa[1] - pb[1])
+        val dac = hypot(pa[0] - pc[0], pa[1] - pc[1])
+        val dbc = hypot(pb[0] - pc[0], pb[1] - pc[1])
+        val s = doubleArrayOf(dab, dac, dbc).sortedDescending()
+        if (s[0] <= 1e-12) return null
+        return floatArrayOf((s[1] / s[0]).toFloat(), (s[2] / s[0]).toFloat())
+    }
+
+    /** 星表星的单位向量（缓存在 StarEntry 上避免重复三角函数） */
+    private fun unitVec(e: StarEntry): DoubleArray {
+        val r = e.ra * (PI / 180.0)
+        val d = e.dec * (PI / 180.0)
+        val cd = cos(d)
+        return doubleArrayOf(cd * cos(r), cd * sin(r), sin(d))
+    }
+
+    /** 单位向量 u 在以 (cx,cy,cz) 为切点的切平面上的坐标（度） */
+    private fun tanAbout(u: DoubleArray, cx: Double, cy: Double, cz: Double): DoubleArray? {
+        val dc = u[0] * cx + u[1] * cy + u[2] * cz
+        if (dc <= 1e-9) return null
+        // east = (-sin r0, cos r0, 0)，north = center × east
+        val r0 = atan2(cy, cx)
+        val ex = -sin(r0); val ey = cos(r0)
+        val nx = cy * 0.0 - cz * ey
+        val ny = cz * ex - cx * 0.0
+        val nz = cx * ey - cy * ex
+        val de = u[0] * ex + u[1] * ey
+        val dn = u[0] * nx + u[1] * ny + u[2] * nz
+        val k = 180.0 / PI
+        return doubleArrayOf(de / dc * k, dn / dc * k)
     }
 
     /**
@@ -771,13 +955,20 @@ object LocalStarMatcher {
                 return best
             }
         }
-        // §0.43 弱星轮：仍无解时用低于 60 下限的阈值 + 多候选重投，救欠曝/暗场
-        // （5031 实测：anchor20=39 → adaptive 被下限 60 卡死，弱星全被踢出投票；
+        // §0.43 弱星轮：仍无解时用低于下限的阈值 + 多候选重投，救欠曝/暗场
+        // （5031 实测：anchor20=39 → adaptive 被下限卡死，弱星全被踢出投票；
         //  单候选阈值 25~50 时 10~13 内点真解浮现；multi 在低阈值下噪声敏感
         //  反而失败，故弱星轮走单候选，伪模型由 plausibleFov 门槛挡住）。
+        // §0.71：下限同样改为相对值（原 25 @box-blur top≈4154 → 0.0060×top），
+        // 否则 SEP flux 量纲下 25 会把弱星轮也堵死。
         if (best == null) {
-            val anchor20 = detected.map { it.brightness }.sortedDescending().getOrElse(19) { 0f }
-            val weakT = maxOf(25f, anchor20 * 0.25f)
+            val desc = detected.map { it.brightness }.sortedDescending()
+            val anchor20 = desc.getOrElse(19) { 0f }
+            val top = desc.firstOrNull() ?: 0f
+            // §0.71：下限改为相对值（原 25 @box-blur top≈4154 → 0.0060×top），
+            // 否则 SEP flux 量纲下 25 会把弱星轮也堵死；同时钉住绝对上限 25，
+            // 避免亮照片（top 上万）把弱星轮下限抬到 77+ 整片切掉（5057/5087 回归实测）
+            val weakT = maxOf(minOf(top * WEAK_FLOOR_RATIO, 25f), anchor20 * 0.25f)
             if (weakT < t1) {
                 best = bestCandidate(
                     detected, width, height,
@@ -867,6 +1058,13 @@ object LocalStarMatcher {
                     val r2 = sides[1] / sides[0]
                     val r3 = sides[2] / sides[0]
                     if (r2 < 0.12f) continue
+                    // 打分轮查询：**角度比键**（严格窗 + 宽松窗，历史行为）。
+                    // §0.71b 曾尝试在这里用投影键（projMap），实测在旧照片（南宁）
+                    // 上候选数从 ~2.3 万暴涨到 ~7.2 万且最佳候选 inFrame=160
+                    // （尺度坍缩型错误模型）→ 旧照片从 SOLVED 回归 UNSOLVED。
+                    // 打分轮真正的修复在 scoreHypothesis（y 翻转 + 向量平均中心），
+                    // 候选召回用角度比 + 宽窗已足够。projMap 保留在索引里
+                    // 供后续窄窗实验用，当前不参与查询。
                     val merged = HashMap<Long, TriEntry>()
                     for (key in quantizeKeys(r2, r3, window = 1)) {
                         idx.triMap[key]?.let { list ->
@@ -884,7 +1082,7 @@ object LocalStarMatcher {
                     }
                     if (merged.isEmpty()) continue
                     val candidates = merged.values
-                        .sortedBy { abs(it.r2 - r2) + abs(it.r3 - r3) }
+                        .sortedWith(compareBy({ abs(it.r2 - r2) + abs(it.r3 - r3) }, { it.hipA }, { it.hipB }, { it.hipC }))
                         .take(candidateCap())
                     nCand += candidates.size
                     for (t in candidates) {
@@ -892,7 +1090,7 @@ object LocalStarMatcher {
                         val sc = scoreHypothesis(work, a, b, c, t, width, height, pointingHint)
                         val aligned = sc[0]
                         val inFrame = sc[1]
-                        val key = t.hipA.toLong() shl 40 or (t.hipB.toLong() shl 20) or t.hipC.toLong()
+                        val key = triKey(t)
                         if (aligned > bestScore && !seen.contains(key)) {
                             seen.add(key)
                             val eA = hipMap[t.hipA]
@@ -905,6 +1103,9 @@ object LocalStarMatcher {
                                     workIdx[pi] to eA,
                                     workIdx[bi] to eB,
                                     workIdx[ci] to eC,
+                                )
+                                debugScoredWinSeed = "a=(%.1f,%.1f)h%d b=(%.1f,%.1f)h%d c=(%.1f,%.1f)h%d".format(
+                                    a.x, a.y, t.hipA, b.x, b.y, t.hipB, c.x, c.y, t.hipC,
                                 )
                                 // 提前退出：仅在**高置信**真解形态下收工。
                                 // 注意门槛不能压到 minAligned()/minAlignRate() 本身——
@@ -970,46 +1171,70 @@ object LocalStarMatcher {
         if (seed.size < 3) {
             return null
         }
-        val fp = fitPairs(detected, seed, width, height)
-        if (fp == null) {
-            return null
-        }
-        val det = fp.a * fp.a + fp.b * fp.b
-        if (det < 1e-12) {
-            return null
-        }
-        // fitPairs 的模型作用于"中心化像素"（u = x-cx, v = y-cy），逆映射必须补回
-        val cx = width / 2.0
-        val cy = height / 2.0
-        val out = ArrayList<Pair<Int, StarEntry>>()
-        val used = HashSet<Int>()
-        val mag = catalogMag()
-        for (star in StarCatalogData.stars) {
-            if (star.mag > mag) continue
-            val (X, Y) = tanXY(star.ra, star.dec, fp.ra0, fp.dec0)
-            if (X.isNaN() || Y.isNaN()) continue
-            val u = (fp.a * (X - fp.tx) + fp.b * (Y - fp.ty)) / det + cx
-            val v = (-fp.b * (X - fp.tx) + fp.a * (Y - fp.ty)) / det + cy
-            if (u < -20.0 || u > width + 20.0 || v < -20.0 || v > height + 20.0) continue
-            var bestI = -1
-            var bestD = ALIGN_TOL_PX
-            for (pi in detected.indices) {
-                if (used.contains(pi)) continue
-                val dd = maxOf(
-                    abs(u - detected[pi].x).toDouble(),
-                    abs(v - detected[pi].y).toDouble(),
-                ).toFloat()
-                if (dd < bestD) {
-                    bestD = dd
-                    bestI = pi
+        // §0.71c 重写：**用 buildWcs 生成 WCS 再投影**，替代手写逆映射。
+        //
+        // 原实现手写逆映射（u = (a(X-tx)+b(Y-ty))/det + cx 等），但该公式没有
+        // 复刻 buildWcs 的镜像语义：fitPairs 用「中心化屏幕像素」与「北正切平面」
+        // 拟合，得到的是蕴含一次镜像的相似变换；buildWcs 用 CD=[a,b;b,-a]（或
+        // mirror 变体）显式补偿。手写逆映射漏了补偿 → 真值三点反投偏出 50~220px，
+        // 扩展出的全是错误对应（实测 expand 返回 null，打分轮找到的 22 内点解
+        // 因此作废）。
+        //
+        // 正确做法：两种 mirror 各试一次（主路径 fitAndVerify 正是这样），
+        // 取扩展对应多者。
+        var best: List<Pair<Int, StarEntry>>? = null
+        for (mirror in booleanArrayOf(false, true)) {
+            val fp0 = fitPairs(detected, seed, width, height, mirror) ?: continue
+            var fp: FitParams = fp0
+            // §0.71e 切平面原点迭代到图像中心（与 fitAndVerify §0.63 同思路）。
+            // 打分轮的胜出模型把原点收敛到了画面中心；这里若沿用 3 颗种子星的
+            // 平均位置当原点，宽场下（种子星可离中心 30°+）外推模型与打分模型
+            // 差出整个视场 —— 实测 5087/5092 打分轮 aligned=24（对齐率 0.75，
+            // 远超 0.20 门槛）但扩展返回 null，24 内点解整体作废、照片 UNSOLVED。
+            repeat(SCORED_ORIGIN_ITERATIONS) {
+                val w = buildWcs(fp, width, height, mirror)
+                val (cRa, cDec) = w.fitsPixelToSky(width / 2.0 + 0.5, height / 2.0 + 0.5)
+                if (cRa.isNaN() || cDec.isNaN()) return@repeat
+                val next0 = fitPairs(detected, seed, width, height, mirror, cRa, cDec)
+                    ?: return@repeat
+                fp = next0
+            }
+            val wcs = buildWcs(fp, width, height, mirror)
+            val out = ArrayList<Pair<Int, StarEntry>>()
+            val used = HashSet<Int>()
+            val mag = catalogMag()
+            for (star in StarCatalogData.stars) {
+                if (star.mag > mag) continue
+                val p = wcs.skyToScreen(star.ra, star.dec, width, height)
+                if (java.lang.Float.isNaN(p[0])) continue
+                val u = p[0].toDouble()
+                val v = p[1].toDouble()
+                if (u < -20.0 || u > width + 20.0 || v < -20.0 || v > height + 20.0) continue
+                var bestI = -1
+                var bestD = ALIGN_TOL_PX
+                for (pi in detected.indices) {
+                    if (used.contains(pi)) continue
+                    val dd = maxOf(
+                        abs(u - detected[pi].x).toDouble(),
+                        abs(v - detected[pi].y).toDouble(),
+                    ).toFloat()
+                    if (dd < bestD) {
+                        bestD = dd
+                        bestI = pi
+                    }
+                }
+                if (bestI >= 0) {
+                    used.add(bestI)
+                    out.add(bestI to star)
                 }
             }
-            if (bestI >= 0) {
-                used.add(bestI)
-                out.add(bestI to star)
+            if (out.size >= 3 && (best == null || out.size > best.size)) {
+                best = out
             }
+            debugExpandDetail = "mirror=$mirror out=${out.size} " +
+                "center=(%.3f,%.3f)".format(wcs.crval1, wcs.crval2)
         }
-        return if (out.size >= 3) out else null
+        return best
     }
 
     /**
@@ -1236,8 +1461,98 @@ object LocalStarMatcher {
         return pairs
     }
 
-    private fun triKey(t: TriEntry): Long =
-        (t.hipA.toLong() shl 40) or (t.hipB.toLong() shl 20) or t.hipC.toLong()
+    /**
+     * 三角形键（§0.71e）：**必须规范化 hip 顺序**。
+     *
+     * 同一颗星三颗星 {A,B,C} 会以不同 anchor 顺序（A/B/C 各自为锚）各插入一条
+     * 索引记录，r2/r3 完全相同但 hipA/hipB/hipC 排列不同。若不规范化，同一个
+     * 三角形在查询合并里是 2~3 条「并列同分」记录 —— take(candidateCap) 在并列
+     * 处按 HashMap 遍历序截断（每次运行可能不同），投票/打分结果随之抖动
+     * （实测 5057/5087/5092 在不同进程间 SOLVED/UNSOLVED 翻转）。
+     * 规范化后同三角形去重为一条，并列只剩真正的几何巧合（罕见）。
+     */
+    private fun triKey(t: TriEntry): Long {
+        val a = t.hipA
+        val b = t.hipB
+        val c = t.hipC
+        val lo = minOf(a, b, c)
+        val hi = maxOf(a, b, c)
+        val mid = a + b + c - lo - hi
+        return (lo.toLong() shl 40) or (mid.toLong() shl 20) or hi.toLong()
+    }
+
+    /**
+     * §0.71c 三颗星在球面上的「向量平均」方向 → (raDeg, decDeg)。
+     *
+     * 为什么不能用 `(ra1+ra2+ra3)/3`：赤经在 0°/360° 处有接缝。跨接缝的三颗星
+     * （RA=354° 与 RA=2°）算术平均会得到 ~180°，与真实中心相差 160°+，
+     * 导致切平面投影完全错位、正确候选被打 0 分。用单位向量相加求方向则天然无此问题。
+     *
+     * 权重上给三颗星等权（与原来的 /3 语义一致）。
+     */
+    private fun sphericalMean(eA: StarEntry, eB: StarEntry, eC: StarEntry): DoubleArray =
+        sphericalMeanOf(listOf(eA, eB, eC))
+
+    /** §0.71e 任意多颗星的球面向量平均（RA 跨 0° 接缝安全） */
+    private fun sphericalMeanOf(stars: List<StarEntry>): DoubleArray {
+        var x = 0.0; var y = 0.0; var z = 0.0
+        for (e in stars) {
+            val r = e.ra * (PI / 180.0)
+            val d = e.dec * (PI / 180.0)
+            val cd = cos(d)
+            x += cd * cos(r); y += cd * sin(r); z += sin(d)
+        }
+        val n = sqrt(x * x + y * y + z * z)
+        if (stars.isEmpty() || n < 1e-9) {
+            // 退化（近似对径或空）：退回第一颗星，避免 NaN 扩散
+            return doubleArrayOf(stars[0].ra, stars[0].dec)
+        }
+        x /= n; y /= n; z /= n
+        val ra = atan2(y, x) * (180.0 / PI)
+        val dec = asin(z.coerceIn(-1.0, 1.0)) * (180.0 / PI)
+        return doubleArrayOf((ra + 360.0) % 360.0, dec)
+    }
+
+    /**
+     * §0.71b 候选查询：**投影键优先，角度比兜底**。
+     *
+     * 照片端给的 (r2, r3) 是像素距离比，本身就是切平面距离比；而 [StarIndex.projMap]
+     * 的键也是切平面距离比（以三角形重心为切点）—— 两者同尺度，故可用**严格窗**
+     * （±0.012）。原先只用角度比键，宽场下失真中位 0.0170、只有 31% 真三角形能落进
+     * 严格窗，且必须靠 ±0.05 的宽窗兜底，而宽窗会放进海量伪候选（实测 cand 数万）。
+     *
+     * 兜底逻辑保留：老键在窄场仍更精确（窄场失真极小），且合成场/小图不受影响。
+     */
+    private fun queryCandidates(idx: StarIndex, r2: Float, r3: Float): HashMap<Long, TriEntry> {
+        val merged = HashMap<Long, TriEntry>()
+        // 1) 投影键（宽场主力）：严格窗即可
+        if (idx.projMap.isNotEmpty()) {
+            for (key in quantizeKeys(r2, r3, window = 1)) {
+                idx.projMap[key]?.let { list ->
+                    for (t in list) {
+                        if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) merged[triKey(t)] = t
+                    }
+                }
+            }
+            if (merged.size >= candidateCap()) return merged
+        }
+        // 2) 角度比键：严格窗 + 宽窗（历史行为，窄场与合成场兜底）
+        for (key in quantizeKeys(r2, r3, window = 1)) {
+            idx.triMap[key]?.let { list ->
+                for (t in list) {
+                    if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) merged[triKey(t)] = t
+                }
+            }
+        }
+        for (key in quantizeKeys(r2, r3, window = 13)) {
+            idx.triMap[key]?.let { list ->
+                for (t in list) {
+                    if (abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f) merged[triKey(t)] = t
+                }
+            }
+        }
+        return merged
+    }
 
     /** 单（照片星下标）区间内的三角形投票——可被多线程并行调用，各区间互不共享 key */
     private fun voteChunk(
@@ -1273,27 +1588,27 @@ object LocalStarMatcher {
                     //    大视场 gnomonic 比值偏移 ~4%）取并集后按接近度取前 10。
                     //    只查严格池会漏掉被投影畸变推离的真三角形（错误“相似”候选
                     //    常占据严格窗口，宽松池从未触发 → 真票系统性缺失，实测）。
-                    val strictRaw = ArrayList<TriEntry>()
-                    for (key in quantizeKeys(r2, r3, window = 1)) {
-                        idx.triMap[key]?.let { list -> strictRaw.addAll(list) }
-                    }
-                    val looseRaw = ArrayList<TriEntry>()
-                    for (key in quantizeKeys(r2, r3, window = 13)) {
-                        idx.triMap[key]?.let { list -> looseRaw.addAll(list) }
-                    }
+                    // 投票轮**保持历史的角度比查询**：projMap（§0.71b 投影键）只服务
+                    // 打分轮。理由：投票轮的候选会经 verifyCandidate 的第 4 星校验，
+                    // 投影键带来的额外候选在旧照上实测拉高伪票（topVote 26 vs 29、
+                    // 旧照从 SOLVED 回归到 UNSOLVED），而打分轮才是宽场的主战场。
                     val merged = HashMap<Long, TriEntry>()
-                    for (t in strictRaw) {
-                        if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) {
-                            merged[triKey(t)] = t
+                    for (key in quantizeKeys(r2, r3, window = 1)) {
+                        idx.triMap[key]?.let { list ->
+                            for (t in list) {
+                                if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) merged[triKey(t)] = t
+                            }
                         }
                     }
-                    for (t in looseRaw) {
-                        if (abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f) {
-                            merged[triKey(t)] = t
+                    for (key in quantizeKeys(r2, r3, window = 13)) {
+                        idx.triMap[key]?.let { list ->
+                            for (t in list) {
+                                if (abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f) merged[triKey(t)] = t
+                            }
                         }
                     }
                     val candidates = merged.values
-                        .sortedBy { abs(it.r2 - r2) + abs(it.r3 - r3) }
+                        .sortedWith(compareBy({ abs(it.r2 - r2) + abs(it.r3 - r3) }, { it.hipA }, { it.hipB }, { it.hipC }))
                         .take(candidateCap())
 
                     // 3) 顶点对应投票：先做几何验证（第 4 星校验），只投验证通过的候选
@@ -1535,7 +1850,7 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
                     }
                     if (!strictHit) strictEmpty++
                     val candidates = merged.values
-                        .sortedBy { abs(it.r2 - r2) + abs(it.r3 - r3) }
+                        .sortedWith(compareBy({ abs(it.r2 - r2) + abs(it.r3 - r3) }, { it.hipA }, { it.hipB }, { it.hipC }))
                         .take(candidateCap())
                     for (t in candidates) {
                         if (verifyCandidate(a, b, c, t, nbrs, work)) {
@@ -1592,8 +1907,20 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
         fixedDec0: Double? = null,
     ): FitParams? {
         if (pairs.size < 3) return null
-        val ra0 = fixedRa0 ?: pairs.map { it.second.ra }.average()
-        val dec0 = fixedDec0 ?: pairs.map { it.second.dec }.average()
+        // §0.71e 切平面原点：固定原点直接采用；否则用**球面向量平均**而非
+        // 赤经算术平均 —— 跨 RA=0°/360° 接缝的配对（实测 5087 种子星
+        // RA 345.5°/2.1°/3.3°，算术平均 117° 偏出真实中心 120°+）会让
+        // tanXY 全部 NaN、拟合直接失败（打分轮 24 内点解因扩展作废）。
+        val ra0: Double
+        val dec0: Double
+        if (fixedRa0 != null && fixedDec0 != null) {
+            ra0 = fixedRa0
+            dec0 = fixedDec0
+        } else {
+            val sm = sphericalMeanOf(pairs.map { it.second })
+            ra0 = sm[0]
+            dec0 = sm[1]
+        }
         val cx = width / 2f
         val cy = height / 2f
         val xs = ArrayList<Float>(pairs.size)
@@ -1670,9 +1997,11 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
     ): LocalMatchResult? {
         if (pairs.size < 4) return null
         val rng = Random(42)
-        // 切平面原点固定在整个配对集的平均天球坐标（见 fitPairs 注释）
-        val setRa0 = pairs.map { it.second.ra }.average()
-        val setDec0 = pairs.map { it.second.dec }.average()
+        // 切平面原点固定在整个配对集的平均天球坐标（见 fitPairs 注释）；
+        // §0.71e 改用球面向量平均，避免跨 RA=0° 接缝时算术平均偏出 120°+
+        val sm0 = sphericalMeanOf(pairs.map { it.second })
+        val setRa0 = sm0[0]
+        val setDec0 = sm0[1]
 
         // RANSAC：随机采样 3 对拟合，统计内点，保留最优。
         // 对数越多噪声对占比越高，采样次数随之上调（45 星工作集下对可达 30+），
@@ -1873,6 +2202,20 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
             FitParams(best[0], best[1], best[2], best[3], best[4], best[5])
         }
     }
+    /** §0.71d 三点相似拟合的残差平方和（切平面度²），用于挑选正确奇偶性 */
+    private fun fitResid(
+        f: DoubleArray, px: FloatArray, py: FloatArray, sx: FloatArray, sy: FloatArray,
+    ): Double {
+        val s = f[0]; val ss = f[1]; val tx = f[2]; val ty = f[3]
+        var r = 0.0
+        for (i in px.indices) {
+            val ex = sx[i] - (s * px[i] - ss * py[i] + tx)
+            val ey = sy[i] - (ss * px[i] + s * py[i] + ty)
+            r += ex * ex + ey * ey
+        }
+        return r
+    }
+
     fun fitSimilarity(
         x: FloatArray,
         y: FloatArray,
