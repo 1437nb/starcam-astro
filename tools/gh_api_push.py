@@ -122,7 +122,13 @@ def upload_commit(local_sha, parent_sha):
             skipped_workflow.append(path)
             continue
         if status == "D":
-            items.append({"path": path, "mode": newmode, "type": "blob", "sha": None})
+            # 删除条目：mode 必须给一个合法的文件模式。git diff --raw 对删除给的是
+            # newmode=000000，直接传给 GitHub 会被拒/忽略，导致**删除不生效**
+            # （实测：删掉的文件在远端依然存在）。删除语义由 sha=None 表达，
+            # mode 用 oldmode（fields[0] 去掉前导冒号）或退化为 100644。
+            oldmode = fields[0].lstrip(":")
+            del_mode = oldmode if oldmode and oldmode != "000000" else "100644"
+            items.append({"path": path, "mode": del_mode, "type": "blob", "sha": None})
             continue
         # 关键：从 git 对象读（LF），不读工作区（CRLF）
         content = subprocess.run((GIT, "show", f"{local_sha}:{path}"), cwd=WD,
