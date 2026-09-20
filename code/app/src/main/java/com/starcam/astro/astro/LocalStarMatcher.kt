@@ -158,12 +158,47 @@ object LocalStarMatcher {
     var debugScoredStats: String? = null
 
     /**
+     * §0.74 调试：matchInternal 各阶段耗时（毫秒，按调用顺序）。
+     * 形如 "primary=1230;multi=0;weak=0;backup=0;scored=0"。值为 0 表示该阶段未执行
+     * （提前退出或前置条件不满足）。用于定位耗时瓶颈 —— 实测宽场失败路径的时间
+     * 并不在常被怀疑的打分轮（它有 [SCORED_TIME_BUDGET_MS] 预算兜底），
+     * 而在投票轮被完整跑遍的阶梯上。
+     */
+    @Volatile
+    var debugPhaseTimings: String? = null
+
+    /**
      * §0.70 调试：逐星投票轮统计（参与投票的星数 / 得到票的星数 / 最高票 / 平均领先比）。
      * 用于区分「真信号缺失」与「阈值把关太严」两类失败 ——
      * 在识别失败页与日志里展示，也是用户反馈问题时的关键证据。
      */
     @Volatile
     var debugVoteStats: String? = null
+
+    /**
+     * §0.74 调试：voteChunk 的索引扫描计数（三角形数 / 桶查询次数 / 遍历条目数 /
+     * 进入合并的条目数 / 送验候选数）。用来定位投票轮的耗时究竟在桶查询还是在
+     * 候选合并 —— 实测合并条目数是桶查询次数的 10 倍量级，说明开销在
+     * 「把上千候选塞进 HashMap 再全排序」，而不在索引查找本身。
+     * 读法：见 [debugVoteScanTake]（读取并清零）。
+     */
+
+    // §0.74 计数器（voteChunk 多线程累加，仅调试读）
+    private val nTriangles = java.util.concurrent.atomic.AtomicLong()
+    private val nBucketLookups = java.util.concurrent.atomic.AtomicLong()
+    private val nEntriesScanned = java.util.concurrent.atomic.AtomicLong()
+    private val nMerged = java.util.concurrent.atomic.AtomicLong()
+    private val nVerified = java.util.concurrent.atomic.AtomicLong()
+
+    /** §0.74 调试：读取并清零 voteChunk 计数器 */
+    internal fun debugVoteScanTake(): String {
+        val s = "tri=%d buckets=%d entries=%d merged=%d taken=%d".format(
+            nTriangles.get(), nBucketLookups.get(), nEntriesScanned.get(),
+            nMerged.get(), nVerified.get())
+        nTriangles.set(0); nBucketLookups.set(0); nEntriesScanned.set(0)
+        nMerged.set(0); nVerified.set(0)
+        return s
+    }
 
     /**
      * §0.62 打分轮的星表星缓存：只存一次（按 [catalogMag] 过滤），
@@ -805,9 +840,13 @@ object LocalStarMatcher {
                     val r3 = (sides[2] / sides[0]).toFloat()
                     if (r2 < 0.12f) continue // 排除过扁三角形
                     val entry = TriEntry(a.hip, b.hip, c.hip, r2, r3)
-                    for (key in quantizeKeys(r2, r3)) {
-                        triMap.getOrPut(key) { mutableListOf() }.add(entry)
-                    }
+                    // §0.74：triMap **每三角形只存一个桶**（原为 quantizeKeys 默认的
+                    // 9 个相邻桶）。9 桶存储让查询端每扫一条就要重复见到同一对象 9 次
+                    // —— 实测一轮投票要扫 6000 万条目、其中九成是这种重复。改单桶后
+                    // 索引从 305,118 条降到 ~34,000 条，查询扫描量同比例下降。
+                    // 覆盖范围不变：原「存 ±1 桶 + 查 ±13 桶」等效覆盖 ±14 桶，
+                    // 故各查询点的 window 已同步 +1（±13 → ±14、±1 → ±2）。
+                    triMap.getOrPut(bucketKey(r2, r3)) { mutableListOf() }.add(entry)
                     // §0.71b 投影感知索引：同时写入「以三角形重心为投影中心」的
                     // gnomonic 距离比键。照片端像素距离本身就是切平面距离，
                     // 故该键与照片端**严格一致**（实测失真 0.0000 vs 角度比 0.0170），
@@ -896,6 +935,16 @@ object LocalStarMatcher {
         return keys
     }
 
+    /**
+     * §0.74 单桶键（triMap 存储用）。与 [quantizeKeys] 同一量化，只是不向相邻桶扩散。
+     * 查询侧用 window+1 补偿，覆盖范围与旧的「9 桶存储 + window」完全一致。
+     */
+    private fun bucketKey(r2: Float, r3: Float): Int {
+        val b2 = (r2 * 256).toInt().coerceIn(0, 255)
+        val b3 = (r3 * 256).toInt().coerceIn(0, 255)
+        return b2 * 256 + b3
+    }
+
     // ================= 3. 匹配 =================
 
     /**
@@ -934,24 +983,33 @@ object LocalStarMatcher {
         pointingHint: PointingHint?,
     ): LocalMatchResult? {
         val (t1, t2) = voteThresholds(detected.map { it.brightness })
+        val tStart = System.currentTimeMillis()
+        var msPrimary = 0L; var msMulti = 0L; var msWeak = 0L
+        var msBackup = 0L; var msBackupMulti = 0L; var msScored = 0L
 
         // 投票与 parity（镜像）无关：每个阈值只投一次，normal/mirrored 共享结果。
         // （v1.5.8 的双阈值曾按"每 parity × 每阈值"各投一次，投票最多 4 轮，
         //  失败/弱解照片识别耗时从 ~2s 涨到 ~9s；本重构降回最多 2 轮，成功率不变）
+        val tA = System.currentTimeMillis()
         val primaryPairs = votePairs(detected, width, height, t1, pointingHint = pointingHint)
         var best = bestCandidate(detected, width, height, primaryPairs, pointingHint)
+        msPrimary = System.currentTimeMillis() - tA
         if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
+            debugPhaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
             return best
         }
         // §0.43 稀疏场重投：单候选轮完全无解时，用每星 top-3 候选重投一轮
         // （仅当无解，有解路径完全不动；伪解由 plausibleFov/skySpan 门槛把守）。
         if (best == null) {
+            val tB = System.currentTimeMillis()
             best = bestCandidate(
                 detected, width, height,
                 votePairs(detected, width, height, t1, multi = true, pointingHint = pointingHint),
                 pointingHint,
             )
+            msMulti = System.currentTimeMillis() - tB
             if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
+                debugPhaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
                 return best
             }
         }
@@ -962,6 +1020,7 @@ object LocalStarMatcher {
         // §0.71：下限同样改为相对值（原 25 @box-blur top≈4154 → 0.0060×top），
         // 否则 SEP flux 量纲下 25 会把弱星轮也堵死。
         if (best == null) {
+            val tC = System.currentTimeMillis()
             val desc = detected.map { it.brightness }.sortedDescending()
             val anchor20 = desc.getOrElse(19) { 0f }
             val top = desc.firstOrNull() ?: 0f
@@ -976,19 +1035,26 @@ object LocalStarMatcher {
                     pointingHint,
                 )
                 if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
+                    msWeak = System.currentTimeMillis() - tC
+                    debugPhaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
                     return best
                 }
             }
+            msWeak = System.currentTimeMillis() - tC
         }
         if (t2 != t1) {
+            val tD = System.currentTimeMillis()
             val backupPairs = votePairs(detected, width, height, t2, pointingHint = pointingHint)
             var alt = bestCandidate(detected, width, height, backupPairs, pointingHint)
+            msBackup = System.currentTimeMillis() - tD
             if (alt == null) {
+                val tE = System.currentTimeMillis()
                 alt = bestCandidate(
                     detected, width, height,
                     votePairs(detected, width, height, t2, multi = true, pointingHint = pointingHint),
                     pointingHint,
                 )
+                msBackupMulti = System.currentTimeMillis() - tE
             }
             // 备用轮只有拿到强解才反超主轮：弱解之间以主轮为准（主口味优先，
             // 备用轮弱解顶掉主轮真解的回归见 §0.32.3 —— apod4 12 内点真解曾被
@@ -1002,8 +1068,13 @@ object LocalStarMatcher {
         // 14~19 票）。但"逐候选拟合 + 数对齐星数"分离度极高：真候选对齐
         // 16.8/25 颗，伪候选仅 1.0/25（实测同一张照片）。故投票全败时按此打分。
         if (best == null && !debugDisableScored) {
+            val tF = System.currentTimeMillis()
             best = scoredRound(detected, width, height, pointingHint)
+            msScored = System.currentTimeMillis() - tF
         }
+        debugPhaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;" +
+                "backup=$msBackup;backupMulti=$msBackupMulti;scored=$msScored;" +
+                "total=${System.currentTimeMillis() - tStart}"
         return best
     }
 
@@ -1066,14 +1137,14 @@ object LocalStarMatcher {
                     // 候选召回用角度比 + 宽窗已足够。projMap 保留在索引里
                     // 供后续窄窗实验用，当前不参与查询。
                     val merged = HashMap<Long, TriEntry>()
-                    for (key in quantizeKeys(r2, r3, window = 1)) {
+                    for (key in quantizeKeys(r2, r3, window = 2)) {
                         idx.triMap[key]?.let { list ->
                             for (t in list) {
                                 if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) merged[triKey(t)] = t
                             }
                         }
                     }
-                    for (key in quantizeKeys(r2, r3, window = 13)) {
+                    for (key in quantizeKeys(r2, r3, window = 14)) {
                         idx.triMap[key]?.let { list ->
                             for (t in list) {
                                 if (abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f) merged[triKey(t)] = t
@@ -1482,6 +1553,18 @@ object LocalStarMatcher {
     }
 
     /**
+     * §0.74 有界选择的比较键：与原先
+     * `compareBy({ |Δr2|+|Δr3| }, { hipA }, { hipB }, { hipC })` 完全一致。
+     * 距离相同时按 HIP 升序 —— 这一步是确定性的关键（§0.71e）。
+     */
+    private fun triBefore(t: TriEntry, d: Float, other: TriEntry, od: Float): Boolean {
+        if (d != od) return d < od
+        if (t.hipA != other.hipA) return t.hipA < other.hipA
+        if (t.hipB != other.hipB) return t.hipB < other.hipB
+        return t.hipC < other.hipC
+    }
+
+    /**
      * §0.71c 三颗星在球面上的「向量平均」方向 → (raDeg, decDeg)。
      *
      * 为什么不能用 `(ra1+ra2+ra3)/3`：赤经在 0°/360° 处有接缝。跨接缝的三颗星
@@ -1537,14 +1620,14 @@ object LocalStarMatcher {
             if (merged.size >= candidateCap()) return merged
         }
         // 2) 角度比键：严格窗 + 宽窗（历史行为，窄场与合成场兜底）
-        for (key in quantizeKeys(r2, r3, window = 1)) {
+        for (key in quantizeKeys(r2, r3, window = 2)) {
             idx.triMap[key]?.let { list ->
                 for (t in list) {
                     if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) merged[triKey(t)] = t
                 }
             }
         }
-        for (key in quantizeKeys(r2, r3, window = 13)) {
+        for (key in quantizeKeys(r2, r3, window = 14)) {
             idx.triMap[key]?.let { list ->
                 for (t in list) {
                     if (abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f) merged[triKey(t)] = t
@@ -1563,6 +1646,10 @@ object LocalStarMatcher {
         idx: StarIndex,
         maxSide: Float,
     ) {
+        // §0.74 计数器：局部累加、退出时一次性并入原子量。内循环每轮要扫数百万条目，
+        // 在那里做 AtomicLong 自增会把生产路径拖慢（实测总时长反升）。
+        var cTriangles = 0L; var cBuckets = 0L; var cEntries = 0L
+        var cMerged = 0L; var cTaken = 0L
         for (pi in from until to) {
             val a = work[pi]
             val nbrs = work.mapIndexed { j, s -> j to dist(a, s) }
@@ -1588,28 +1675,73 @@ object LocalStarMatcher {
                     //    大视场 gnomonic 比值偏移 ~4%）取并集后按接近度取前 10。
                     //    只查严格池会漏掉被投影畸变推离的真三角形（错误“相似”候选
                     //    常占据严格窗口，宽松池从未触发 → 真票系统性缺失，实测）。
-                    // 投票轮**保持历史的角度比查询**：projMap（§0.71b 投影键）只服务
-                    // 打分轮。理由：投票轮的候选会经 verifyCandidate 的第 4 星校验，
-                    // 投影键带来的额外候选在旧照上实测拉高伪票（topVote 26 vs 29、
-                    // 旧照从 SOLVED 回归到 UNSOLVED），而打分轮才是宽场的主战场。
-                    val merged = HashMap<Long, TriEntry>()
-                    for (key in quantizeKeys(r2, r3, window = 1)) {
-                        idx.triMap[key]?.let { list ->
-                            for (t in list) {
-                                if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) merged[triKey(t)] = t
+                    //    投票轮**保持历史的角度比查询**：projMap（§0.71b 投影键）只服务
+                    //    打分轮。理由：投票轮的候选会经 verifyCandidate 的第 4 星校验，
+                    //    投影键带来的额外候选在旧照上实测拉高伪票（topVote 26 vs 29、
+                    //    旧照从 SOLVED 回归到 UNSOLVED），而打分轮才是宽场的主战场。
+                    //
+                    // §0.74 有界 top-K 选择（原为「全量进 HashMap + 全排序」）：
+                    // 实测每轮要扫 ~6000 万条目、往 HashMap 插 ~390 万次，而最终只取
+                    // ~7 万个候选 —— 即每个三角形插近千次、只要 18 个。这是投票轮
+                    // 2.7~4.4s 的主要开销。改为一次扫描 + 有界插入排序：
+                    //   ① 严格池是宽松池的子集（容差 ±0.012 ⊂ ±0.05，桶窗 ±1 ⊂ ±13），
+                    //      故严格池整个省去 —— 它能找到的条目宽松池必然也能找到；
+                    //   ② 同一三角形的重复记录（9 桶冗余 + 锚点顺序冗余）r2/r3 完全
+                    //      相同 → 距离也相同。但**不同锚点插入的实例 (hipA,hipB,hipC)
+                    //      排列不同**，而排序的第三~五键正是它们 —— 所以必须复现旧
+                    //      `merged[triKey] = t` 的「后写覆盖」语义：重复记录到来时
+                    //      换成后出现的那个实例（距离不变，只换实例），否则候选集
+                    //      会变（实测 4984 从 51 内点掉到 15、5068 从 50 掉到 13）。
+                    //   ③ 距离**严格大于**当前第 cap 名的条目才跳过。必须用严格大于：
+                    //      旧算法是全排序后取前 cap，距离打平时按 hip 决胜 —— 若用
+                    //      `>=` 把打平条目一并跳过，就会漏掉本可靠更小 hip 入选的那个。
+                    // 选出的集合与顺序和原 `merged.values.sortedWith(...).take(cap)`
+                    // 完全一致（同样的比较键：距离、hipA、hipB、hipC）。
+                    val cap = candidateCap()
+                    // 原生数组而非 ArrayList<Long>：去重是每条扫描条目都要做的一次
+                    // O(cap) 比较，用装箱集合会把本轮 5000 万次扫描拖慢一个量级
+                    // （实测总时长反升 12%）。
+                    val sel = arrayOfNulls<TriEntry>(cap)
+                    val selDist = FloatArray(cap)
+                    val selKey = LongArray(cap)
+                    var n = 0
+                    for (key in quantizeKeys(r2, r3, window = 14)) {
+                        cBuckets++
+                        val list = idx.triMap[key] ?: continue
+                        for (t in list) {
+                            cEntries++
+                            val dr2 = abs(t.r2 - r2)
+                            if (dr2 >= 0.05f) continue
+                            val dr3 = abs(t.r3 - r3)
+                            if (dr3 >= 0.05f) continue
+                            val d = dr2 + dr3
+                            val k = triKey(t)
+                            var at = -1
+                            for (q in 0 until n) { if (selKey[q] == k) { at = q; break } }
+                            if (at >= 0) {
+                                // 后写覆盖：同 triKey 的重复记录换成后出现的实例。
+                                // 距离相同故名次不变，只换 (hipA,hipB,hipC) 排列。
+                                if (sel[at] !== t) sel[at] = t
+                                continue
                             }
+                            if (n >= cap && d > selDist[n - 1]) continue
+                            var p = n
+                            while (p > 0 && triBefore(t, d, sel[p - 1]!!, selDist[p - 1])) p--
+                            if (p == cap) continue   // 打平且 hip 更大 → 仍不入选
+                            if (n < cap) n++
+                            var q = n - 1
+                            while (q > p) {
+                                sel[q] = sel[q - 1]; selDist[q] = selDist[q - 1]; selKey[q] = selKey[q - 1]
+                                q--
+                            }
+                            sel[p] = t; selDist[p] = d; selKey[p] = k
                         }
                     }
-                    for (key in quantizeKeys(r2, r3, window = 13)) {
-                        idx.triMap[key]?.let { list ->
-                            for (t in list) {
-                                if (abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f) merged[triKey(t)] = t
-                            }
-                        }
-                    }
-                    val candidates = merged.values
-                        .sortedWith(compareBy({ abs(it.r2 - r2) + abs(it.r3 - r3) }, { it.hipA }, { it.hipB }, { it.hipC }))
-                        .take(candidateCap())
+                    cTriangles++
+                    cMerged += n.toLong()
+                    cTaken += n.toLong()
+                    val candidates = ArrayList<TriEntry>(n)
+                    for (q in 0 until n) candidates.add(sel[q]!!)
 
                     // 3) 顶点对应投票：先做几何验证（第 4 星校验），只投验证通过的候选
                     val verified = candidates.filter { verifyCandidate(a, b, c, it, nbrs, work) }
@@ -1624,6 +1756,11 @@ object LocalStarMatcher {
                 }
             }
         }
+        nTriangles.addAndGet(cTriangles)
+        nBucketLookups.addAndGet(cBuckets)
+        nEntriesScanned.addAndGet(cEntries)
+        nMerged.addAndGet(cMerged)
+        nVerified.addAndGet(cTaken)
     }
 
 private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
@@ -1828,11 +1965,11 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
                     val r3 = sides[2] / sides[0]
                     if (r2 < 0.12f) continue
                     val strictRaw = ArrayList<TriEntry>()
-                    for (key in quantizeKeys(r2, r3, window = 1)) {
+                    for (key in quantizeKeys(r2, r3, window = 2)) {
                         idx.triMap[key]?.let { list -> strictRaw.addAll(list) }
                     }
                     val looseRaw = ArrayList<TriEntry>()
-                    for (key in quantizeKeys(r2, r3, window = 13)) {
+                    for (key in quantizeKeys(r2, r3, window = 14)) {
                         idx.triMap[key]?.let { list -> looseRaw.addAll(list) }
                     }
                     val merged = HashMap<Long, TriEntry>()
