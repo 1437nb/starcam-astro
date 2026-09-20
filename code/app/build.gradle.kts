@@ -81,6 +81,8 @@ android {
         // 构建机仅 1.8GB 内存：gradle 守护进程(512m) + 测试 worker 默认(512m)
         // 并存时会触发内核 OOM-killer（2026-08-28 实测）。测试实际峰值远低于默认值，
         // 限到 384m 后守护进程与 worker 可共存。
+        // 注：512m 同时也是「星表加深到 6.5 等不可行」的实测约束 —— 那个索引
+        // （500 万条三角形记录）在这个堆里连求解阶段都跑不完，见 PROGRESS §0.73。
         unitTests.all {
             it.maxHeapSize = "512m"
         }
@@ -89,13 +91,14 @@ android {
     // 本机 4 逻辑核（2026-09-01）：两个测试 worker 并行跑测试类，全量回归减半
     tasks.withType<Test>().configureEach {
         maxParallelForks = 2
-        // 真值回归台依赖不入库的真实照片素材（testdata/，含私拍原图）；
-        // CI 里没有这批素材，用 -PskipPhotoTests=true 排除。
-        // 本机照常执行——这是宽场/暗星等修复的唯一真值保护，务必保留。
+        // 真值回归台依赖不入库的真实照片素材（testdata/，含私拍原图）与
+        // SkyView 下载的 DSS 巡天图；CI 里没有这批素材，用 -PskipPhotoTests=true 排除。
+        // 本机照常执行——这是宽场/暗星等/窄场修复的唯一真值保护，务必保留。
         if (project.findProperty("skipPhotoTests") == "true") {
             filter {
                 excludeTestsMatching("com.starcam.astro.RealPhotoMatchTest")
                 excludeTestsMatching("com.starcam.astro.Photo12RegressionTest")
+                excludeTestsMatching("com.starcam.astro.NarrowFieldRegressionTest")
             }
         }
     }
