@@ -19,6 +19,23 @@
   **已于 2026-09-12 合并为本仓库**，旧副本全部归档到 `C:\star\_archive\`。
 - **不要再从别处开发、不要手工同步副本。** 改代码只在这里改。
 - 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），分支 `main`。
+
+### ⚠️ 凭据红线（2026-09-20 事故后，务必遵守）
+
+2026-09-20 发现 `tools/gh_socks_tunnel.py` 把构建服务器 **root 口令与 IP 明文
+硬编码**，随提交进入公开仓库并暴露约 2 天。处置见 `docs/71-…`。
+
+**硬性规则**：
+
+1. **任何凭据不得进入 git 跟踪范围**（含历史）。服务器口令、API Key、token 一律走
+   环境变量或 `~/.starcam/*.env`（`.gitignore` 已覆盖 `*.env` 等）。
+2. **提交前跑 `python tools/check_secrets.py`** —— 已装为 pre-commit 钩子
+   （`core.hooksPath=.githooks`，新克隆需执行一次 `git config core.hooksPath .githooks`）。
+3. **不要依赖 CI 的默认扫描**：gitleaks 默认规则只认「已知凭据格式」，
+   「自定义变量名 = 任意口令」不在其覆盖范围 —— 本项目必须用仓库内 `.gitleaks.toml`。
+4. **`tools/gh_api_push.py` 是唯一推送通道**（git push 被墙），它已内置推送前自检；
+   若绕过它用别的方式推送，先手动跑 `check_secrets.py`。
+5. **发布前审阅 `git diff`**，尤其 `tools/` 这类辅助目录。
 - 当前基线：**v1.5.61**（versionCode 81）**待发版**；
 - **v1.5.61 修复「SEP 提星阈值语义误用」（§0.72，用户报告）**：
   `sepDetectStars(sigma=2.0)` 的「背景 sigma 倍数」被 C 层直接写进 simplexy 的
