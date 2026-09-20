@@ -1,0 +1,11 @@
+#!/bin/sh
+# 提交前凭据自检（2026-09-20 事故后新增）
+# 事故：tools/gh_socks_tunnel.py 硬编码服务器 root 口令并推送到公开仓库。
+# 启用方式（每台克隆执行一次）：
+#     git config core.hooksPath .githooks
+python tools/check_secrets.py --staged || {
+  echo ""
+  echo "提交已中止：暂存内容含疑似凭据。"
+  echo "确认是误报请加入 .gitleaks.toml 的 allowlist，不要用 --no-verify 绕过。"
+  exit 1
+}

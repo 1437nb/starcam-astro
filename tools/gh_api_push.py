@@ -152,6 +152,17 @@ def cmd_push():
     if remote == local:
         print("已同步，无需推送")
         return
+    # 2026-09-20 事故后加的强制闸门：本脚本是绕过本地 git 钩子（pre-commit /
+    # pre-push）的**唯一**推送通道，因此必须自己先扫一遍凭据——当时正是这条
+    # 通道把硬编码的服务器口令连推了 3 次。发现疑似凭据即中止（退出码非 0）。
+    print("推送前凭据自检…")
+    chk = subprocess.run(
+        (sys.executable, os.path.join(WD, "tools", "check_secrets.py")),
+        cwd=WD, capture_output=True, text=True,
+    )
+    print(chk.stdout.strip())
+    if chk.returncode != 0:
+        sys.exit("凭据自检未通过，已中止推送。处理后再重试（误报请加 .gitleaks.toml allowlist）。")
     # 远端 sha 可能不在本地（API 创建的提交）→ 用 tree sha / 提交信息找本地等价提交
     remote_tree = gh("GET", f"/repos/{OWNER}/{REPO}/git/commits/{remote}")["tree"]["sha"]
     base, how = find_local_base(remote, remote_tree)
