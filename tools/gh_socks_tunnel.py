@@ -1,5 +1,13 @@
 """本地 SOCKS5 代理，把流量经构建服务器中转访问 GitHub。
 
+凭据（**绝不写入本文件**）——按以下顺序查找：
+  1. 环境变量  STARCAM_SSH_HOST / STARCAM_SSH_USER / STARCAM_SSH_PASS
+  2. 未入库文件 ~/.starcam/ssh-tunnel.env（HOST=/USER=/PASS= 三行，chmod 600）
+
+事故教训（2026-09-17）：本文件曾硬编码服务器 root 密码并提交到公开仓库，
+线上暴露 2 天后才被发现，只能轮换口令收场。任何凭据都不得进入 git 跟踪范围。
+
+
 用法：
     python tools/gh_socks_tunnel.py &          # 监听 127.0.0.1:1080
     git -c http.proxy=socks5h://127.0.0.1:1080 push origin main
@@ -24,7 +32,40 @@ import threading
 
 import paramiko
 
-SSH_HOST, SSH_USER, SSH_PASS = _load_credentials()   # 凭据见本文件 docstring（绝不硬编码）
+def _load_credentials():
+    """凭据：环境变量优先，其次 ~/.starcam/ssh-tunnel.env（未入库）。"""
+    import os
+    host = os.environ.get("STARCAM_SSH_HOST", "")
+    user = os.environ.get("STARCAM_SSH_USER", "")
+    pwd = os.environ.get("STARCAM_SSH_PASS", "")
+    if not (host and user and pwd):
+        cfg = os.path.join(os.path.expanduser("~"), ".starcam", "ssh-tunnel.env")
+        try:
+            with open(cfg, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip().upper()
+                    if k == "HOST":
+                        host = host or v.strip()
+                    elif k == "USER":
+                        user = user or v.strip()
+                    elif k == "PASS":
+                        pwd = pwd or v.strip()
+        except OSError:
+            pass
+    if not (host and user and pwd):
+        sys.exit(
+            "缺少凭据。请设置环境变量 STARCAM_SSH_HOST/USER/PASS，或创建 "
+            "~/.starcam/ssh-tunnel.env（HOST=/USER=/PASS= 三行，chmod 600）。"
+            "切勿把凭据写进本文件——它受 git 跟踪。",
+        )
+    return host, user, pwd
+
+
+SSH_HOST, SSH_USER, SSH_PASS = _load_credentials()
 LISTEN = ("127.0.0.1", 1080)
 
 transport = None
