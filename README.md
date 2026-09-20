@@ -12,18 +12,24 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.61](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.61)** —
+最新版本 **[v1.5.62](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.62)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.61-sep-threshold-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.61/StarCam-v1.5.61-sep-threshold-fix-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.61-sep-threshold-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.61/StarCam-v1.5.61-sep-threshold-fix-debug.apk) | 26.9 MB | 含调试日志 |
+| [StarCam-v1.5.62-solver-3.4x-faster-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.62/StarCam-v1.5.62-solver-3.4x-faster-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.62-solver-3.4x-faster-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.62/StarCam-v1.5.62-solver-3.4x-faster-debug.apk) | 26.9 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
 
-> **v1.5.61 修复「原图识别不出来、把对比度拉高却能识别」**（2026-09-17 用户报告）：
-> 根因在**提星环节**——阈值参数被误用（传入的「噪声倍数」被当成提星器的
-> 「峰值显著度」），实际检出限低于噪声本身，整幅图 29% 的像素被判为一片
+> **v1.5.62 识别提速 3.4 倍**：12 张宽场回归照片的总识别耗时从 46.6 秒降到
+> 13.8 秒，单张最快 0.36 秒、最慢 2.6 秒（此前 1.6~11.1 秒）。根因是三角形索引
+> 把每个三角形写进 9 个相邻桶、查询时同一对象被重复遍历 9 次，以及候选合并
+> 「全量进哈希表再整体排序」。修复后**识别结果逐位一致**——12 张照片的内点数
+> 与改动前逐个相同，仍 12/12 正确解出、0 假阳性。
+
+> **v1.5.61 修复「原图识别不出来、把对比度拉高却能识别」**（2026-09-17 用户报告，
+> 已真机验证通过）：根因在**提星环节**——阈值参数被误用（传入的「噪声倍数」被当成
+> 提星器的「峰值显著度」），实际检出限低于噪声本身，整幅图 29% 的像素被判为一片
 > 「延展天体」整体丢弃，真星全丢、只剩图像边缘的噪声团块。修复后过阈像素
 > 从 29.27% 降到 0.63%。同时新增**提星诊断日志**（可直接看出是"没提到星"
 > 还是"提到了但匹配不上"）。
@@ -113,6 +119,12 @@
   `Application.onTrimMemory` 钩子，在系统报 `TRIM_MEMORY_RUNNING_LOW` 时释放索引
   （阈值选在此处而非更激进，避免用户连续识别时把索引丢掉、下次反而变慢）。
   释放前检查有无超时 detach 的线程仍在运行，有则拒绝释放 —— **宁可占内存也不崩**。
+
+- **识别提速 3.4 倍**（v1.5.62）：12 张宽场回归照片的总耗时从 46.6 秒降到
+  13.8 秒，单张最快 0.36 秒、最慢 2.6 秒。根因是三角形索引把每个三角形写进
+  9 个相邻桶、查询扫 729 桶时同一对象被重复遍历（一轮投票要扫 5966 万条记录，
+  九成是重复），以及候选合并用「全量进哈希表再整体排序」。修复后**识别结果
+  逐位一致**：12 张照片的内点数与改动前逐个相同，仍 12/12 正确解出、0 假阳性。
 
 - **提星阈值修复**（v1.5.61，**重要**）：修复「原图识别不出来、把对比度拉高却能识别」。
   根因在**提星环节**：阈值参数被误用（传入的「背景噪声倍数」被当成提星器的

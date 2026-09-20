@@ -12,26 +12,36 @@ A pure offline Android application for astrophotography plate-solving and night 
 
 ## Download
 
-Latest release: **[v1.5.61](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.61)**
+Latest release: **[v1.5.62](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.62)**
 
 | Package | Size | Notes |
 |---|---|---|
-| [StarCam-v1.5.61-sep-threshold-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.61/StarCam-v1.5.61-sep-threshold-fix-release.apk) | 16.5 MB | **Recommended** — R8-minified signed build |
-| [StarCam-v1.5.61-sep-threshold-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.61/StarCam-v1.5.61-sep-threshold-fix-debug.apk) | 26.9 MB | Includes debug logging |
+| [StarCam-v1.5.62-solver-3.4x-faster-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.62/StarCam-v1.5.62-solver-3.4x-faster-release.apk) | 16.5 MB | **Recommended** — R8-minified signed build |
+| [StarCam-v1.5.62-solver-3.4x-faster-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.62/StarCam-v1.5.62-solver-3.4x-faster-debug.apk) | 26.9 MB | Includes debug logging |
 
 All versions: [Releases](https://github.com/1437nb/starcam-astro/releases).
 
+> **v1.5.62 makes solving 3.4× faster**: total solve time across the 12-photo
+> wide-field regression set drops from 46.6 s to 13.8 s (fastest single photo
+> 0.36 s, slowest 2.6 s; previously 1.6 s–11.1 s). The causes were that the
+> triangle index wrote every triangle into 9 adjacent buckets — so a 729-bucket
+> query re-visited the same object 9 times (one voting round traversed 59.66 M
+> index entries, nine tenths of them duplicates) — and that candidate merging
+> loaded everything into a hash map before sorting. **Results are bit-identical
+> after the fix**: the 12 photos report the same inlier counts as before, still
+> 12/12 correct with zero false positives.
+
 > **v1.5.61 fixes "the original photo will not solve, but raising the contrast
-> does"** (reported 2026-09-17): the cause was in **star extraction** — a
-> threshold parameter was misused (the caller's "noise multiple" was interpreted
-> as the extractor's "peak significance"), leaving the detection limit *below*
-> the noise itself. 29% of all pixels passed the threshold and merged into one
-> 848,846-pixel blob, which exceeded the extractor's extended-object cap and was
-> discarded wholesale — every real star was lost, leaving only border noise
-> (the 172 "stars" in the user's log: **none** of them sat on a real source).
-> After the fix: over-threshold pixels drop to 0.63%. A new **extraction
-> diagnostic** in the solve log shows whether the failure was "no stars
-> extracted" or "stars extracted but not matched".
+> does"** (reported 2026-09-17, **verified on a real device**): the cause was in
+> **star extraction** — a threshold parameter was misused (the caller's "noise
+> multiple" was interpreted as the extractor's "peak significance"), leaving the
+> detection limit *below* the noise itself. 29% of all pixels passed the
+> threshold and merged into one 848,846-pixel blob, which exceeded the
+> extractor's extended-object cap and was discarded wholesale — every real star
+> was lost, leaving only border noise (the 172 "stars" in the user's log:
+> **none** of them sat on a real source). After the fix: over-threshold pixels
+> drop to 0.63%. A new **extraction diagnostic** in the solve log shows whether
+> the failure was "no stars extracted" or "stars extracted but not matched".
 
 > **v1.5.60 fixes "star photos fail to solve"**: four independent defects stacked
 > on top of each other — a brightness-threshold unit mismatch, a hard-coded
@@ -86,6 +96,15 @@ back gracefully to the JVM catalog matcher).
 - **Native star extraction fix** (v1.5.55, **critical**): the native engine extracted **zero stars on every device**. Three compounding C-level defects had been misdiagnosed as "a data race on some ARM64 models" — they reproduce 100 % of the time on x86_64 as well: (1) `simplexy_set_defaults()` memsets the whole struct, but the bridge filled `image/nx/ny` *before* calling it, so those three fields were zeroed; (2) `simplexy_free_contents()` calls `free(s->image)`, yet that pointer comes from JNI `GetFloatArrayElements` (an ART heap pointer that only `Release...Elements` may hand back) — defect (1) nulled the pointer and conveniently masked (2); (3) the success test read `if (rc != 0 || npeaks <= 0)`, inverting the real semantics (`rc=0` means no pixel rose above threshold, i.e. failure), so the branch was always taken, the SEP path never succeeded, and the "SEP-first" three-tier fallback on the Kotlin side never ran. The same release also fixed `maxStars` truncating by scan order (now takes the top k by flux), a silently ignored `thresholdBgMultiple`, a JNI array-length leak, a three-state timeout misjudgement, `pthread_create` failure being reported as a timeout, and an unbounded `join` (now a 5 s grace period plus detach protection).
 - **Engineering hardening** (v1.5.56): user-supplied astrometry.net API keys are now stored with `EncryptedSharedPreferences` (previously plaintext; existing values migrate automatically on read); build scripts no longer hard-code local paths (`STARCAM_KEYSTORE` env var → `-PkeystoreProps` → `~/.starcam/`); a **GitHub Actions CI** workflow runs the unit tests plus a gitleaks credential scan; the camera analysis stream switched to `YUV_420_888` reading only the Y plane (eliminating 1.9 M `ByteBuffer.get()` calls per frame); the online client is hardened (HTTPS enforced, exponential backoff, upload de-duplication); debug switches were narrowed to `internal`.
 - **Reclaimable index memory** (v1.5.57): the ~11 MB catalog index cache is now handed back under memory pressure, reducing the chance of the app being killed in the background. Solver thread state moved from a **process-wide singleton** to **one instance per solve** (fixing a use-after-free latent in v1.5.55: if an earlier solve leaked a thread on timeout and the current one finished cleanly, the caller would `solver_free` memory still being read); a new `releaseIndexes()` JNI entry point plus an `Application.onTrimMemory` hook frees the indexes on `TRIM_MEMORY_RUNNING_LOW` — deliberately not a more aggressive threshold, so that back-to-back solves do not drop the cache and end up slower. Release is refused while a detached timeout thread may still be running: **rather hold 11 MB than crash**.
+- **Solving is 3.4× faster** (v1.5.62): total solve time across the 12-photo
+  wide-field regression set drops from 46.6 s to 13.8 s (fastest single photo
+  0.36 s, slowest 2.6 s). The causes were that the triangle index wrote every
+  triangle into 9 adjacent buckets, so a 729-bucket query re-visited the same
+  object 9 times (one voting round traversed 59.66 M index entries, nine tenths
+  of them duplicates), and that candidate merging loaded everything into a hash
+  map before sorting it. **Results are bit-identical after the fix**: the 12
+  photos report the same inlier counts as before, still 12/12 correct with zero
+  false positives.
 - **Star-extraction threshold fix** (v1.5.61, **critical**): fixes "the original photo
   will not solve, but raising the contrast in a gallery app does". The cause was in
   **star extraction**: a threshold parameter was misused — the caller's "background
