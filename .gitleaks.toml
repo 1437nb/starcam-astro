@@ -16,16 +16,20 @@ useDefault = true
 id = "starcam-ssh-credential"
 description = "SSH/服务器口令硬编码"
 # 变量名含 pass/pwd/secret + 赋值为长度 ≥6 的字符串字面量。
-# 注意：占位符（your_password_here / REDACTED / * / ${VAR}）在下方 allowlist 放行。
-regex = '''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*["'][^"'$\{\s][^"']{5,}["']'''
+# 注意：字符类里必须显式排除 \r\n —— 否则 `"password="` 这种**字符串字面量**
+# 的引号会与下一行的引号配对，把两行正文糊成一次"赋值"匹配（实测误报 3 处）。
+# 占位符（your_password_here / REDACTED / * / ${VAR}）在下方 allowlist 放行。
+regex = '''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*["'][^"'$\{\s\r\n][^"'\r\n]{5,}["']'''
 tags = ["credential", "ssh"]
 [rules.allowlist]
 # 允许「明显是占位/示例/读取环境变量/路径」的写法
 regexes = [
   # 占位符：your_*/changeme/placeholder/xxx/REDACTED/***
-  '''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*["'][^"']*(your|changeme|placeholder|redacted|example|dummy|fake|todo|xxx|\*\*\*)[^"']*["']''',
+  '''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*["'][^"'\r\n]*(your|changeme|placeholder|redacted|example|dummy|fake|todo|xxx|\*\*\*)[^"'\r\n]*["']''',
   # 读取环境变量/配置，非字面量
   '''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*\w+\.get(env|Property)''',
+  # 解析 "password=" 这类字符串字面量（git credential 协议），不是凭据本身
+  '''(?i)(?:startswith|endswith|contains|equals|indexOf)\s*\(\s*["'][\w.]*(pass|pwd|secret)[\w.]*["']''',
   # URL 路径/接口名（如 forgot_password_url = "/auth/reset"）——值以 / 开头
   '''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*["']/''',
   # 单字符或纯符号（掩码、正则片段）
@@ -37,8 +41,18 @@ id = "starcam-server-ip-with-credential"
 description = "公网 IP 与 SSH/凭据语境同现"
 # 单独的地址字面量不算凭据（版本号 17.0.20.1 之类会误报，文档里也有示例 IP）。
 # 只有地址与 host/ssh 等配置语境出现在同一行时才告警，避免噪声。
-regex = '''(?i)(?:ssh_?host|host|server|ip)\s*[:=]\s*["'](?!10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)\d{1,3}(?:\.\d{1,3}){3}["']'''
+#
+# 注意：gitleaks 用 RE2 引擎，**不支持 lookahead/lookbehind**（`(?!...)` 会让
+# gitleaks 启动即 panic）。因此排除私有网段改用下面的 allowlist.regexes 表达。
+regex = '''(?i)(?:ssh_?host|ssh_?server|host|server|ip)\s*[:=]\s*["']\d{1,3}(?:\.\d{1,3}){3}["']'''
 tags = ["infrastructure", "credential"]
+[rules.allowlist]
+# 私有/回环/链路本地网段不算泄露（RE2 里没有 lookahead，只能在这里排除）
+regexes = [
+  '''(?i)(?:host|server|ip)\s*[:=]\s*["'](?:10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|169\.254\.|0\.)''',
+  # 文档/示例里常见的占位地址
+  '''(?i)(?:host|server|ip)\s*[:=]\s*["'](?:1\.2\.3\.4|8\.8\.8\.8|example|your|xxx|\*+)''',
+]
 
 [[rules]]
 id = "starcam-ssh-root-line"
@@ -46,13 +60,11 @@ description = "SSH 配置行里的 root 账户"
 regex = '''(?i)\b(ssh_?user|username|user)\s*[:=]\s*["']root["']'''
 tags = ["credential", "ssh"]
 
-# 全局白名单：这些路径里的内容不算泄露
+# 全局白名单：这些路径不算泄露
 [allowlist]
 paths = [
   # 测试夹具与示例
   '''.*(test|spec|fixture|example|sample).*''',
-  # 本仓库的脱敏文档（明示凭据处理历史）
-  '''docs/.*''',
-  # gitleaks 自身配置
+  # gitleaks 自身配置（规则里必然出现这些关键字）
   '''\.gitleaks\.toml$''',
 ]

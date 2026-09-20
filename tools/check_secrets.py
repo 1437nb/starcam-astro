@@ -25,15 +25,21 @@ GIT = os.environ.get("GIT_EXE", "git")
 
 # 与 .gitleaks.toml 的三条项目规则对应（内置回退用）
 RULES = [
+    # 注意：字符类排除 \r\n，否则 "password=" 这类字符串字面量会与下一行的
+    # 引号配对，把两行糊成一次"赋值"匹配（实测误报 3 处）。
     ("硬编码口令",
-     re.compile(r'''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*["'][^"'$\{\s][^"']{5,}["']''')),
-    ("服务器 IP + 凭据语境",
-     re.compile(r'''(?i)(?:ssh_?host|host|server|ip)\s*[:=]\s*["'](?!10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)\d{1,3}(?:\.\d{1,3}){3}["']''')),
+     re.compile(r'''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*["'][^"'$\{\s\r\n][^"'\r\n]{5,}["']''')),
+    ("服务器地址 + 凭据语境",
+     re.compile(r'''(?i)(?:ssh_?host|ssh_?server|host|server|ip)\s*[:=]\s*["']\d{1,3}(?:\.\d{1,3}){3}["']''')),
     ("root 账户赋值",
      re.compile(r'''(?i)\b(ssh_?user|username|user)\s*[:=]\s*["']root["']''')),
 ]
 
 ALLOW = [
+    # 私有/回环/链路本地网段（.gitleaks.toml 同样用 allowlist 表达，RE2 无 lookahead）
+    re.compile(r'''(?i)(?:host|server|ip)\s*[:=]\s*["'](?:10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|169\.254\.|0\.)'''),
+    # 解析 "password=" 这类字面量（git credential 协议），不是凭据本身
+    re.compile(r'''(?i)(?:startswith|endswith|contains|equals|indexOf)\s*\(\s*["'][\w.]*(pass|pwd|secret)[\w.]*["']'''),
     re.compile(r'''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*["'][^"']*(your|changeme|placeholder|redacted|example|dummy|fake|todo|xxx|\*\*\*)[^"']*["']'''),
     re.compile(r'''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*\w+\.get(env|Property)'''),
     re.compile(r'''(?i)[\w.]*(pass(word|wd)?|pwd|secret)[\w]*\s*[:=]\s*["']/'''),
