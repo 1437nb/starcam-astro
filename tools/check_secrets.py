@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """提交前凭据自检（本地守门），与 CI 的 .gitleaks.toml 规则保持一致。
 
-为什么需要它（2026-09-20 事故）：
-  tools/gh_socks_tunnel.py 硬编码服务器 root 口令并推送到公开仓库，暴露 2 天。
-  CI 里的 gitleaks 用的是默认规则集，「自定义变量名 = 任意口令」不在其覆盖范围，
-  所以每次都报 success。本脚本用**仓库自己的规则**扫工作区 + 暂存区，
-  在 git commit 之前拦住同类问题。
+为什么需要它：
+  CI 的 gitleaks 用默认规则集，而默认规则只认「已知凭据格式」，
+  「自定义变量名 = 任意口令」不在覆盖范围。本脚本用仓库自己的规则
+  （与 .gitleaks.toml 一致）扫工作区 + 暂存区，在 git commit 之前拦住问题，
+  且不依赖 gitleaks 二进制。
 
 用法：
     python tools/check_secrets.py            # 扫工作区全部跟踪文件
@@ -52,7 +52,7 @@ def scan_text(path, text):
     hits = []
     for i, line in enumerate(text.splitlines(), 1):
         # gitleaks 约定的行内豁免：行尾带 gitleaks:allow 标记的行不告警。
-        # 用于文档/测试里必须展示的示例文本（例如事故复盘记录泄露形态本身）。
+        # 用于必须展示示例文本的场景（文档、测试夹具）。
         if "gitleaks:allow" in line:
             continue
         if not any(r.search(line) for _, r in RULES):

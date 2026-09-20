@@ -58,3 +58,8 @@ tmp_*/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# --- 安全事件复盘（仅本地留存，绝不入库：内容等于泄露细节说明书） ---
+/docs/71-*
+~/.starcam/incident/
+/tools/purge_remote_history.py

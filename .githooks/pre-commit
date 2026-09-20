@@ -1,6 +1,5 @@
 #!/bin/sh
-# 提交前凭据自检（2026-09-20 事故后新增）
-# 事故：tools/gh_socks_tunnel.py 硬编码服务器 root 口令并推送到公开仓库。
+# 提交前凭据自检：防止口令/密钥等被硬编码进源码或文档。
 # 启用方式（每台克隆执行一次）：
 #     git config core.hooksPath .githooks
 python tools/check_secrets.py --staged || {

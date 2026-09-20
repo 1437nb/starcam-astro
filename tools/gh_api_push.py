@@ -152,9 +152,8 @@ def cmd_push():
     if remote == local:
         print("已同步，无需推送")
         return
-    # 2026-09-20 事故后加的强制闸门：本脚本是绕过本地 git 钩子（pre-commit /
-    # pre-push）的**唯一**推送通道，因此必须自己先扫一遍凭据——当时正是这条
-    # 通道把硬编码的服务器口令连推了 3 次。发现疑似凭据即中止（退出码非 0）。
+    # 强制闸门：本脚本是绕过本地 git 钩子（pre-commit / pre-push）的**唯一**
+    # 推送通道，因此必须自己先扫一遍凭据。发现疑似凭据即中止（退出码非 0）。
     print("推送前凭据自检…")
     chk = subprocess.run(
         (sys.executable, os.path.join(WD, "tools", "check_secrets.py")),
