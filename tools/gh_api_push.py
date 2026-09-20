@@ -51,6 +51,19 @@ def get_token():
 TOK = get_token()
 
 
+def has_workflow_scope():
+    """token 是否带 workflow scope（GitHub 在任意响应头里给出 x-oauth-scopes）。"""
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{OWNER}/{REPO}",
+        headers={"Authorization": "Bearer " + TOK,
+                 "User-Agent": "StarCam-gh-api-push/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return "workflow" in (r.headers.get("X-OAuth-Scopes") or "")
+    except urllib.error.HTTPError:
+        return False
+
+
 def gh(method, path, payload=None):
     headers = {
         "Authorization": "Bearer " + TOK,
@@ -116,9 +129,11 @@ def upload_commit(local_sha, parent_sha):
         meta, path = line.split("\t", 1)
         fields = meta.split()           # ":<oldmode> <newmode> <oldsha> <newsha> <status>"
         newmode, status = fields[1], fields[4][0]
-        # .github/workflows/ 的写入需要 token 具备 workflow scope（仅 repo scope 时
-        # GitHub 对这类路径一律回 404，Contents API 与 Git Data API 都是）。
-        if path.startswith(".github/workflows/"):
+        # .github/workflows/ 的写入需要 token 具备 workflow scope。token 缺该 scope 时
+        # GitHub 对这类路径一律回 404（Contents API 与 Git Data API 都是）——此时上传会
+        # 直接失败，因此先探测 scope，缺了才跳过（曾因无条件跳过导致 CI 配置改不动）。
+        is_workflow = path.startswith(".github/workflows/")
+        if is_workflow and not has_workflow_scope():
             skipped_workflow.append(path)
             continue
         if status == "D":
