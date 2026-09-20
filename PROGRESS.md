@@ -389,8 +389,9 @@
          Android SDK。已删除并直接指向预装 SDK；同时补上缺失的 Gradle wrapper
          （仓库此前没有 wrapper，CI 无 gradle 可用）。
       **现状**：CI 全绿（run #2，145 项单测 0 失败 + gitleaks 通过）。
-- [ ] **astrometry.net API key 轮换** —— 该 key 自开源首发提交 `511c825` 起就在公开历史中，
-      改历史无用，只能去 nova 侧作废并更换。
+- [x] ~~**astrometry.net API key 轮换**~~ —— 已核实为误报：`apiKey` 只是
+      `PlateSolveClient` 的入参名，仓库（含首发提交 `511c825`）里没有任何 key 字面值，
+      `settings.hasApiKey` 也只是用户输入的开关。无需轮换。
 - [ ] **真实照片回归素材不在工程内** —— `RealPhotoMatchTest` / `Photo12RegressionTest` 依赖
       `testdata/realphotos` 与 `testdata/gray12`，这批素材目前在归档目录
       （`C:\star\_archive\20260912-pre-merge\starcam-bundle\testdata\`），导致本机跑不了真实照片回归。

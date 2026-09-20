@@ -4,23 +4,18 @@
   1. 环境变量  STARCAM_SSH_HOST / STARCAM_SSH_USER / STARCAM_SSH_PASS
   2. 未入库文件 ~/.starcam/ssh-tunnel.env（HOST=/USER=/PASS= 三行，chmod 600）
 
-事故教训（2026-09-17）：本文件曾硬编码服务器 root 密码并提交到公开仓库，
-线上暴露 2 天后才被发现，只能轮换口令收场。任何凭据都不得进入 git 跟踪范围。
+红线：任何凭据都不得进入 git 跟踪范围（含历史）。含凭据的文件一律放
+~/.starcam/ 并 chmod 600，或走环境变量；提交前跑 tools/check_secrets.py。
 
 
 用法：
     python tools/gh_socks_tunnel.py &          # 监听 127.0.0.1:1080
     git -c http.proxy=socks5h://127.0.0.1:1080 push origin main
 
-背景：本机 github.com 间歇不可达（实测多次 Connection reset / 超时），而构建
-服务器稳定可达。这里用 paramiko 的 direct-tcpip 通道实现「ssh -L」的等价物。
-仅监听回环地址，不对外暴露。凭据与 ssh_helper.py 一致。
-
 背景：本机直连 github.com 被阻断（curl 多次 000），而构建服务器稳定可达
 （实测 3/3 HTTP 200）。这里用 paramiko 的 direct-tcpip 通道做「ssh -L」的
-等价物，在本机 127.0.0.1:1080 起一个 SOCKS5 服务，让浏览器能通过它上 GitHub。
-
-仅监听回环地址，不对外暴露。
+等价物，在本机 127.0.0.1:1080 起一个 SOCKS5 服务，让 git / 浏览器通过它访问
+GitHub。仅监听回环地址，不对外暴露。
 """
 
 import json
