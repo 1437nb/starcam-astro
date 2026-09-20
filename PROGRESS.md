@@ -57,6 +57,12 @@
   - `tools/gh_api_push.py` 推送前强制自检 —— 它是绕过所有 git 钩子的唯一推送通道。
   - `tools/gh_socks_tunnel.py` 的凭据改为从环境变量 / `~/.starcam/ssh-tunnel.env` 读取；
     `.gitignore` 补 `*.env` 等防线。
+  - **踩坑记录（gitleaks 两个硬约束）**：① 它走 **RE2 引擎，不支持 lookahead**
+    （`(?!...)` 会让它启动即 panic、CI 8 秒失败）——排除项必须写进 `allowlist.regexes`；
+    ② 规则的字符类必须排除 `
+`，否则 `"password="` 这类字面量的引号会与下一行
+    引号配对，把两行正文糊成一次"赋值"匹配。两处都已修复并加了本机 gitleaks 实测
+    （仓库零发现 + 构造样本 3/3 命中）。
 
 - **2026-09-20（v1.5.61）** — **修复 SEP 提星阈值语义误用（§0.72，用户报告）**：
   - **问题**：用户装 v1.5.60 后用相册导入 9-17 原图仍失败（`work=6 votedStars=0`），
