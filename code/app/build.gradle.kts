@@ -101,6 +101,7 @@ android {
                 excludeTestsMatching("com.starcam.astro.NarrowFieldRegressionTest")
                 excludeTestsMatching("com.starcam.astro.PhaseTimingBench")
                 excludeTestsMatching("com.starcam.astro.TieredCatalogTest")
+                excludeTestsMatching("com.starcam.astro.SyntheticMidFieldTest")
             }
         }
     }

@@ -4,7 +4,11 @@
 import json, os, sys
 import numpy as np
 
-OUT = sys.argv[1] if len(sys.argv) > 1 else "/c/starword/testdata/narrowfield"
+# 默认目录由本脚本位置推导（tools/ 的上一级即仓库根）。不要写死
+# "/c/starword/..." —— Windows 原生 Python 会把它解析成 C:\c\starword\...，
+# 素材会静默落到另一棵目录树上。
+_HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_HERE, os.pardir, "testdata", "narrowfield")
 
 NOTES = {
     "m51-1d": "M51 涡状星系 1°", "m51-5d": "M51 5°",
@@ -24,6 +28,30 @@ NOTES = {
     "void": "高银纬空场 2°（极稀疏）",
     "equator10": "赤道 10°（中场）",
     "mid30": "30° 视场（中场）",
+    # §0.76 中场批（10°~20°）
+    "cas15": "仙后座 W 15°（北天图案+双星团）",
+    "m31m33-14": "M31+M33 双星系 14°",
+    "leo15": "狮子座镰刀 15°",
+    "orion15": "猎户座宽场 15°（参宿四→参宿三）",
+    "sco18": "天蝎座 18°",
+    "sgr15": "人马座茶壶 15°（银心方向）",
+    "crux10": "南十字座 10°（南天）",
+    "summer20": "夏季大三角 20°（织女-牛郎-天津四）",
+    "cyg15": "天鹅座银河 15°（密场）",
+    "void15": "高银纬空场 15°（极稀疏）",
+    "seam0-15": "RA 0° 接缝 15°",
+    "npole12": "北天极 12°（高赤纬 cos 压缩）",
+    "spole12": "南天极 12°（高赤纬 cos 压缩）",
+}
+
+# 没有本地 FITS 的真值条目：这些图是早前单独拉的，FITS 已删除省空间，
+# 但 WCS 真值必须留着，否则回归会静默漏掉这一场。
+EXTRA_TRUTH = {
+    "apod3xcheck": {
+        "ra": 130.274, "dec": -43.878, "fov": 8.5, "px": 30.6,
+        "w": 1000, "h": 1000, "bright": 10252,
+        "note": "apod3 解算天区的 DSS 交叉验证",
+    },
 }
 
 def read_header(path):
@@ -85,6 +113,7 @@ for name in sorted(os.listdir(OUT)):
     print(f"OK {fid:12s} {w}x{hh} fov={truth[fid]['fov']:6.2f}° px={truth[fid]['px']:6.2f}\" "
           f"bright={bright:5d} | {truth[fid]['note']}")
 
+truth.update(EXTRA_TRUTH)
 with open(os.path.join(OUT, "truth.json"), "w", encoding="utf-8") as f:
     json.dump(truth, f, ensure_ascii=False, indent=1)
 print(f"\ntruth: {len(truth)} fields")
