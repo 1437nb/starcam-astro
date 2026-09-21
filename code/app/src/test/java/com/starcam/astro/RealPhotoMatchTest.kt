@@ -123,17 +123,54 @@ class RealPhotoMatchTest {
     }
 
     /**
+     * apod3 = 船帆座超新星遗迹（Vela SNR）窄场，8.4°×6.3°。
+     *
+     * §0.75 之前它必须保持 UNSOLVED —— 那时它只会以尺度坍缩的错解出现
+     * （FOV≈627°）。深星表域兜底（mag<=6.5）落地后，它被**正确**解出：
+     *   RA 130.27 / Dec -43.88 / FOV 8.5° / 20 内点。
+     *
+     * 真值依据（三条独立证据）：
+     *  ① 视场 8.5° 与注释记载的 8.4°×6.3° 相差 1.2%；
+     *  ② 解的银道坐标 l=263.1° b=-1.2°，船帆座 SNR 标准位 l=263.9° b=-3.1°，
+     *     角距 2.02°（在 8.5° 视场内，偏离中心合理）；
+     *  ③ **交叉验证**：按该解算坐标从 SkyView 拉的 DSS 巡天图（完全不同的图像）
+     *     用同一引擎独立解出，28 内点，位置一致。
+     * 旧失败形态（FOV≈627° 尺度坍缩）已消失，故按测试自身规则转为真值断言。
+     */
+    @Test
+    fun apod3VelaNarrowFieldGroundTruth() {
+        val res = solve(photo("apod3.gray"))
+        println("PHOTO apod3.gray ${describe(res)}")
+        assertNotNull("apod3 船帆座窄场必须解出（当前 UNSOLVED —— 深星表域兜底回归）", res)
+        val s = res!!.solve
+        assertTrue(
+            "apod3 赤经偏出真值窗口：${s.raDeg}（期望 130.3±3）",
+            abs(s.raDeg - 130.3) < 3.0,
+        )
+        assertTrue(
+            "apod3 赤纬偏出真值窗口：${s.decDeg}（期望 -43.9±3）",
+            abs(s.decDeg - (-43.9)) < 3.0,
+        )
+        assertTrue(
+            "apod3 视场偏出真值窗口：${s.fieldWidthDeg}°（期望 6°~11°，真值 8.4°×6.3°）",
+            s.fieldWidthDeg in 6.0..11.0,
+        )
+    }
+
+    /**
      * 假阳性对照样本（修复前形态见验证报告 §0.4）：
-     *  - apod3（船帆座 SNR，8.4°×6.3° 窄场）：曾解出 FOV≈627°（尺度坍缩）；
      *  - apod5（Sedna 发现图，~45°）：曾以 5 内点错误锁定不符天区；
      *  - pleiades（昴星团 demo）：曾解出 FOV≈1900°（尺度膨胀）。
-     * 三者当前都必须 UNSOLVED；若未来星表/算法升级使其中某张能正确解出，
+     * 两者当前都必须 UNSOLVED；若未来星表/算法升级使其中某张能正确解出，
      * 应把该样本改为真值断言而不是删掉本测试。
+     *
+     * 注：apod3 已于 §0.75 移出本列表 —— 深星表域兜底让它被**正确**解出
+     * （船帆座 SNR 天区，见 [apod3VelaNarrowFieldGroundTruth]）。
      */
     @Test
     fun knownFalsePositivesRemainUnsolved() {
         val failures = ArrayList<String>()
-        for (name in listOf("apod3.gray", "apod5.gray", "pleiades.gray")) {
+        for (name in listOf("apod5.gray", "pleiades.gray")) {
             val res = solve(photo(name))
             println("PHOTO $name ${describe(res)}")
             if (res != null) {

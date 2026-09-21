@@ -78,6 +78,24 @@ object LocalStarMatcher {
     /** 生产星表域星等上限：投票索引 / 验证网格 / 内点统计统一使用 */
     private const val PROD_CATALOG_MAG = 4.0f
 
+    /**
+     * §0.75 深星表域星等上限（窄场兜底）。
+     *
+     * 取 6.5 而不是更深，是因为仓库星表本身就到 6.5 等（8415 颗）—— 零新增数据。
+     * 实测该深度已能让 10° 视场解出；再深需要引入外部星表（hip_main.dat），
+     * 索引体积和内存都要再翻一倍以上，见 PROGRESS §0.75 的分级决策记录。
+     */
+    private const val DEEP_CATALOG_MAG = 6.5f
+
+    /**
+     * §0.75 深域路径的视场上界（度）。
+     *
+     * 取值依据：已知全部真解的最大视场是宽场回归里的 76.9°，而深域坍缩伪影
+     * 报出 104°~170°。取 90° 落在两者之间，既容纳真实宽场，又排除全部伪影。
+     * 只作用于深域兜底路径，浅域（宽场主路径）的 [plausibleFov] 门槛不变。
+     */
+    private const val DEEP_PATH_MAX_FOV_DEG = 90.0
+
     /** 当前生效的星表域星等上限（调试可覆盖） */
     private fun catalogMag(): Float = debugForceCatalogMag ?: PROD_CATALOG_MAG
 
@@ -599,14 +617,25 @@ object LocalStarMatcher {
         val projMap: HashMap<Int, MutableList<TriEntry>> = HashMap(),
     )
 
+    /**
+     * §0.75 索引缓存：**按星等上限分槽**。
+     *
+     * 为什么不能是单槽：深域兜底（mag<=6.5，55 万条三角形、构建 8.9s）与浅域
+     * （mag<=4.0，3.4 万条、358ms）会在同一批照片里交替出现（批量导出宽窄混杂）。
+     * 单槽会让每次交替都重建一次索引 —— 深域重建一次就是 8.9 秒，10 张交替
+     * 就要 46 秒。分槽后两域各建一次、之后都命中缓存。
+     */
     @Volatile
-    private var cachedIndex: StarIndex? = null
+    private var indexCache: HashMap<Float, StarIndex> = HashMap()
 
-    /** [cachedIndex] 构建时使用的星等上限（调试覆盖变化时用于失效重建） */
+    /** §0.75 深域重试的切域锁，见 [match] 里的说明 */
+    private val domainLock = Any()
+
+    /** §0.75 调试：彻底跳过深星表域兜底（A/B 计费用；true=浅域无解即返回 null） */
     @Volatile
-    private var cachedIndexMag: Float = Float.NaN
+    internal var debugDisableDeepCatalog: Boolean = false
 
-    /** 调试：返回（索引三角形总数, 首次构建耗时 ms） */
+    /** 调试：返回（当前星表域索引的三角形总数, 首次构建耗时 ms） */
     internal fun debugIndexBuild(): Pair<Int, Long> {
         val t0 = System.nanoTime()
         val idx = index()
@@ -616,12 +645,10 @@ object LocalStarMatcher {
 
     private fun index(): StarIndex {
         val mag = catalogMag()
-        cachedIndex?.let { if (cachedIndexMag == mag) return it }
+        indexCache[mag]?.let { return it }
         synchronized(this) {
-            cachedIndex?.let { if (cachedIndexMag == mag) return it }
-            cachedIndex = buildIndex(mag)
-            cachedIndexMag = mag
-            return cachedIndex!!
+            indexCache[mag]?.let { return it }
+            return buildIndex(mag).also { indexCache[mag] = it }
         }
     }
 
@@ -821,19 +848,48 @@ object LocalStarMatcher {
         val bright = StarCatalogData.stars.filter { it.mag <= magLimit }
         val triMap = HashMap<Int, MutableList<TriEntry>>()
         val projMap = HashMap<Int, MutableList<TriEntry>>()
+        // §0.75 邻居搜索的空间网格。原实现对每颗星遍历整个亮星集算角距 ——
+        // O(n²) 在浅域（514 颗）下只要 600ms，但深域（mag<=6.5，8415 颗）
+        // 实测要 ~50s，没法在兜底路径里现场构建。改为按赤纬分带、带内按赤经
+        // 分格，只算 25° 搜索半径内的候选。
+        // §0.75 邻居搜索分两条路，按星表规模选：
+        //   · 小星表（浅域 514 颗）—— 直接全量算角距。这是**原实现逐位复现**：
+        //     遍历全部亮星、稳定排序（打平时保留星表序）、取前 12。600ms 可接受。
+        //   · 大星表（深域 8415 颗）—— 走空间网格。原 O(n²) 实测要 ~50s，
+        //     网格后 ~10s。
+        // 为什么不让网格也服务浅域：网格版与全量版的邻居集在「距离打平」和
+        // 「高纬边界」上有极少数差异（实测浅域索引少几十个三角形），会改变宽场
+        // 解算结果。而分级的设计前提正是「宽场行为逐位不变」，所以浅域坚持原算法。
+        val useGrid = bright.size > NEIGHBOR_GRID_THRESHOLD
+        // 网格里存 (bright 下标, 星)：下标让网格路径也能按星表序决断
+        val grid: HashMap<Long, MutableList<Pair<Int, StarEntry>>>? = if (useGrid) {
+            val g = HashMap<Long, MutableList<Pair<Int, StarEntry>>>()
+            bright.forEachIndexed { i, s ->
+                val row = ((s.dec + 90.0) / GRID_CELL_DEG).toInt().coerceIn(0, GRID_ROWS - 1)
+                val col = ((((s.ra % 360.0) + 360.0) % 360.0) / GRID_CELL_DEG).toInt()
+                    .coerceIn(0, GRID_COLS - 1)
+                g.getOrPut(cellKey(col, row)) { ArrayList() }.add(i to s)
+            }
+            g
+        } else null
         for (a in bright) {
-            val neighbors = bright
-                .filter { it !== a }
-                .map { it to angularDist(a, it) }
-                .filter { it.second in 0.8..25.0 }
-                .sortedBy { it.second } // 与照片端"最近邻"一致
-                .take(12)
+            val neighbors: List<Triple<Int, StarEntry, Double>> = if (useGrid) {
+                neighborsWithin(a, grid!!)
+                    .sortedWith(compareBy({ it.third }, { it.first }))
+                    .take(12)
+            } else {
+                // 与原实现等价：全量算距 → 稳定排序（打平保留星表序）→ 取前 12
+                bright.mapIndexed { i, s -> Triple(i, s, angularDist(a, s)) }
+                    .filter { it.second !== a && it.third in NEIGHBOR_MIN_DEG..NEIGHBOR_MAX_DEG }
+                    .sortedBy { it.third }
+                    .take(12)
+            }
             for (i in neighbors.indices) {
                 for (j in i + 1 until neighbors.size) {
-                    val b = neighbors[i].first
-                    val c = neighbors[j].first
-                    val dab = neighbors[i].second
-                    val dac = neighbors[j].second
+                    val b = neighbors[i].second
+                    val c = neighbors[j].second
+                    val dab = neighbors[i].third
+                    val dac = neighbors[j].third
                     val dbc = angularDist(b, c)
                     val sides = doubleArrayOf(dab, dac, dbc).sortedDescending()
                     val r2 = (sides[1] / sides[0]).toFloat()
@@ -863,6 +919,69 @@ object LocalStarMatcher {
         }
         return StarIndex(triMap, projMap)
     }
+
+    // ================= §0.75 索引构建用的空间网格 =================
+
+    /** 网格cell边长（度）。取 5° 与 [catGrid] 一致，便于共用约定 */
+    private const val GRID_CELL_DEG = 5.0
+    private const val GRID_COLS = (360.0 / GRID_CELL_DEG).toInt()   // 72
+    private const val GRID_ROWS = (180.0 / GRID_CELL_DEG).toInt()   // 36
+
+    private fun cellKey(col: Int, row: Int): Long = col.toLong() * 1000L + row.toLong()
+
+    /**
+     * §0.75：返回 [a] 角距 0.8°~25° 内的全部亮星（含距离）。
+     *
+     * 为什么要按赤纬实算赤经格数：赤经格在天球上的实际宽度是 5°×cos(dec)，
+     * 越近北极越窄。若固定扫 ±5 个赤经格，高纬会漏掉 25° 内的星；
+     * 固定扫更多格则在低纬做无用功。故按所在赤纬带的 cos(dec) 反算格数。
+     */
+    private fun neighborsWithin(
+        a: StarEntry,
+        grid: HashMap<Long, MutableList<Pair<Int, StarEntry>>>,
+    ): List<Triple<Int, StarEntry, Double>> {
+        val out = ArrayList<Triple<Int, StarEntry, Double>>()
+        val rowLo = ((a.dec - NEIGHBOR_MAX_DEG + 90.0) / GRID_CELL_DEG).toInt().coerceAtLeast(0)
+        val rowHi = ((a.dec + NEIGHBOR_MAX_DEG + 90.0) / GRID_CELL_DEG).toInt().coerceAtMost(GRID_ROWS - 1)
+        for (row in rowLo..rowHi) {
+            // 该赤纬带内 |dec| 最大处 —— cos 最小、所需赤经格数最多。
+            // 为什么不能按带中心算：带内恒星的赤纬可偏离中心 2.5°，靠近极点时
+            // cos 差出好几倍，按中心折算会**漏掉高纬的邻星**（实测浅域索引因此
+            // 少 81 个三角形，pleiades 从 UNSOLVED 变 SOLVED，假阳性回归）。
+            val rowLoDec = row * GRID_CELL_DEG - 90.0
+            val rowHiDec = rowLoDec + GRID_CELL_DEG
+            val maxAbsDec = maxOf(abs(rowLoDec), abs(rowHiDec))
+            val cosD = cos(Math.toRadians(maxAbsDec)).coerceAtLeast(0.02)
+            // 扫描窗不会超过半圈（±36 列即覆盖全部 72 列），避免极区附近做重复劳动
+            val spanCols = minOf(GRID_COLS / 2,
+                Math.ceil(NEIGHBOR_MAX_DEG / (GRID_CELL_DEG * cosD)).toInt())
+            val aCol = ((((a.ra % 360.0) + 360.0) % 360.0) / GRID_CELL_DEG).toInt()
+                .coerceIn(0, GRID_COLS - 1)
+            for (dc in -spanCols..spanCols) {
+                // 赤经环绕：取模而非 clamp
+                val col = ((aCol + dc) % GRID_COLS + GRID_COLS) % GRID_COLS
+                val list = grid[cellKey(col, row)] ?: continue
+                for ((i, s) in list) {
+                    if (s === a) continue
+                    val d = angularDist(a, s)
+                    if (d in NEIGHBOR_MIN_DEG..NEIGHBOR_MAX_DEG) out.add(Triple(i, s, d))
+                }
+            }
+        }
+        return out
+    }
+
+    /** 邻星搜索的角距窗（与 buildIndex 原实现的 0.8..25.0 一致） */
+    private const val NEIGHBOR_MIN_DEG = 0.8
+    private const val NEIGHBOR_MAX_DEG = 25.0
+
+    /**
+     * §0.75 星表规模超过此值才启用空间网格做邻居搜索。
+     * 浅域（mag<=4.0）514 颗 < 1000，走全量算距的原实现；深域（mag<=6.5）
+     * 8415 颗 > 1000，走网格。取 1000 是为了让浅域无论星表怎么微调都稳定
+     * 落在原实现那一侧。
+     */
+    private const val NEIGHBOR_GRID_THRESHOLD = 1000
 
     /**
      * §0.71b：以三角形**重心**为投影中心，算三条边的 gnomonic 切平面距离，
@@ -973,7 +1092,46 @@ object LocalStarMatcher {
             val hintResult = matchInternal(detected, width, height, pointingHint)
             if (hintResult != null) return hintResult
         }
-        return matchInternal(detected, width, height, null)
+        val shallow = matchInternal(detected, width, height, null)
+        if (shallow != null) return shallow
+        if (debugDisableDeepCatalog) return null
+        // §0.75 窄场兜底：浅星表域（mag<=4.0）整条阶梯都无解时，用深星表域
+        // （mag<=6.5）重试一次。宽场照片在浅域就能解出，永远不会走到这里 ——
+        // 这是分级而非全局加深的原因：实测全局加深会让 30° 宽场（mid30 的
+        // 9 内点弱解）从 SOLVED 变 UNSOLVED，并让 4 个窄场出现尺度坍缩错解
+        // （报出 FOV 115°~170°）。
+        //
+        // 切域方式：catalogMag() 是**五个域共用的唯一取值点** —— 三角形索引、
+        // 第 4 星验证网格（catGrid）、打分表（scoreTable）、假设展开
+        // （expandHypothesisPairs）、内点统计（countInliers）。§0.43 已用实测
+        // 记下教训：只改其中一个域「完全无效」（4.5→6.5 深扫全部 UNSOLVED 且慢
+        // 14~35 倍）。所以这里统一切到深域，而不是只换索引。
+        //
+        // 加锁的原因：切域是改对象级状态，并发求解会串域。实测 App 内求解本就
+        // 串行（批量导出是顺序 for 循环，相机/相册一次一张），加锁只是把这个
+        // 既有约束变成显式保证。
+        val savedMag = debugForceCatalogMag
+        val deep = synchronized(domainLock) {
+            debugForceCatalogMag = DEEP_CATALOG_MAG
+            try {
+                matchInternal(detected, width, height, null)
+            } finally {
+                debugForceCatalogMag = savedMag
+            }
+        }
+        // §0.75 深域是**窄场路径**，对它的解再设一道视场上界。
+        //
+        // 为什么需要：深域候选密度是浅域的 16 倍，尺度坍缩型伪影随之增多 ——
+        // 实测 6 个窄场从 UNSOLVED 变成 WRONG，报出视场 104°~170° 而真值只有
+        // 1°~5°。而一个解若声称视场 >90°，它本质是宽场；宽场在浅域就该解出
+        // （宽场回归 12/12），浅域整条阶梯都无解的宽场照片拿到 >90° 的解，
+        // 基本都是坍缩伪影。窄场目标（10°）远低于此界，不受影响。
+        if (deep != null &&
+            maxOf(deep.solve.fieldWidthDeg, deep.solve.fieldHeightDeg) > DEEP_PATH_MAX_FOV_DEG
+        ) {
+            return null
+        }
+        return deep
     }
 
     private fun matchInternal(
