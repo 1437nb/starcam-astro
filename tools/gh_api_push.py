@@ -114,43 +114,73 @@ def find_local_base(remote_sha, remote_tree):
     return None, None
 
 
+def remote_tree_files(tree_sha):
+    """递归列出远端一棵树的全部 blob：{path: blob_sha}。"""
+    out = {}
+    stack = [("", tree_sha)]
+    while stack:
+        prefix, ts = stack.pop()
+        d = gh("GET", f"/repos/{OWNER}/{REPO}/git/trees/{ts}")
+        for e in d.get("tree", []):
+            p = prefix + e["path"]
+            if e["type"] == "tree":
+                stack.append((p + "/", e["sha"]))
+            else:
+                out[p] = e["sha"]
+    return out
+
+
+def local_tree_files(sha):
+    """列出本地一个提交的全部 blob：{path: blob_sha}（git ls-tree -r）。"""
+    out = {}
+    for line in git("ls-tree", "-r", sha).splitlines():
+        meta, path = line.split("	", 1)
+        out[path] = meta.split()[2]
+    return out
+
+
 def upload_commit(local_sha, parent_sha):
-    """把一个本地提交重建到远端（parent 为远端提交 sha）。"""
+    """把一个本地提交重建到远端（parent 为远端提交 sha）。
+
+    差集算法：直接对比「远端父树的文件清单」与「本地提交的文件清单」。
+
+    为什么不能用 `git diff --raw <parent_sha> <local_sha>`：parent_sha 是本脚本
+    通过 API 创建的提交，**本地仓库里往往不存在**，git diff 会失败；旧代码此时
+    退化成「对空树做全量 diff」，而那种 diff 只有新增、表达不出删除 —— 实测删掉的
+    文件在远端依然存在（CatalogDepthAB.kt 的删除静默丢失，CI 继续跑它并失败）。
+    """
     base_tree = gh("GET", f"/repos/{OWNER}/{REPO}/git/commits/{parent_sha}")["tree"]["sha"]
-    # 用提交自身的 tree 差集：git diff 需要 parent 在本地；缺失时退化为全量对比
-    try:
-        raw = git("diff", "--raw", parent_sha, local_sha)
-    except subprocess.CalledProcessError:
-        empty = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-        raw = git("diff", "--raw", empty, local_sha)
+    parent_files = remote_tree_files(base_tree)
+    local_files = local_tree_files(local_sha)
+
     items = []
     skipped_workflow = []
-    for line in raw.splitlines():
-        meta, path = line.split("\t", 1)
-        fields = meta.split()           # ":<oldmode> <newmode> <oldsha> <newsha> <status>"
-        newmode, status = fields[1], fields[4][0]
+    # 1) 新增 / 修改
+    for path, lsha in sorted(local_files.items()):
+        if parent_files.get(path) == lsha:
+            continue                                    # 未变
         # .github/workflows/ 的写入需要 token 具备 workflow scope。token 缺该 scope 时
-        # GitHub 对这类路径一律回 404（Contents API 与 Git Data API 都是）——此时上传会
+        # GitHub 对这类路径一律回 404，Contents API 与 Git Data API 都是——此时上传会
         # 直接失败，因此先探测 scope，缺了才跳过（曾因无条件跳过导致 CI 配置改不动）。
-        is_workflow = path.startswith(".github/workflows/")
-        if is_workflow and not has_workflow_scope():
+        if path.startswith(".github/workflows/") and not has_workflow_scope():
             skipped_workflow.append(path)
-            continue
-        if status == "D":
-            # 删除条目：mode 必须给一个合法的文件模式。git diff --raw 对删除给的是
-            # newmode=000000，直接传给 GitHub 会被拒/忽略，导致**删除不生效**
-            # （实测：删掉的文件在远端依然存在）。删除语义由 sha=None 表达，
-            # mode 用 oldmode（fields[0] 去掉前导冒号）或退化为 100644。
-            oldmode = fields[0].lstrip(":")
-            del_mode = oldmode if oldmode and oldmode != "000000" else "100644"
-            items.append({"path": path, "mode": del_mode, "type": "blob", "sha": None})
             continue
         # 关键：从 git 对象读（LF），不读工作区（CRLF）
         content = subprocess.run((GIT, "show", f"{local_sha}:{path}"), cwd=WD,
                                  capture_output=True, check=True).stdout
         blob = gh("POST", f"/repos/{OWNER}/{REPO}/git/blobs",
                   {"content": base64.b64encode(content).decode(), "encoding": "base64"})
-        items.append({"path": path, "mode": newmode, "type": "blob", "sha": blob["sha"]})
+        # 本仓库全部是普通文件，统一 100644
+        items.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+    # 2) 删除：父树里有、本地没有 → sha=None（删除语义由 sha 表达，mode 给合法值）
+    for path in sorted(parent_files):
+        if path in local_files:
+            continue
+        if path.startswith(".github/workflows/") and not has_workflow_scope():
+            skipped_workflow.append(path)
+            continue
+        items.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+
     if not items:
         # 本次提交只改了 .github/workflows/ 下的文件（全被跳过）→ 无可上传内容，
         # 直接复用 parent，不产生空提交（GitHub 不允许 base_tree 配空 tree）。
