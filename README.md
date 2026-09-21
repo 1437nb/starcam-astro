@@ -12,14 +12,21 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.62](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.62)** —
+最新版本 **[v1.5.63](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.63)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.62-solver-3.4x-faster-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.62/StarCam-v1.5.62-solver-3.4x-faster-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.62-solver-3.4x-faster-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.62/StarCam-v1.5.62-solver-3.4x-faster-debug.apk) | 26.9 MB | 含调试日志 |
+| [StarCam-v1.5.63-narrow-field-10deg-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.63/StarCam-v1.5.63-narrow-field-10deg-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.63-narrow-field-10deg-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.63/StarCam-v1.5.63-narrow-field-10deg-debug.apk) | 26.9 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
+
+> **v1.5.63 窄场支持做到 10° 视场**：此前 10°~20° 视场（望远镜/长焦）基本认不出，
+> 根因是星表深度不够（索引只用 4.0 等以上的 514 颗星，10° 视场凑不齐匹配所需的
+> 最少星数）。改为**分级星表域**：浅域负责 30° 以上宽场，只有浅域整条路径都失败
+> 时才自动切到深域（6.5 等、8415 颗）重试 —— 10° 两张测试图分别以 16/24 内点
+> 解出，而宽场行为**完全不变**。**安装包体积不变**（深域用的是包里本来就有的星表
+> 数据）。附带：船帆座超新星遗迹（8.4° 窄场）从只会给出错误解变成能正确解出。
 
 > **v1.5.62 识别提速 3.4 倍**：12 张宽场回归照片的总识别耗时从 46.6 秒降到
 > 13.8 秒，单张最快 0.36 秒、最慢 2.6 秒（此前 1.6~11.1 秒）。根因是三角形索引
@@ -120,6 +127,11 @@
   （阈值选在此处而非更激进，避免用户连续识别时把索引丢掉、下次反而变慢）。
   释放前检查有无超时 detach 的线程仍在运行，有则拒绝释放 —— **宁可占内存也不崩**。
 
+- **窄场支持做到 10° 视场**（v1.5.63）：改为分级星表域——浅域（4.0 等）负责 30°
+  以上宽场，浅域整条路径都失败时才切深域（6.5 等、8415 颗）重试。实测 10° 视场
+  从"解不出"变为"解得出"，宽场 12/12 回归逐位不变，**APK 体积不变**（深域用的是
+  包里本来就有的星表数据）。为什么不整体加深：实测会让 30° 宽场从认得出变认不出，
+  并引入尺度错误伪影。深域另加 90° 视场上界挡掉伪影。
 - **识别提速 3.4 倍**（v1.5.62）：12 张宽场回归照片的总耗时从 46.6 秒降到
   13.8 秒，单张最快 0.36 秒、最慢 2.6 秒。根因是三角形索引把每个三角形写进
   9 个相邻桶、查询扫 729 桶时同一对象被重复遍历（一轮投票要扫 5966 万条记录，

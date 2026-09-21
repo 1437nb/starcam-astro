@@ -28,13 +28,13 @@ android {
         applicationId = "com.starcam.astro"
         minSdk = 26
         targetSdk = 34
-        versionCode = 82
-        versionName = "1.5.62"
+        versionCode = 83
+        versionName = "1.5.63"
     }
 
     // 每版更新内容简述（用户规则：在 APK 文件名上带上更新内容）
     val updateDesc = project.findProperty("updateDesc") as? String
-        ?: "识别提速3.4倍"
+        ?: "窄场支持10度"
 
     // APK 产物自动带版本号、更新内容与变体名（用户规则：文件名标注版本与更新内容）
     applicationVariants.all {
