@@ -36,6 +36,30 @@ data class LayerFlags(
  */
 object LayeredRenderer {
 
+    /**
+     * §0.78 渲染用 Paint 集合（**每帧复用的 scratch**）。
+     *
+     * 原来 [draw] 每次调用都新建 **9 个 Paint** —— 而它是 AR 叠加层的每帧路径
+     * （约 60fps）→ 540 个 Paint/秒，Paint 构造带 native 开销，纯 GC 压力。
+     * 这里按用途收敛成 3 个（描边 / 文字 / 填充），draw 内只改属性
+     * （改属性是廉价的 native setter，远低于重新构造）。
+     *
+     * **由调用方持有**、而不是放在 object 里：`draw()` 会被主线程（Compose 预览）
+     * 与 IO 线程（保存相册 / 放大查看器的位图渲染）同时调用，Paint 不是线程安全的，
+     * 共享一份会互相踩。Compose 侧用 `remember { LayeredRenderer.RenderPaints() }`。
+     */
+    class RenderPaints {
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG)
+        val text = Paint(Paint.ANTI_ALIAS_FLAG)
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        init {
+            stroke.style = Paint.Style.STROKE
+            fill.style = Paint.Style.FILL
+            text.typeface = Typeface.DEFAULT_BOLD
+        }
+    }
+
     /** 已投影的叠加场景数据（结果页 Success 状态持有，复用避免重复投影） */
     data class OverlayScene(
         val width: Int,
@@ -58,6 +82,8 @@ object LayeredRenderer {
      * [degPerPx]：天球角度 / 图像像素（板比例）。非空时日月按**真实视直径**绘制
      * （这才是天文软件该有的样子）；为空则退化为固定尺寸标记。行星因视直径远小于
      * 一像素，一律用标记环绘制。
+     * [paints]：§0.78 复用传入的 Paint（每帧路径必须传，见 [RenderPaints]）；
+     * 为 null 时本次调用内部临时创建 —— 位图渲染等一次性路径可以省掉这个约定。
      */
     fun draw(
         canvas: Canvas,
@@ -70,12 +96,17 @@ object LayeredRenderer {
         drawHeight: Float = canvas.height.toFloat(),
         dimBelowHorizon: Boolean = false,
         degPerPx: Float? = null,
+        paints: RenderPaints? = null,
     ) {
         val w = scene.width
         val h = scene.height
         // 坐标缩放（图像坐标 → 画布像素）；字号/线宽为画布绝对像素，不随 sx 缩放
         val sx = drawWidth / w
         val sy = drawHeight / h
+
+        // §0.78：Paint 每帧复用；seg 是连线的收缩结果缓冲（循环外建一次，见 shrinkInto）
+        val p = paints ?: RenderPaints()
+        val seg = FloatArray(4)
 
         val lineColor = if (night) 0x66FF8A80.toInt() else 0x8C7FD0FF.toInt()
         val nameColor = if (night) 0xFFE8A8A0.toInt() else 0xFFF7EDCB.toInt()
@@ -87,76 +118,60 @@ object LayeredRenderer {
 
         // ① 星座连线：两端按星等留空（星星不被线覆盖）
         if (flags.lines) {
-            val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = lineColor
-                strokeWidth = 1.2f * density
-                style = Paint.Style.STROKE
-            }
+            p.stroke.strokeWidth = 1.2f * density
             for (line in scene.lines) {
-                val seg = shrink(
+                val ok = shrinkInto(
+                    seg,
                     line.a.x, line.a.y, line.a.entry.mag,
                     line.b.x, line.b.y, line.b.entry.mag,
-                ) ?: continue
-                if (dimBelowHorizon && (line.a.belowHorizon || line.b.belowHorizon)) {
-                    linePaint.color = dimLine
+                )
+                if (!ok) continue
+                p.stroke.color = if (dimBelowHorizon && (line.a.belowHorizon || line.b.belowHorizon)) {
+                    dimLine
                 } else {
-                    linePaint.color = lineColor
+                    lineColor
                 }
-                canvas.drawLine(seg[0] * sx, seg[1] * sy, seg[2] * sx, seg[3] * sy, linePaint)
+                canvas.drawLine(seg[0] * sx, seg[1] * sy, seg[2] * sx, seg[3] * sy, p.stroke)
             }
         }
 
         // ② 恒星专名（亮星且能解析出名字）
         if (flags.starNames) {
-            val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = nameColor
-                textSize = 12f * density
-                typeface = Typeface.DEFAULT_BOLD
-                setShadowLayer(3f * density, 1f, 1f, 0xFF000000.toInt())
-            }
+            p.text.textSize = 12f * density
+            p.text.setShadowLayer(3f * density, 1f, 1f, 0xFF000000.toInt())
             for (s in scene.stars) {
                 if (!s.visible || s.entry.mag > 3.2) continue
                 val name = StarNames.displayName(s.entry.hip, s.entry.name, isEnglish)
                 if (name.isEmpty()) continue
-                if (dimBelowHorizon && s.belowHorizon) namePaint.color = dimName else namePaint.color = nameColor
-                canvas.drawText(name, s.x * sx + 7f * density, s.y * sy - 7f * density, namePaint)
+                p.text.color = if (dimBelowHorizon && s.belowHorizon) dimName else nameColor
+                canvas.drawText(name, s.x * sx + 7f * density, s.y * sy - 7f * density, p.text)
             }
         }
 
         // ③ 星座名称标签
         if (flags.constellationNames) {
-            val conPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = conColor
-                textSize = 11f * density
-                typeface = Typeface.DEFAULT_BOLD
-                setShadowLayer(3f * density, 1f, 1f, 0xFF000000.toInt())
-            }
+            p.text.textSize = 11f * density
+            p.text.setShadowLayer(3f * density, 1f, 1f, 0xFF000000.toInt())
+            p.text.color = conColor
             for (l in scene.labels) {
-                canvas.drawText(l.text, l.x * sx, l.y * sy, conPaint)
+                canvas.drawText(l.text, l.x * sx, l.y * sy, p.text)
             }
         }
 
         // ④ 梅西耶深空天体标注（小圆圈 + 编号与名称，颜色按类型）
         if (flags.messier) {
-            val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeWidth = 1.4f * density
-            }
-            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = nameColor
-                textSize = 10f * density
-                typeface = Typeface.DEFAULT_BOLD
-                setShadowLayer(2.5f * density, 1f, 1f, 0xFF000000.toInt())
-            }
+            p.stroke.strokeWidth = 1.4f * density
+            p.text.textSize = 10f * density
+            p.text.setShadowLayer(2.5f * density, 1f, 1f, 0xFF000000.toInt())
             for (m in scene.messier) {
                 if (!m.visible) continue
                 val dim = dimBelowHorizon && m.belowHorizon
-                ringPaint.color = if (dim) dimMessier else MessierCatalog.typeColor(m.obj.type)
-                if (dim) textPaint.color = dimMessier else textPaint.color = nameColor
-                canvas.drawCircle(m.x * sx, m.y * sy, 7f * density, ringPaint)
+                p.stroke.color = if (dim) dimMessier else MessierCatalog.typeColor(m.obj.type)
+                p.text.color = if (dim) dimMessier else nameColor
+                canvas.drawCircle(m.x * sx, m.y * sy, 7f * density, p.stroke)
                 canvas.drawText(
                     m.obj.label(isEnglish), m.x * sx + 10f * density, m.y * sy - 6f * density,
-                    textPaint,
+                    p.text,
                 )
             }
         }
@@ -164,22 +179,9 @@ object LayeredRenderer {
         // ⑤ 太阳系天体（§0.58）：月亮 / 行星 / 太阳
         //    日月按真实视直径绘制（给定板比例时），行星用标记环 + 名称。
         if (flags.planets && scene.solar.isNotEmpty()) {
-            val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeWidth = 1.6f * density
-            }
-            val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.FILL
-            }
-            val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.FILL
-            }
-            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = nameColor
-                textSize = 11f * density
-                typeface = Typeface.DEFAULT_BOLD
-                setShadowLayer(3f * density, 1f, 1f, 0xFF000000.toInt())
-            }
+            p.stroke.strokeWidth = 1.6f * density
+            p.text.textSize = 11f * density
+            p.text.setShadowLayer(3f * density, 1f, 1f, 0xFF000000.toInt())
             // 真实视直径上限：不超过画面短边的 1/3（防止极端长焦下日月糊满屏）
             val maxDiskR = minOf(drawWidth, drawHeight) / 3f
             for (s in scene.solar) {
@@ -201,23 +203,23 @@ object LayeredRenderer {
 
                 if (SolarSystemCatalog.isDisk(body) && diskR > 0f) {
                     // 光晕 → 实心圆面 → 细描边，模拟目视观感
-                    glowPaint.color = withAlpha(color, if (dim) 0.10f else 0.22f)
-                    canvas.drawCircle(cx, cy, diskR * 1.35f, glowPaint)
-                    fillPaint.color = withAlpha(color, if (dim) 0.55f else 0.95f)
-                    canvas.drawCircle(cx, cy, diskR, fillPaint)
-                    ringPaint.color = withAlpha(color, if (dim) 0.5f else 0.9f)
-                    canvas.drawCircle(cx, cy, diskR, ringPaint)
+                    p.fill.color = withAlpha(color, if (dim) 0.10f else 0.22f)
+                    canvas.drawCircle(cx, cy, diskR * 1.35f, p.fill)
+                    p.fill.color = withAlpha(color, if (dim) 0.55f else 0.95f)
+                    canvas.drawCircle(cx, cy, diskR, p.fill)
+                    p.stroke.color = withAlpha(color, if (dim) 0.5f else 0.9f)
+                    canvas.drawCircle(cx, cy, diskR, p.stroke)
                 } else {
                     // 行星 / 未知板比例：实心小点 + 外环
-                    fillPaint.color = withAlpha(color, if (dim) 0.5f else 0.95f)
-                    canvas.drawCircle(cx, cy, markerR * 0.42f, fillPaint)
-                    ringPaint.color = withAlpha(color, if (dim) 0.5f else 0.9f)
-                    canvas.drawCircle(cx, cy, markerR, ringPaint)
+                    p.fill.color = withAlpha(color, if (dim) 0.5f else 0.95f)
+                    canvas.drawCircle(cx, cy, markerR * 0.42f, p.fill)
+                    p.stroke.color = withAlpha(color, if (dim) 0.5f else 0.9f)
+                    canvas.drawCircle(cx, cy, markerR, p.stroke)
                 }
 
-                textPaint.color = if (dim) dimName else nameColor
+                p.text.color = if (dim) dimName else nameColor
                 val labelX = cx + (if (diskR > 0f) diskR else markerR) + 5f * density
-                canvas.drawText(SolarSystemCatalog.name(body, isEnglish), labelX, cy + 4f * density, textPaint)
+                canvas.drawText(SolarSystemCatalog.name(body, isEnglish), labelX, cy + 4f * density, p.text)
             }
         }
     }
@@ -243,20 +245,40 @@ object LayeredRenderer {
         return out
     }
 
-    /** 线段两端按星等收缩：越亮的星空隙越大（与 OverlayRenderer.shrink 一致） */
-    fun shrink(
+    /**
+     * §0.78：[shrink] 的**零分配版本** —— 结果写入调用方的 [out]（长度须 ≥ 4），
+     * 线段太短无法收缩时返回 false。
+     *
+     * 每帧绘制路径必须用这个：原 [shrink] 每条线返回一个新 `FloatArray(4)`，
+     * 典型 50~200 条可见连线 → 数十~数百个数组/帧。
+     */
+    fun shrinkInto(
+        out: FloatArray,
         ax: Float, ay: Float, magA: Double,
         bx: Float, by: Float, magB: Double,
-    ): FloatArray? {
+    ): Boolean {
         val dx = bx - ax
         val dy = by - ay
         val len = kotlin.math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
         val gapA = gapOf(magA)
         val gapB = gapOf(magB)
-        if (len <= gapA + gapB + 2f) return null
+        if (len <= gapA + gapB + 2f) return false
         val ux = dx / len
         val uy = dy / len
-        return floatArrayOf(ax + ux * gapA, ay + uy * gapA, bx - ux * gapB, by - uy * gapB)
+        out[0] = ax + ux * gapA
+        out[1] = ay + uy * gapA
+        out[2] = bx - ux * gapB
+        out[3] = by - uy * gapB
+        return true
+    }
+
+    /** 线段两端按星等收缩：越亮的星空隙越大（与 OverlayRenderer.shrink 一致） */
+    fun shrink(
+        ax: Float, ay: Float, magA: Double,
+        bx: Float, by: Float, magB: Double,
+    ): FloatArray? {
+        val out = FloatArray(4)
+        return if (shrinkInto(out, ax, ay, magA, bx, by, magB)) out else null
     }
 
     private fun gapOf(mag: Double): Float = ((4.8 - mag).coerceIn(0.8, 5.0) * 6f).toFloat()

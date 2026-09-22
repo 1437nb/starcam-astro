@@ -13,19 +13,31 @@ data class MessierObject(
     val en: String = "",
     val type: String,
 ) {
+    /**
+     * §0.78：标签**预生成**。
+     *
+     * 原来 [label] 每次调用都做字符串模板拼接（`"M$number $name"`），而它位于
+     * AR 叠加层的**每帧绘制路径**上 —— 110 个天体 × 60fps ≈ 6600 个 String/秒，
+     * 纯 GC 压力。标签只取决于 [number]/[zh]/[en]，构造时算一次即可。
+     */
+    val labelZh: String = buildLabel(number, zh)
+
+    val labelEn: String = buildLabel(number, en)
+
     /** 规范显示标签：支持中英双语，无专名时仅显示 "M$number" */
-    fun label(isEnglish: Boolean = false): String {
-        val name = if (isEnglish) en else zh
-        return if (name.isBlank() || name.equals("M$number", ignoreCase = true)) {
-            "M$number"
-        } else {
-            "M$number $name"
-        }
-    }
+    fun label(isEnglish: Boolean = false): String = if (isEnglish) labelEn else labelZh
 
     /** 默认中文规范显示标签（兼容旧调用） */
-    val label: String
-        get() = label(isEnglish = false)
+    val label: String get() = labelZh
+
+    private companion object {
+        fun buildLabel(number: Int, name: String): String =
+            if (name.isBlank() || name.equals("M$number", ignoreCase = true)) {
+                "M$number"
+            } else {
+                "M$number $name"
+            }
+    }
 }
 
 object MessierCatalog {

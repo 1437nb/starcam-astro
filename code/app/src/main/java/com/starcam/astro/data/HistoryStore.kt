@@ -106,8 +106,10 @@ object HistoryStore {
     }
 
     /**
-     * 导出识别历史为 CSV（§0.40）：API 29+ 写入系统"下载"目录，
-     * 旧版写入公共下载目录；返回展示用路径描述，失败返回 null。
+     * 导出识别历史为 CSV（§0.40）：API 29+ 经 MediaStore 写入系统「下载」目录；
+     * API 26~28 写入**应用外部私有目录**（§0.78 修正 —— 公共目录需
+     * WRITE_EXTERNAL_STORAGE，本应用未声明、也不必为此声明写权限）。
+     * 返回展示用路径描述，失败返回 null。
      */
     fun exportCsv(context: Context, entries: List<Entry>): String? {
         val sb = StringBuilder("timestamp,constellation,raDeg,decDeg,fovDeg,engine,imagePath\n")
@@ -136,10 +138,14 @@ object HistoryStore {
                 }
                 "下载目录/$fileName"
             } else {
-                val dir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    "",
-                ).apply { mkdirs() }
+                // §0.78：API 26~28 写公共下载目录需要 WRITE_EXTERNAL_STORAGE，
+                // 而 manifest 只声明了 READ_EXTERNAL_STORAGE —— 必然抛 SecurityException，
+                // 再被外层 catch 吞成「导出失败」，功能在 Android 8/8.1 上完全不可用。
+                // 改写到**应用外部私有目录**：免权限，且 Android 8/9 上该路径
+                // 对文件管理器可见（与 ImageUtils 保存图片的做法一致）。
+                val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                    ?: context.filesDir
+                dir.mkdirs()
                 File(dir, fileName).writeText(sb.toString())
                 dir.absolutePath + "/" + fileName
             }

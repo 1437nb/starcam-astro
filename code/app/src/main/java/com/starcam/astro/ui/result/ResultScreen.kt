@@ -586,6 +586,8 @@ private fun SuccessContent(
     onBack: () -> Unit,
     onOpenViewer: (Bitmap, Bitmap) -> Unit,
 ) {
+    // §0.78：全分辨率标注图合成要移出主线程（见下面 onTap 的说明）
+    val scope = rememberCoroutineScope()
     // §0.47：图层开关由 ResultScreen 持有（查看器共享同一开关状态）
     Column(
         modifier = modifier
@@ -596,7 +598,16 @@ private fun SuccessContent(
             state = state,
             flags = layerFlags,
             onFlagsChange = onFlagsChange,
-            onTap = { onOpenViewer(state.bitmap, renderAnnotatedBitmap(state, flags = layerFlags)) },
+            // §0.78：原来在主线程**同步**合成 2200px 全分辨率位图（≈14MB + 一遍全星表
+            // 投影），点开大图时明显卡顿；而同一个操作在 SaveToGalleryButton 里却走了 IO。
+            onTap = {
+                scope.launch {
+                    val anno = withContext(Dispatchers.IO) {
+                        renderAnnotatedBitmap(state, flags = layerFlags)
+                    }
+                    onOpenViewer(state.bitmap, anno)
+                }
+            },
         )
         Spacer(Modifier.height(8.dp))
         Row(

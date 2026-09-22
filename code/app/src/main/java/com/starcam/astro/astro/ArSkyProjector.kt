@@ -68,6 +68,11 @@ object ArSkyProjector {
     // 连线可见性索引（主线程逐帧复用，避免每帧分配）
     private val visibleIdx = IntArray(StarCatalogData.stars.size)
 
+    // §0.78：project() 的 scratch（主线程逐帧专用，与 projectPoint 的 ptScratch 同理）
+    private val aScratch = FloatArray(9)
+    private val camScratch = FloatArray(3)
+    private val cScratch = FloatArray(3)
+
     // §0.54b：projectPoint 独立 scratch（与 project() 局部数组不共享，主线程专用，零每帧分配）
     private val ptScratchA = FloatArray(9)
     private val ptScratchC = FloatArray(3)
@@ -181,11 +186,11 @@ object ArSkyProjector {
         val cl = kotlin.math.cos(lstDeg * d).toFloat()
         val sp = kotlin.math.sin(latDeg * d).toFloat()
         val cp = kotlin.math.cos(latDeg * d).toFloat()
-        val a = floatArrayOf(
-            -sl, cl, 0f,          // E
-            -sp * cl, -sp * sl, cp,  // N
-            cp * cl, cp * sl, sp,    // U
-        )
+        // §0.78：写入复用 scratch（原本每帧一个 floatArrayOf(9)）
+        val a = aScratch
+        a[0] = -sl; a[1] = cl; a[2] = 0f             // E
+        a[3] = -sp * cl; a[4] = -sp * sl; a[5] = cp  // N
+        a[6] = cp * cl; a[7] = cp * sl; a[8] = sp    // U
 
         // 视锥参数
         val halfFov = Math.toRadians(fovDeg.coerceIn(5.0, 170.0) / 2.0)
@@ -209,7 +214,7 @@ object ArSkyProjector {
         var offX = 0f
         var offY = 0f
         if (correctionVec != null) {
-            val c = FloatArray(3)
+            val c = cScratch
             enuToCam(correctionVec, c)
             if (c[2] > 0.05f) {
                 offX = cx - (cx + f * c[0] / c[2])
@@ -218,7 +223,7 @@ object ArSkyProjector {
         }
 
         // 恒星
-        val cam = FloatArray(3)
+        val cam = camScratch
         val nStars = entries.size
         for (i in 0 until nStars) {
             val o = i * 3
@@ -230,9 +235,13 @@ object ArSkyProjector {
             val sy = cy - f * cam[1] / z + offY
             val margin = 60f
             if (sx < -margin || sx > widthPx + margin || sy < -margin || sy > heightPx + margin) continue
-            out.stars += StarChartOverlay.Star2D(
-                entries[i], sx, sy, visible = true, belowHorizon = worldU < 0f,
-            )
+            // §0.78：复用本容器的池对象，不再逐颗 new（见 ProjectedSky.starPool）
+            val s2 = out.starPool[i]
+            s2.x = sx
+            s2.y = sy
+            s2.visible = true
+            s2.belowHorizon = worldU < 0f
+            out.stars.add(s2)
         }
 
         // 星座连线：两端点均可见才保留（按目录下标 O(1) 查屏幕坐标）
@@ -240,8 +249,10 @@ object ArSkyProjector {
         // 必须用 -1 填充重置：IntArray 默认 0 是合法槽位号，若清成 0，
         // 所有"一端在视野外"的连线都会被错误连到第 0 颗可见星 → 射线扇面（v1.5.37 修复）
         java.util.Arrays.fill(visibleIdx, -1)
-        for ((slot, s2) in out.stars.withIndex()) {
-            val idx = StarCatalogData.indexOfHip(s2.entry.hip)
+        // §0.78：用索引循环替代 withIndex() —— 后者每个元素都会分配一个 IndexedValue
+        // 包装对象，可见星约 2000 颗 → 每帧 2000 个临时对象。
+        for (slot in out.stars.indices) {
+            val idx = StarCatalogData.indexOfHip(out.stars[slot].entry.hip)
             if (idx >= 0) visibleIdx[idx] = slot
         }
         for (seg in StarCatalogData.constellationLines) {
@@ -295,6 +306,30 @@ object ArSkyProjector {
 
     /** 单帧投影结果（可复用容器） */
     class ProjectedSky {
+        /**
+         * §0.78：**本容器专属**的 Star2D 对象池（按 [ArSkyProjector.entries] 下标）。
+         *
+         * 每帧约 2000 颗星落在视锥内，原实现逐颗 `new Star2D(...)` → 约 2000 个对象/帧
+         * （12 万/秒），是 AR 逐帧路径上最大的一笔分配。
+         *
+         * **为什么池挂在容器上、而不是 [ArSkyProjector] 这个 object 上**：池化意味着
+         * 「对象会被下一帧改写」。挂在 object 上会让**两个不同的 ProjectedSky**
+         * 共享同一批对象 —— 先投影的那份结果会被后投影的那份覆盖。
+         * （`ArSkyProjectorTest.correctionShiftsChartToCenter` 正是比较两次投影的结果，
+         * 挂 object 上会直接断言失败 —— 这是实测踩到的。）
+         *
+         * 挂在容器上则两全：**同一个容器跨帧复用**（AR 的真实用法：`arSky` 由
+         * `remember` 持有）→ 零每帧分配；**不同容器互不干扰** → 语义与从前一致。
+         *
+         * 池槽恒对应同一颗星（`entry` 是 `val`），每帧只更新 x/y/visible/belowHorizon。
+         */
+        internal val starPool: Array<StarChartOverlay.Star2D> =
+            Array(ArSkyProjector.entries.size) { i ->
+                StarChartOverlay.Star2D(
+                    ArSkyProjector.entries[i], 0f, 0f, visible = false, belowHorizon = false,
+                )
+            }
+
         val stars = ArrayList<StarChartOverlay.Star2D>(256)
         val lines = ArrayList<StarChartOverlay.Line2D>(48)
         val labels = ArrayList<StarChartOverlay.Label2D>(8)

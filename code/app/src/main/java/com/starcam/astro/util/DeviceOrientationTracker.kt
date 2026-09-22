@@ -2,6 +2,7 @@ package com.starcam.astro.util
 
 import android.content.Context
 import android.hardware.GeomagneticField
+import android.location.Location
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -71,6 +72,24 @@ class DeviceOrientationTracker(
     private val magneticValues = FloatArray(3)
     private var hasGravity = false
     private var hasMagnetic = false
+
+    /**
+     * §0.78 姿态每帧路径的复用 scratch。[predictedPointing] 只被 AR 画布在**主线程**
+     * 逐帧调用（CameraScreen 的绘制 lambda），因此单实例复用安全。
+     * 若将来要从别的线程调用它，这里必须先改成由调用方传入 out 参数。
+     */
+    private val matrixScratch = FloatArray(9)
+
+    /** §0.78 定位结果缓存（见 [bestLocation]） */
+    private var locCache: Location? = null
+    private var locCacheMs = 0L
+    private val locCacheTtlMs = 30_000L
+
+    /** §0.78 地磁模型缓存（见 [geomagneticField]） */
+    private var geoFieldCache: GeomagneticField? = null
+    private var geoFieldQLat = Long.MIN_VALUE
+    private var geoFieldQLon = Long.MIN_VALUE
+    private var geoFieldHour = Long.MIN_VALUE
 
     // 平滑滤波缓冲（世界坐标系下的相机光轴向量 E, N, U）
     private var smoothedE = 0.0
@@ -162,8 +181,13 @@ class DeviceOrientationTracker(
      */
     fun predictedPointing(): DevicePointing {
         synchronized(fusionLock) {
-            val q = fusion.predicted(android.os.SystemClock.elapsedRealtimeNanos(), predictMs / 1000.0) ?: return currentPointing
-            val r = QuatMath.quatToMatrix(q)
+            val q = fusion.predicted(android.os.SystemClock.elapsedRealtimeNanos(), predictMs / 1000.0)
+                ?: return currentPointing
+            // §0.78：矩阵转换写入复用 scratch（原本每帧一个 FloatArray(9)）。
+            // right/up/axis 仍**必须新建** —— 它们随 DevicePointing 交给调用方持有，
+            // 复用会被下一次调用覆盖。
+            QuatMath.quatToMatrixInto(q, matrixScratch)
+            val r = matrixScratch
             val right = floatArrayOf(r[0], r[3], r[6])
             val up = floatArrayOf(r[1], r[4], r[7])
             val axis = floatArrayOf(-r[2], -r[5], -r[8])
@@ -185,7 +209,10 @@ class DeviceOrientationTracker(
         var azMagDeg = Math.toDegrees(atan2(eNorm.toDouble(), nNorm.toDouble()))
         if (azMagDeg < 0.0) azMagDeg += 360.0
 
-        val loc = locationHelper.getBestLocation()
+        // §0.78：定位走 30s 缓存。原实现每帧直接调 locationHelper.getBestLocation()，
+        // 而它内部先做 hasPermission()（2 次 ContextCompat.checkSelfPermission 的 Binder
+        // IPC）；AR 姿态由传感器事件驱动，可达 50Hz → 100 次跨进程调用/秒。
+        val loc = bestLocation()
         val nowSec = System.currentTimeMillis() / 1000L
 
         var azTrueDeg = azMagDeg
@@ -196,12 +223,9 @@ class DeviceOrientationTracker(
 
         if (loc != null) {
             try {
-                val geoField = GeomagneticField(
-                    loc.latitude.toFloat(),
-                    loc.longitude.toFloat(),
-                    loc.altitude.toFloat(),
-                    System.currentTimeMillis(),
-                )
+                // §0.78：地磁模型按 (0.01° 网格, 整点小时) 缓存 —— GeomagneticField
+                // 构造要读 WMM 模型，而磁偏角随位置与时间变化极慢（每小时 < 0.1°）。
+                val geoField = geomagneticField(loc, System.currentTimeMillis())
                 declinationDeg = geoField.declination.toDouble()
                 azTrueDeg = (azMagDeg + geoField.declination + 360.0) % 360.0
                 isTrueAzimuth = true
@@ -226,12 +250,13 @@ class DeviceOrientationTracker(
 
         // §0.56：将三轴基由磁北东北天顺时针旋转 declinationDeg 到真北东北天坐标系
         // 使 AR 星图投影、地平线与 HUD 在全天球绝对几何下 100% 对齐真北
-        val trueRight = right.clone()
-        val trueUp = up.clone()
-        val trueAxis = axis.clone()
+        //
+        // §0.78：**就地**旋转，省掉 3 次 clone/帧。契约如下：
+        //   三个入参都是调用方现场新建的临时数组（predictedPointing 与 computePointing
+        //   均如此），rotateBasisAroundUp 会修改它们；调用方不得传入自己还要复用的数组。
         if (isTrueAzimuth && kotlin.math.abs(declinationDeg) > 1e-4) {
             com.starcam.astro.astro.CameraMath.rotateBasisAroundUp(
-                trueRight, trueUp, trueAxis, declinationDeg,
+                right, up, axis, declinationDeg,
             )
         }
 
@@ -245,10 +270,48 @@ class DeviceOrientationTracker(
             latDeg = loc?.latitude,
             lonDeg = loc?.longitude,
             hasOrientation = true,
-            right = trueRight,
-            up = trueUp,
-            axis = trueAxis,
+            right = right,
+            up = up,
+            axis = axis,
         )
+    }
+
+    /**
+     * §0.78：带 TTL 的定位缓存（见 [buildPointing] 里的说明）。
+     * 位置本身由 [LocationHelper.startListening] 在后台持续刷新，姿态路径 30s 取一次足够。
+     */
+    private fun bestLocation(): Location? {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - locCacheMs < locCacheTtlMs) return locCache
+        val l = locationHelper.getBestLocation()
+        locCache = l
+        locCacheMs = now
+        return l
+    }
+
+    /**
+     * §0.78：地磁模型缓存。按纬度/经度 0.01° 网格（≈1.1 km）与整点小时做 key ——
+     * 磁偏角随位置和时间变化极慢，没必要每帧重建 `GeomagneticField`（构造要读 WMM 模型）。
+     */
+    private fun geomagneticField(loc: Location, nowMs: Long): GeomagneticField {
+        val qLat = Math.round(loc.latitude * 100)
+        val qLon = Math.round(loc.longitude * 100)
+        val hour = nowMs / 3_600_000L
+        val cached = geoFieldCache
+        if (cached != null && geoFieldQLat == qLat && geoFieldQLon == qLon && geoFieldHour == hour) {
+            return cached
+        }
+        val f = GeomagneticField(
+            loc.latitude.toFloat(),
+            loc.longitude.toFloat(),
+            loc.altitude.toFloat(),
+            nowMs,
+        )
+        geoFieldCache = f
+        geoFieldQLat = qLat
+        geoFieldQLon = qLon
+        geoFieldHour = hour
+        return f
     }
 
     private fun computePointing() {

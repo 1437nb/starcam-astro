@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  §0.78 网络安全配置。
+
+  背景：`PlateSolveClient.isSecureServerUrl()` 接受 `http://127.0.0.1` 与
+  `http://localhost`（为用户自建本地 astrometry.net 服务联调），但 targetSdk 34
+  下平台默认 `cleartextTrafficPermitted=false`，明文 HTTP 一律被拒 ——
+  代码里承诺的这条通路实际不可达，用户改完服务器地址只会看到求解失败。
+
+  这里只对**回环地址**开放明文，其余域名仍强制 HTTPS。
+  不要图省事加 `android:usesCleartextTraffic="true"`（那会对全网开放明文）。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

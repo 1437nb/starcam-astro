@@ -6,13 +6,23 @@ package com.starcam.astro.astro
  */
 object StarChartOverlay {
 
-    /** 投影后的星点；[belowHorizon] 表示天球高度角 < 0（§0.53 全天星空变暗用） */
+    /**
+     * 投影后的星点；[belowHorizon] 表示天球高度角 < 0（§0.53 全天星空变暗用）。
+     *
+     * §0.78：`x`/`y`/`visible`/`belowHorizon` 改为 `var`，以支持 AR 路径的**对象池**
+     * （[ArSkyProjector] 每帧约 2000 颗星，按星表下标复用同一批对象，
+     * 消除每帧 2000 个 data class 分配 —— 这是 AR 逐帧路径上最大的一笔）。
+     * `entry` 保持 `val`：每个池槽恒对应同一颗星。
+     *
+     * **契约**：池化对象只在**当前帧**内有效，跨帧持有其引用会读到下一帧的值。
+     * 结果页路径（[projectStars]）不池化，行为与从前完全一致。
+     */
     data class Star2D(
         val entry: StarEntry,
-        val x: Float,
-        val y: Float,
-        val visible: Boolean,
-        val belowHorizon: Boolean = false,
+        var x: Float,
+        var y: Float,
+        var visible: Boolean,
+        var belowHorizon: Boolean = false,
     )
 
     /** 星座连线（两端点均为可见星） */

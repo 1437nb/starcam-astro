@@ -58,17 +58,28 @@ object QuatMath {
         )
     }
 
+    /**
+     * §0.78：[quatToMatrix] 的**零分配版本** —— 结果写入调用方传入的 [out]
+     * （长度须 ≥ 9，行主序）。
+     *
+     * 姿态的**每帧路径**必须用这个：见
+     * [com.starcam.astro.util.DeviceOrientationTracker.predictedPointing]，
+     * 它每帧被 AR 画布调用一次。
+     */
+    fun quatToMatrixInto(q: FloatArray, out: FloatArray) {
+        val xx = q[1] * q[1]; val yy = q[2] * q[2]; val zz = q[3] * q[3]
+        val xy = q[1] * q[2]; val xz = q[1] * q[3]; val yz = q[2] * q[3]
+        val wx = q[0] * q[1]; val wy = q[0] * q[2]; val wz = q[0] * q[3]
+        out[0] = 1 - 2 * (yy + zz); out[1] = 2 * (xy - wz); out[2] = 2 * (xz + wy)
+        out[3] = 2 * (xy + wz); out[4] = 1 - 2 * (xx + zz); out[5] = 2 * (yz - wx)
+        out[6] = 2 * (xz - wy); out[7] = 2 * (yz + wx); out[8] = 1 - 2 * (xx + yy)
+    }
+
     /** 单位四元数 → 旋转矩阵（行主序 9 元素；与 SensorManager.getRotationMatrixFromVector 同式） */
     fun quatToMatrix(q: FloatArray): FloatArray {
-        val (w, x, y, z) = q
-        val xx = x * x; val yy = y * y; val zz = z * z
-        val xy = x * y; val xz = x * z; val yz = y * z
-        val wx = w * x; val wy = w * y; val wz = w * z
-        return floatArrayOf(
-            1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy),
-            2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx),
-            2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy),
-        )
+        val out = FloatArray(9)
+        quatToMatrixInto(q, out)
+        return out
     }
 
     /** 单位四元数旋转向量 v（v' = R·v） */

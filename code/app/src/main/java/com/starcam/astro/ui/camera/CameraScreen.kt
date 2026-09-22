@@ -161,6 +161,12 @@ fun CameraScreen(
     var livePreview by remember { mutableStateOf(true) }
     val livePreviewFlag = remember { java.util.concurrent.atomic.AtomicBoolean(true) }
     var previewOverlay by remember { mutableStateOf<Bitmap?>(null) }
+
+    // §0.78：AR 每帧绘制复用同一组 Paint（原来 LayeredRenderer.draw 每次调用新建
+    // 9 个 Paint，而它每帧被调一次 → 约 540 个 Paint/秒，Paint 构造带 native 开销）。
+    // 必须**由调用方持有**：draw() 也会被 IO 线程（保存相册 / 查看器的位图渲染）调用，
+    // Paint 不是线程安全的，不能放在 LayeredRenderer 这个 object 里共享。
+    val arPaints = remember { com.starcam.astro.astro.LayeredRenderer.RenderPaints() }
     var previewLabel by remember { mutableStateOf("") }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val lastAnalyzeMs = remember { AtomicLong(0) }
@@ -762,6 +768,8 @@ fun CameraScreen(
                             dimBelowHorizon = true,
                             // §0.58：AR 视场即水平视场 → 直接得板比例，日月按真实视直径绘制
                             degPerPx = (arFovDeg / rectW).toFloat(),
+                            // §0.78：复用 remember 的 Paint，避免每帧新建 9 个
+                            paints = arPaints,
                         )
                         // §0.53/§0.56：地平线指示线与地平罗盘标尺（大圆针孔投影直线 + 4边鲁棒求交 + 8方位罗盘标尺，对齐 Stellarium）
                         val f = (rectW / 2f) / kotlin.math.tan(Math.toRadians(arFovDeg / 2.0)).toFloat()

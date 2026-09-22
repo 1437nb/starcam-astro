@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +42,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.starcam.astro.astro.LayerFlags
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 全屏图片查看器（§0.34，§0.37 增加原图/标注切换，§0.47 增加图层开关面板）：
@@ -67,6 +71,32 @@ fun ZoomableImageViewer(
     // §0.47：图层开关与当前标注位图（开关变化时经 renderAnnotated 重渲染）
     var flags by remember { mutableStateOf(initialFlags) }
     var annotatedBitmap by remember { mutableStateOf(annotated) }
+    val scope = rememberCoroutineScope()
+
+    /**
+     * §0.78：图层切换的重渲染统一入口。
+     *
+     * 原实现在 4 个开关回调里**同步**调用 [renderAnnotated]，而它是 2200px 级
+     * 全分辨率位图合成（≈14MB，还要跑一遍全星表投影）—— 放在主线程会明显卡顿；
+     * 而**同一个操作**在「保存到相册」路径里却正确地走了 IO。
+     *
+     * [renderingNew] 是防抖标志：全分辨率合成要几百毫秒，快速连点开关时
+     * 不会同时堆出多张 14MB 位图（原生内存峰值）。
+     */
+    var renderingNew by remember { mutableStateOf(false) }
+    val rerender: (LayerFlags) -> Unit = { f ->
+        val render = renderAnnotated
+        if (render != null && !renderingNew) {
+            renderingNew = true
+            scope.launch {
+                try {
+                    annotatedBitmap = withContext(Dispatchers.IO) { render.invoke(f) }
+                } finally {
+                    renderingNew = false
+                }
+            }
+        }
+    }
     var showLayerPanel by remember { mutableStateOf(false) }
     // §0.48：点击命中的天体 → 底部科普卡片
     var cardObject by remember { mutableStateOf<SkyObjectRef?>(null) }
@@ -234,19 +264,19 @@ fun ZoomableImageViewer(
                         Spacer(Modifier.height(4.dp))
                         ViewerLayerToggle(com.starcam.astro.ui.I18n.Layers.lines, flags.lines) {
                             flags = flags.copy(lines = it)
-                            annotatedBitmap = renderAnnotated.invoke(flags)
+                            rerender(flags)
                         }
                         ViewerLayerToggle(com.starcam.astro.ui.I18n.Layers.starNames, flags.starNames) {
                             flags = flags.copy(starNames = it)
-                            annotatedBitmap = renderAnnotated.invoke(flags)
+                            rerender(flags)
                         }
                         ViewerLayerToggle(com.starcam.astro.ui.I18n.Layers.constellationNames, flags.constellationNames) {
                             flags = flags.copy(constellationNames = it)
-                            annotatedBitmap = renderAnnotated.invoke(flags)
+                            rerender(flags)
                         }
                         ViewerLayerToggle(com.starcam.astro.ui.I18n.Layers.messier, flags.messier) {
                             flags = flags.copy(messier = it)
-                            annotatedBitmap = renderAnnotated.invoke(flags)
+                            rerender(flags)
                         }
                     }
                 }
