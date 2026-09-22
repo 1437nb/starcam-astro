@@ -15,6 +15,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
@@ -75,7 +76,11 @@ object LocalStarMatcher {
      * §0.62 调试：强制**星表域**星等上限——索引 / 第四星验证网格 / 内点统计
      * 三域同时生效（历史上三者不一致时，涉及暗星的三角形会在验证环节被整体否决，
      * 只加深索引完全无效——§0.43 深扫实测 4.5→6.5 全部 UNSOLVED 且慢 14~35 倍）。
-     * null = 生产默认（见 [PROD_CATALOG_MAG]）。
+     * null = 不覆盖，走运行时域 [runtimeCatalogMag]。
+     *
+     * §0.77：本字段恢复**只读覆盖**语义（仅供测试与标定台）。v1.5.63 曾把它当运行时
+     * 域状态机用（深域重试时写入），既污染了调试字段的语义，又因为「写入侧加锁、
+     * 读取侧裸奔」而存在并发串域风险 —— 运行时域已改由 [runtimeCatalogMag] 承载。
      */
     @Volatile
     internal var debugForceCatalogMag: Float? = null
@@ -101,8 +106,32 @@ object LocalStarMatcher {
      */
     private const val DEEP_PATH_MAX_FOV_DEG = 90.0
 
-    /** 当前生效的星表域星等上限（调试可覆盖） */
-    private fun catalogMag(): Float = debugForceCatalogMag ?: PROD_CATALOG_MAG
+    /**
+     * §0.77 运行时星表域：**对象级状态，受 [solveLock] 保护**。
+     *
+     * 为什么不是 ThreadLocal（一条走过的弯路，留作记录）：投票轮内部用线程池并行
+     * （`voteChunk` 里的 `Executors.newFixedThreadPool` + `pool.submit`），而
+     * ThreadLocal 在 worker 线程上会退回 `initialValue()` —— 也就是**浅域**。
+     * 于是深域兜底时主线程按深域取索引、worker 却按浅域口径工作，实测直接让
+     * apod3（船帆座窄场）从「解出 8.5° / 20 内点」退回 UNSOLVED。
+     * 结论：域是**整次求解的属性**，必须让所有参与线程看到同一个值。
+     *
+     * 为什么不是无保护的共享变量：`catalogMag()` 在一次求解里要被读 6 次
+     * （三角形索引、第 4 星验证网格、打分表、假设展开、内点统计…）。两个并发求解
+     * 互相改域，就可能让**同一次**求解出现「深域索引 + 浅域验证网格」，
+     * 涉及暗星的三角形被整体否决（§0.43 实测的形态）→ **静默 UNSOLVED**。
+     *
+     * 所以取「对象级状态 + 求解入口互斥」：同一时刻只有一个求解在跑，域在整个
+     * 求解期间保持稳定，所有线程读到同一个值（见 [match] / [solveLock]）。
+     */
+    @Volatile
+    private var runtimeCatalogMag: Float = PROD_CATALOG_MAG
+
+    /** §0.77 求解互斥：保证星表域在整次求解期间不被另一个求解改写（见 [runtimeCatalogMag]） */
+    private val solveLock = Any()
+
+    /** 当前生效的星表域星等上限（调试字段优先级最高，仅测试/标定台会写） */
+    private fun catalogMag(): Float = debugForceCatalogMag ?: runtimeCatalogMag
 
     /**
      * §0.62 调试：每轮投票送验候选数上限（生产默认 18）。宽场（>60°）实测：
@@ -612,14 +641,12 @@ object LocalStarMatcher {
     private class TriEntry(val hipA: Int, val hipB: Int, val hipC: Int, val r2: Float, val r3: Float)
 
     /**
-     * 三角形索引。
-     * [triMap]：角度比键（历史实现，保留用于兜底与对照）。
-     * [projMap]：§0.71b 投影感知键 —— 以三角形重心为切点的 gnomonic 距离比，
-     *            与照片端像素比严格同尺度，宽场真三角形命中率 100%（角度比仅 31%）。
+     * 三角形索引。§0.77 起只剩 [triMap]：归一化角度比键，每三角形只存一个桶（§0.74）。
+     * 原 [projMap]（§0.71b 投影感知键）已删除 —— 它从未被任何查询路径使用过，
+     * 是纯占内存的死重量，详见其原址的说明。
      */
     private class StarIndex(
         val triMap: HashMap<Int, MutableList<TriEntry>>,
-        val projMap: HashMap<Int, MutableList<TriEntry>> = HashMap(),
     )
 
     /**
@@ -629,12 +656,13 @@ object LocalStarMatcher {
      * （mag<=4.0，3.4 万条、358ms）会在同一批照片里交替出现（批量导出宽窄混杂）。
      * 单槽会让每次交替都重建一次索引 —— 深域重建一次就是 8.9 秒，10 张交替
      * 就要 46 秒。分槽后两域各建一次、之后都命中缓存。
+     *
+     * §0.77：改用 ConcurrentHashMap。求解可能在星图页分析线程与求解 IO 线程上并发
+     * 发生，普通 HashMap 的「锁外读 + 锁内写」会被并发写破坏内部结构 —— 这是
+     * v1.5.62 引入的回归（v1.5.61 的「单槽缓存 + volatile 双检」本来是安全的）。
+     * 下面的双检保留：它保证 9.3s 的深域构建只发生一次。
      */
-    @Volatile
-    private var indexCache: HashMap<Float, StarIndex> = HashMap()
-
-    /** §0.75 深域重试的切域锁，见 [match] 里的说明 */
-    private val domainLock = Any()
+    private val indexCache = ConcurrentHashMap<Float, StarIndex>()
 
     /** §0.75 调试：彻底跳过深星表域兜底（A/B 计费用；true=浅域无解即返回 null） */
     @Volatile
@@ -852,7 +880,6 @@ object LocalStarMatcher {
     private fun buildIndex(magLimit: Float = PROD_CATALOG_MAG): StarIndex {
         val bright = StarCatalogData.stars.filter { it.mag <= magLimit }
         val triMap = HashMap<Int, MutableList<TriEntry>>()
-        val projMap = HashMap<Int, MutableList<TriEntry>>()
         // §0.75 邻居搜索的空间网格。原实现对每颗星遍历整个亮星集算角距 ——
         // O(n²) 在浅域（514 颗）下只要 600ms，但深域（mag<=6.5，8415 颗）
         // 实测要 ~50s，没法在兜底路径里现场构建。改为按赤纬分带、带内按赤经
@@ -908,21 +935,10 @@ object LocalStarMatcher {
                     // 覆盖范围不变：原「存 ±1 桶 + 查 ±13 桶」等效覆盖 ±14 桶，
                     // 故各查询点的 window 已同步 +1（±13 → ±14、±1 → ±2）。
                     triMap.getOrPut(bucketKey(r2, r3)) { mutableListOf() }.add(entry)
-                    // §0.71b 投影感知索引：同时写入「以三角形重心为投影中心」的
-                    // gnomonic 距离比键。照片端像素距离本身就是切平面距离，
-                    // 故该键与照片端**严格一致**（实测失真 0.0000 vs 角度比 0.0170），
-                    // 宽场真三角形得以回到窄窗内（±0.012 命中率 31% → 100%）。
-                    val pr = projectedRatios(a, b, c)
-                    if (pr != null && pr[0] >= 0.12f) {
-                        val pent = TriEntry(a.hip, b.hip, c.hip, pr[0], pr[1])
-                        for (key in quantizeKeys(pr[0], pr[1])) {
-                            projMap.getOrPut(key) { mutableListOf() }.add(pent)
-                        }
-                    }
                 }
             }
         }
-        return StarIndex(triMap, projMap)
+        return StarIndex(triMap)
     }
 
     // ================= §0.75 索引构建用的空间网格 =================
@@ -988,58 +1004,11 @@ object LocalStarMatcher {
      */
     private const val NEIGHBOR_GRID_THRESHOLD = 1000
 
-    /**
-     * §0.71b：以三角形**重心**为投影中心，算三条边的 gnomonic 切平面距离，
-     * 返回归一化比值 (b/a, c/a)。
-     *
-     * 为什么这样能让键与照片端严格一致：照片是 gnomonic 投影，像素距离 ∝
-     * 该点在切平面上的距离；只要索引端用**同一个投影面**（这里取三角形重心
-     * 作为切点），两边算出的距离只差一个整体尺度因子，比值完全相同。
-     * 实测失真 0.0000，而原「角度比」在 55°×74° 宽场失真中位 0.0170。
-     */
-    private fun projectedRatios(a: StarEntry, b: StarEntry, c: StarEntry): FloatArray? {
-        // 重心方向的单位向量
-        val ua = unitVec(a); val ub = unitVec(b); val uc = unitVec(c)
-        var cx = ua[0] + ub[0] + uc[0]
-        var cy = ua[1] + ub[1] + uc[1]
-        var cz = ua[2] + ub[2] + uc[2]
-        val cn = sqrt(cx * cx + cy * cy + cz * cz)
-        if (cn < 1e-9) return null
-        cx /= cn; cy /= cn; cz /= cn
-        val pa = tanAbout(ua, cx, cy, cz) ?: return null
-        val pb = tanAbout(ub, cx, cy, cz) ?: return null
-        val pc = tanAbout(uc, cx, cy, cz) ?: return null
-        val dab = hypot(pa[0] - pb[0], pa[1] - pb[1])
-        val dac = hypot(pa[0] - pc[0], pa[1] - pc[1])
-        val dbc = hypot(pb[0] - pc[0], pb[1] - pc[1])
-        val s = doubleArrayOf(dab, dac, dbc).sortedDescending()
-        if (s[0] <= 1e-12) return null
-        return floatArrayOf((s[1] / s[0]).toFloat(), (s[2] / s[0]).toFloat())
-    }
-
-    /** 星表星的单位向量（缓存在 StarEntry 上避免重复三角函数） */
-    private fun unitVec(e: StarEntry): DoubleArray {
-        val r = e.ra * (PI / 180.0)
-        val d = e.dec * (PI / 180.0)
-        val cd = cos(d)
-        return doubleArrayOf(cd * cos(r), cd * sin(r), sin(d))
-    }
-
-    /** 单位向量 u 在以 (cx,cy,cz) 为切点的切平面上的坐标（度） */
-    private fun tanAbout(u: DoubleArray, cx: Double, cy: Double, cz: Double): DoubleArray? {
-        val dc = u[0] * cx + u[1] * cy + u[2] * cz
-        if (dc <= 1e-9) return null
-        // east = (-sin r0, cos r0, 0)，north = center × east
-        val r0 = atan2(cy, cx)
-        val ex = -sin(r0); val ey = cos(r0)
-        val nx = cy * 0.0 - cz * ey
-        val ny = cz * ex - cx * 0.0
-        val nz = cx * ey - cy * ex
-        val de = u[0] * ex + u[1] * ey
-        val dn = u[0] * nx + u[1] * ny + u[2] * nz
-        val k = 180.0 / PI
-        return doubleArrayOf(de / dc * k, dn / dc * k)
-    }
+    // §0.77：原 §0.71b 的「投影感知键」实现（projectedRatios / unitVec / tanAbout）
+    // 连同 projMap 一并删除。该方案实测在旧照片上并不优于角度比键，而留在索引里的
+    // 50 万+ 条投影键**从未被查询过**（queryCandidates 全仓零调用点）—— 纯占内存
+    // （9 桶 × 55.6 万三角形 ≈ 500 万条引用）+ 拖慢索引构建，没有任何收益。
+    // 记录保留在 PROGRESS.md §0.71b / §0.77，星表侧的 gnomonic 工具见 tools/。
 
     /**
      * 归一化边长比 → 邻近桶（256 级细粒度，让正确匹配投票尖锐占优）。
@@ -1091,6 +1060,21 @@ object LocalStarMatcher {
         width: Int,
         height: Int,
         pointingHint: PointingHint? = null,
+        allowDeepRetry: Boolean = true,
+    ): LocalMatchResult? = synchronized(solveLock) {
+        // §0.77：整个求解在 solveLock 内执行。域（runtimeCatalogMag）是对象级状态，
+        // 必须保证它在整次求解期间不被另一个求解改写；投票轮的 worker 线程也因此
+        // 与主线程看到同一个域（**不能**用 ThreadLocal，原因见 runtimeCatalogMag）。
+        matchLocked(detected, width, height, pointingHint, allowDeepRetry)
+    }
+
+    /** [match] 的实现体。**必须在 [solveLock] 内调用**（见 [runtimeCatalogMag]）。 */
+    private fun matchLocked(
+        detected: List<DetectedStar>,
+        width: Int,
+        height: Int,
+        pointingHint: PointingHint?,
+        allowDeepRetry: Boolean,
     ): LocalMatchResult? {
         if (detected.size < 5) return null
         if (pointingHint != null) {
@@ -1099,6 +1083,12 @@ object LocalStarMatcher {
         }
         val shallow = matchInternal(detected, width, height, null)
         if (shallow != null) return shallow
+        // §0.77 深域准入闸门：深域重试的触发条件是「浅域整条阶梯无解」，而这个词对
+        // **任何**失败帧都成立 —— 白天、室内、纯噪声帧全都算。相机预览是每 5~8s 一次
+        // 的长驻循环，不做准入就要首帧付 9.3s 的索引构建、之后每帧都跑一遍 16 倍
+        // 候选密度的深域阶梯，纯属浪费：预览用的是主摄广角（≈67°~77°），本就落在
+        // 浅域覆盖的宽场里，深域是给 ≤30° 窄场照片兜底的。
+        if (!allowDeepRetry) return null
         if (debugDisableDeepCatalog) return null
         // §0.75 窄场兜底：浅星表域（mag<=4.0）整条阶梯都无解时，用深星表域
         // （mag<=6.5）重试一次。宽场照片在浅域就能解出，永远不会走到这里 ——
@@ -1112,17 +1102,15 @@ object LocalStarMatcher {
         // 记下教训：只改其中一个域「完全无效」（4.5→6.5 深扫全部 UNSOLVED 且慢
         // 14~35 倍）。所以这里统一切到深域，而不是只换索引。
         //
-        // 加锁的原因：切域是改对象级状态，并发求解会串域。实测 App 内求解本就
-        // 串行（批量导出是顺序 for 循环，相机/相册一次一张），加锁只是把这个
-        // 既有约束变成显式保证。
-        val savedMag = debugForceCatalogMag
-        val deep = synchronized(domainLock) {
-            debugForceCatalogMag = DEEP_CATALOG_MAG
-            try {
-                matchInternal(detected, width, height, null)
-            } finally {
-                debugForceCatalogMag = savedMag
-            }
+        // §0.77 切域方式：改对象级 runtimeCatalogMag。整个求解已在 solveLock 内
+        // （见 match / matchLocked），所以这次改域不会与另一个求解交错；投票轮的
+        // worker 线程读到的也是同一个值 —— 原实现的毛病正是「写入侧加锁、读取侧裸奔」。
+        val savedMag = runtimeCatalogMag
+        runtimeCatalogMag = DEEP_CATALOG_MAG
+        val deep = try {
+            matchInternal(detected, width, height, null)
+        } finally {
+            runtimeCatalogMag = savedMag
         }
         // §0.75 深域是**窄场路径**，对它的解再设一道视场上界。
         //
@@ -1292,13 +1280,12 @@ object LocalStarMatcher {
                     val r2 = sides[1] / sides[0]
                     val r3 = sides[2] / sides[0]
                     if (r2 < 0.12f) continue
-                    // 打分轮查询：**角度比键**（严格窗 + 宽松窗，历史行为）。
-                    // §0.71b 曾尝试在这里用投影键（projMap），实测在旧照片（南宁）
-                    // 上候选数从 ~2.3 万暴涨到 ~7.2 万且最佳候选 inFrame=160
-                    // （尺度坍缩型错误模型）→ 旧照片从 SOLVED 回归 UNSOLVED。
-                    // 打分轮真正的修复在 scoreHypothesis（y 翻转 + 向量平均中心），
-                    // 候选召回用角度比 + 宽窗已足够。projMap 保留在索引里
-                    // 供后续窄窗实验用，当前不参与查询。
+                    // 打分轮查询：**角度比键**（严格窗 + 宽松窗）。
+                    // §0.71b 曾尝试在这里用投影键，实测在旧照片（南宁）上候选数从
+                    // ~2.3 万暴涨到 ~7.2 万，且最佳候选 inFrame=160（尺度坍缩型错误
+                    // 模型）→ 旧照片从 SOLVED 回归 UNSOLVED。打分轮真正的修复在
+                    // scoreHypothesis（y 翻转 + 向量平均中心），候选召回用角度比 +
+                    // 宽窗已足够。该投影键已在 §0.77 连同 projMap 一并删除。
                     val merged = HashMap<Long, TriEntry>()
                     for (key in quantizeKeys(r2, r3, window = 2)) {
                         idx.triMap[key]?.let { list ->
@@ -1759,47 +1746,9 @@ object LocalStarMatcher {
         return doubleArrayOf((ra + 360.0) % 360.0, dec)
     }
 
-    /**
-     * §0.71b 候选查询：**投影键优先，角度比兜底**。
-     *
-     * 照片端给的 (r2, r3) 是像素距离比，本身就是切平面距离比；而 [StarIndex.projMap]
-     * 的键也是切平面距离比（以三角形重心为切点）—— 两者同尺度，故可用**严格窗**
-     * （±0.012）。原先只用角度比键，宽场下失真中位 0.0170、只有 31% 真三角形能落进
-     * 严格窗，且必须靠 ±0.05 的宽窗兜底，而宽窗会放进海量伪候选（实测 cand 数万）。
-     *
-     * 兜底逻辑保留：老键在窄场仍更精确（窄场失真极小），且合成场/小图不受影响。
-     */
-    private fun queryCandidates(idx: StarIndex, r2: Float, r3: Float): HashMap<Long, TriEntry> {
-        val merged = HashMap<Long, TriEntry>()
-        // 1) 投影键（宽场主力）：严格窗即可
-        if (idx.projMap.isNotEmpty()) {
-            for (key in quantizeKeys(r2, r3, window = 1)) {
-                idx.projMap[key]?.let { list ->
-                    for (t in list) {
-                        if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) merged[triKey(t)] = t
-                    }
-                }
-            }
-            if (merged.size >= candidateCap()) return merged
-        }
-        // 2) 角度比键：严格窗 + 宽窗（历史行为，窄场与合成场兜底）
-        for (key in quantizeKeys(r2, r3, window = 2)) {
-            idx.triMap[key]?.let { list ->
-                for (t in list) {
-                    if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) merged[triKey(t)] = t
-                }
-            }
-        }
-        for (key in quantizeKeys(r2, r3, window = 14)) {
-            idx.triMap[key]?.let { list ->
-                for (t in list) {
-                    if (abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f) merged[triKey(t)] = t
-                }
-            }
-        }
-        return merged
-    }
-
+    // §0.77：queryCandidates（§0.71b 的「投影键优先、角度比兜底」查询）已删除 ——
+    // 全仓零调用点。候选查询现统一走投票轮/打分轮里的 triMap 单桶键路径
+    // （见 voteChunk 与 scoredRound 里的 quantizeKeys 查询）。
     /** 单（照片星下标）区间内的三角形投票——可被多线程并行调用，各区间互不共享 key */
     private fun voteChunk(
         votes: HashMap<Long, Int>,
@@ -1838,10 +1787,10 @@ object LocalStarMatcher {
                     //    大视场 gnomonic 比值偏移 ~4%）取并集后按接近度取前 10。
                     //    只查严格池会漏掉被投影畸变推离的真三角形（错误“相似”候选
                     //    常占据严格窗口，宽松池从未触发 → 真票系统性缺失，实测）。
-                    //    投票轮**保持历史的角度比查询**：projMap（§0.71b 投影键）只服务
-                    //    打分轮。理由：投票轮的候选会经 verifyCandidate 的第 4 星校验，
-                    //    投影键带来的额外候选在旧照上实测拉高伪票（topVote 26 vs 29、
-                    //    旧照从 SOLVED 回归到 UNSOLVED），而打分轮才是宽场的主战场。
+                    //    投票轮**保持历史的角度比查询**（§0.71b 的投影键方案已在
+                    //    §0.77 删除）。理由：投票轮的候选会经 verifyCandidate 的第 4 星
+                    //    校验，投影键带来的额外候选在旧照上实测拉高伪票（topVote 26 vs
+                    //    29、旧照从 SOLVED 回归到 UNSOLVED）。
                     //
                     // §0.74 有界 top-K 选择（原为「全量进 HashMap + 全排序」）：
                     // 实测每轮要扫 ~6000 万条目、往 HashMap 插 ~390 万次，而最终只取

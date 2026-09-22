@@ -93,6 +93,7 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.cos
@@ -140,6 +141,15 @@ fun CameraScreen(
     var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
     var maxEvIndex by remember { mutableStateOf(0) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+
+    // §0.77：离开相机页必须显式 unbindAll —— ProcessCameraProvider 是进程级单例，
+    // 而 bindToLifecycle 的 owner 是 Activity（本屏只是 Activity 内的一个页面），
+    // 切到结果页/主页时 Activity 并未销毁，相机因此**从不自动解绑**。
+    // 不解绑的三个后果：① 相机常开、状态栏隐私指示灯常亮、持续耗电；
+    // ② ImageAnalysis 仍每 5~8s 投递帧，向已销毁的组合状态 post 写入；
+    // ③ 投递命中已 shutdown 的 analysisExecutor（RejectedExecutionException），
+    //    且未回收的 ImageProxy 可能让 KEEP_ONLY_LATEST 分析流挂死不再出帧。
+    val cameraProviderRef = remember { AtomicReference<ProcessCameraProvider?>(null) }
     var hasPermission by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     // §0.41：曝光补偿（-max..+max，步长 1）
@@ -274,6 +284,22 @@ fun CameraScreen(
             orientationTracker.startTracking()
         }
         onDispose {
+            // §0.77：先解绑相机，再收线程池 —— 顺序不能反。分析流若还在投递而
+            // executor 已 shutdown，会命中 RejectedExecutionException，且未被回收的
+            // ImageProxy 可能让 KEEP_ONLY_LATEST 的分析流挂死、之后不再出帧。
+            cameraProviderRef.get()?.unbindAll()
+            // §0.77：Pro 模式注入的是「AE 关 + 手动 ISO + 快门」，快门最长可到 30s。
+            // 不清除就离开，这套参数会留在相机设备上 —— 用户下次进来看到黑屏/极暗。
+            // 这里显式恢复自动 AE，与 proMode 切回 false 时的处理保持一致。
+            if (proMode) {
+                cameraControl?.let { ctl ->
+                    try {
+                        androidx.camera.camera2.interop.Camera2CameraControl.from(ctl)
+                            .clearCaptureRequestOptions()
+                    } catch (_: Throwable) {
+                    }
+                }
+            }
             orientationTracker.stopTracking()
             locationHelper.stopListening()
             analysisExecutor.shutdown()
@@ -314,6 +340,8 @@ fun CameraScreen(
         if (!hasPermission) return@LaunchedEffect
         try {
             val provider = ProcessCameraProvider.getInstance(context).await(context)
+            // §0.77：交给 onDispose 解绑用（provider 是局部变量，onDispose 拿不到）
+            cameraProviderRef.set(provider)
             val preview = Preview.Builder()
                 .setTargetAspectRatio(androidx.camera.core.AspectRatio.RATIO_4_3)
                 .build().also {
@@ -358,7 +386,10 @@ fun CameraScreen(
                     val h = frame.height
                     val hint = if (settings.sensorAssistedPointing) orientationTracker.createPointingHint() else null
                     val stars = LocalStarMatcher.detectStars(frame, 60)
-                    val res = LocalStarMatcher.match(stars, w, h, hint)
+                    // §0.77：预览路径关闭深域兜底。主摄广角（≈67°~77°）本就落在
+                    // 浅域覆盖的宽场里，而预览每 5~8s 一次、失败帧（室内/白天/噪声）
+                    // 是常态 —— 开着等于每帧白跑一遍 16 倍候选密度的深域阶梯。
+                    val res = LocalStarMatcher.match(stars, w, h, hint, allowDeepRetry = false)
                     if (res != null && res.solve.wcs != null) {
                         val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
                         val label = HistoryStore.nearestConstellation(

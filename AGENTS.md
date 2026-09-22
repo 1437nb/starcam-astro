@@ -173,6 +173,10 @@ R8 若报 `Missing class xxx` → **不是 OOM，是缺 keep 规则**。R8 会�
 - `.gitignore` 的两个锚定陷阱（**已修复，勿改回去**）：
   `indexes/` 会连带排除 `code/app/src/main/assets/indexes/` 的 8 个 FITS 离线索引
   （离线求解必需），必须写成 `/indexes/`；`/apk/` 同理。自查用 `git check-ignore -v <路径>`。
+- ⚠️ **`docs/71-*` 被 `.gitignore` 预留**（见该文件 `:63`，给「安全事件复盘」——
+  内容等于泄露细节说明书，绝不入库）。**新写的验证报告不要占 71 号**，
+  否则会被**静默排除**、提交时无声消失。docs 编号从 72 继续
+  （当前已用到 `73-`）。写新文档后请用 `git status` 确认它确实出现在待提交列表里。
 - `.gitattributes` 必须保留：仓库含 `.so` / `.fits` / `.jpg`，缺 `binary` 标记会被换行转换损坏。
 - ⚠️ **`git push` 在本机不可用**（`github.com:443` 被阻断，实测 Connection reset /
   timeout；`ssh.github.com:443` 能连通但 publickey 被拒）。两条可用通道：
