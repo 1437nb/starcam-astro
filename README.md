@@ -224,7 +224,7 @@ cd code
 # 编译 Debug APK
 ./gradlew :app:assembleDebug
 
-# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；176 项全绿）
+# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；179 项全绿）
 ./gradlew :app:testDebugUnitTest
 
 # 产物位置
@@ -235,10 +235,10 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI（GitHub Actions）跑的是 165 项 —— 它带 `-PskipPhotoTests=true`，跳过 6 个依赖本机
+> CI（GitHub Actions）跑的是 168 项 —— 它带 `-PskipPhotoTests=true`，跳过 6 个依赖本机
 > 素材的测试类（`RealPhotoMatchTest` / `Photo12RegressionTest` / `NarrowFieldRegressionTest` /
 > `PhaseTimingBench` / `TieredCatalogTest` / `SyntheticMidFieldTest`，共 11 项）；
-> 本地素材齐备时为 **176 项**。
+> 本地素材齐备时为 **179 项**。
 
 ### 真实照片回归（可选）
 
@@ -253,6 +253,37 @@ PHOTO_DIR=/path/to/realphotos ./gradlew :app:testDebugUnitTest
 回归台固化了真值断言：`apod4`（北斗，34° 窄场）、`user-nanning-20260912`
 （用户实拍，74° 广角，真值取自 astrometry.net 独立解算）必须解出；
 `apod1/2/3/5`、`pleiades`、`m44×2` 作为假阳性对照必须保持 UNSOLVED。
+
+---
+
+## 参与贡献
+
+想参与这个项目需要准备什么？取决于你想做什么 —— 三种方式的门槛差别很大：
+
+| 你想做的事 | 需要准备 |
+|---|---|
+| 读代码、改 Kotlin/JVM 逻辑、写文档或翻译、跑测试、构建 debug APK | **JDK 17 + Android SDK 34**（无工程外依赖） |
+| 改 native 桥接 `app/src/main/cpp/astro_bridge.c` | 另需 NDK r26d + astrometry.net 0.97 静态库 + cfitsio 3.47 交叉产物 |
+| 打 release 包 | 另需签名密钥 `.jks`（**仅维护者需要**，贡献者用 debug 包） |
+
+求解引擎 `.so` 已随仓库提供，且 `build.gradle.kts` 不参与 native 构建 ——
+所以除上述两项外，克隆下来就能编译、能跑测试：
+
+```bash
+git clone https://github.com/1437nb/starcam-astro.git
+cd starcam-astro/code
+echo "sdk.dir=$ANDROID_HOME" > local.properties    # 该文件不入库
+./gradlew :app:assembleDebug
+```
+
+完整说明见 **[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
+（依赖清单、跨平台重建 `.so` 的命令、可贡献方向、提交红线）。
+
+> **测试覆盖的已知折扣**：CI 跑 **168 项**，比本地少 11 项 —— 真值回归台依赖
+> **不入库**的实拍素材（含私拍原图，属隐私与体积上的必要取舍），在 CI 中按
+> `-PskipPhotoTests=true` 跳过。CI 侧另有一层**纯合成素材的替代回归**
+> （`SyntheticRegressionTest`）作为降级保护 —— 它验证「匹配管线在已知真值下
+> 能否解出」，但不等价于真实照片上的假阳性守卫。
 
 ---
 

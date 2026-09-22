@@ -225,7 +225,7 @@ cd code
 ./gradlew :app:assembleDebug
 
 # Run full unit tests (astronomical math, catalog integrity, solar-system
-# ephemerides, cross-engine checks — 176/176 passing)
+# ephemerides, cross-engine checks — 179/179 passing)
 ./gradlew :app:testDebugUnitTest
 
 # Output path
@@ -236,11 +236,11 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI (GitHub Actions) runs 165 of these — it passes `-PskipPhotoTests=true` to skip
+> CI (GitHub Actions) runs 168 of these — it passes `-PskipPhotoTests=true` to skip
 > 6 test classes that need locally-built material (`RealPhotoMatchTest` /
 > `Photo12RegressionTest` / `NarrowFieldRegressionTest` / `PhaseTimingBench` /
 > `TieredCatalogTest` / `SyntheticMidFieldTest` — 11 tests in total). With the
-> material present locally the count is **176**.
+> material present locally the count is **179**.
 
 ### Real-Photo Regression (optional)
 
@@ -258,6 +258,38 @@ independent astrometry.net solve) must solve; `apod1/2/3/5`, `pleiades`, and two
 `m44` frames must stay UNSOLVED as false-positive controls.
 
 ---
+
+## Contributing
+
+What you need depends on what you want to do — the bar differs a lot between the three:
+
+| What you want to do | What you need |
+|---|---|
+| Read code, change Kotlin/JVM logic, write docs or translations, run tests, build a debug APK | **JDK 17 + Android SDK 34** (no external dependencies) |
+| Change the native bridge `app/src/main/cpp/astro_bridge.c` | Also NDK r26d + astrometry.net 0.97 static libs + cfitsio 3.47 cross-build |
+| Build a release APK | Also the signing keystore `.jks` — **maintainer only** |
+
+The solver engine `.so` is committed to this repo, and `build.gradle.kts` performs no
+native build. So apart from those last two rows, you can clone, build and test right away:
+
+```bash
+git clone https://github.com/1437nb/starcam-astro.git
+cd starcam-astro/code
+echo "sdk.dir=$ANDROID_HOME" > local.properties    # machine-specific, not tracked
+./gradlew :app:assembleDebug
+```
+
+Full details — dependency list, cross-platform `.so` rebuild commands, contribution
+ideas, and submission rules — are in
+**[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
+(Chinese).
+
+> **Known gap in test coverage**: CI runs **168** of the 179 tests. The truth-regression
+> suites depend on real-photo fixtures that are **not** in the repo (privacy and size) and
+> are skipped via `-PskipPhotoTests=true`. As a degraded fallback, CI also runs a purely
+> synthetic regression (`SyntheticRegressionTest`) that renders the star catalog through a
+> known WCS — it verifies the matching pipeline against known ground truth, but it is
+> **not** a substitute for the false-positive guards on real photos.
 
 ## License & Acknowledgements
 

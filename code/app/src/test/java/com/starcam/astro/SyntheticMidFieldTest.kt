@@ -43,88 +43,6 @@ class SyntheticMidFieldTest {
         return acos(c.coerceIn(-1.0, 1.0)) * 180 / PI
     }
 
-    /**
-     * 标准 gnomonic(TAN) 投影：返回画面像素坐标，越界返回 null。
-     * 约定北上天左（与 DSS 的 CDELT1<0 一致），但匹配器对旋转不敏感，
-     * 故此约定只影响自检的可读性。
-     */
-    private fun project(
-        ra: Double, dec: Double, ra0: Double, dec0: Double, pxDeg: Double, w: Int, h: Int,
-    ): Pair<Double, Double>? {
-        val d = (ra - ra0) * PI / 180
-        val d0 = dec0 * PI / 180
-        val dd = dec * PI / 180
-        val denom = sin(d0) * sin(dd) + cos(d0) * cos(dd) * cos(d)
-        if (denom <= 1e-9) return null // 投影奇点（对径点）
-        val x = cos(dd) * sin(d) / denom          // 东向，弧度
-        val y = (cos(d0) * sin(dd) - sin(d0) * cos(dd) * cos(d)) / denom // 北向，弧度
-        val px = w / 2.0 - x / (pxDeg * PI / 180.0)
-        val py = h / 2.0 - y / (pxDeg * PI / 180.0)
-        if (px < 2 || py < 2 || px > w - 3 || py > h - 3) return null
-        return px to py
-    }
-
-    /** 按星等给高斯半径：亮星大一点，模拟 DSS 重采样后的点扩散函数 */
-    private fun sigmaForMag(mag: Double): Double = 1.0 + 0.12 * (6.5 - mag).coerceIn(0.0, 5.0)
-
-    /** 可复现的伪随机（xorshift），避免依赖 JDK 版本差异 */
-    private var rngState = 0x9E3779B97F4A7C15uL.toLong()
-    private fun noise(): Double {
-        rngState = rngState xor (rngState shl 13)
-        rngState = rngState xor (rngState ushr 7)
-        rngState = rngState xor (rngState shl 17)
-        return (rngState ushr 11).toDouble() / 9007199254740992.0 - 0.5
-    }
-
-    /**
-     * 渲染合成图。返回 (灰度, 渲染星数, 落位列表)。
-     *
-     * 振幅模型：最亮星 250，按 0.35 dex/星等 的斜率衰减，mag 6.5 的暗星约
-     * 25 —— 仍在检测阈值的 3 倍以上（阈值 max(8, 3.5σ)）。斜率刻意取平：
-     * 本测试要问的是「这些星表星在不在、够不够解」，不是复现 DSS 的动态范围
-     * 压缩；压得太陡（0.9 dex/mag 的初版）会让暗星全部低于阈值，合成图
-     * det=0，A/B 直接失效。
-     * 另加 σ=2 的读出噪声，让检测器的阈值行为与实拍同量级。
-     */
-    private fun render(
-        ra0: Double, dec0: Double, fov: Double, px: Int, magLimit: Double, withNoise: Boolean = true,
-    ): Triple<FloatArray, Int, List<Pair<Double, Double>>> {
-        val pxDeg = fov / px
-        val gray = FloatArray(px * px)
-        val flux = StarCatalogData.stars.filter { it.mag <= magLimit }
-        val minMag = flux.minOfOrNull { it.mag } ?: 0.0
-        var count = 0
-        val positions = ArrayList<Pair<Double, Double>>()
-        for (s in flux) {
-            val p = project(s.ra, s.dec, ra0, dec0, pxDeg, px, px) ?: continue
-            val amp = 250.0 * Math.exp(-0.35 * (s.mag - minMag))
-            val sg = sigmaForMag(s.mag)
-            val r = (sg * 3).toInt() + 1
-            val x0 = (p.first - r).toInt().coerceAtLeast(0)
-            val x1 = (p.first + r).toInt().coerceAtMost(px - 1)
-            val y0 = (p.second - r).toInt().coerceAtLeast(0)
-            val y1 = (p.second + r).toInt().coerceAtMost(px - 1)
-            val inv = 1.0 / (2.0 * sg * sg)
-            for (y in y0..y1) {
-                for (x in x0..x1) {
-                    val dx = x - p.first
-                    val dy = y - p.second
-                    val v = amp * Math.exp(-(dx * dx + dy * dy) * inv)
-                    val i = y * px + x
-                    if (v > gray[i]) gray[i] = v.toFloat()
-                }
-            }
-            count++
-            positions.add(p)
-        }
-        if (withNoise) {
-            rngState = 0x9E3779B97F4A7C15uL.toLong()
-            for (i in gray.indices) {
-                gray[i] = (gray[i] + 2.0 * noise()).toFloat().coerceIn(0f, 255f)
-            }
-        }
-        return Triple(gray, count, positions)
-    }
 
     @Test
     fun syntheticVsReal() {
@@ -150,7 +68,7 @@ class SyntheticMidFieldTest {
             val dssFile = File(dir, "$id.gray")
             if (dssFile.exists()) {
                 val (dw, dh, dg) = loadGray(dssFile)
-                val (_, _, pos) = render(ra, dec, fov, w, 6.5)
+                val (_, _, pos) = SyntheticSkyRenderer.render(ra, dec, fov, w, 6.5)
                 var hit = 0
                 for (p in pos) {
                     val x = p.first.toInt().coerceIn(0, dw - 1)
@@ -165,7 +83,7 @@ class SyntheticMidFieldTest {
             }
 
             // --- 合成图（深域 mag<=6.5）跑真实管线 ---
-            val (g65, n65, _) = render(ra, dec, fov, w, 6.5)
+            val (g65, n65, _) = SyntheticSkyRenderer.render(ra, dec, fov, w, 6.5)
             val stars65 = LocalStarMatcher.detectStarsGray(w, w, g65)
             val res65 = LocalStarMatcher.match(stars65, w, w)
             val ok65 = res65 != null && angDist(res65.solve.raDeg, res65.solve.decDeg, ra, dec) < fov * 0.25 &&
@@ -174,7 +92,7 @@ class SyntheticMidFieldTest {
             line.append("| syn6.5 n=%-3d det=%-2d %-7s ".format(n65, stars65.size, if (ok65) "SOLVED" else "FAIL"))
 
             // --- 合成图（浅域 mag<=4.0）单独跑 ---
-            val (g40, n40, _) = render(ra, dec, fov, w, 4.0)
+            val (g40, n40, _) = SyntheticSkyRenderer.render(ra, dec, fov, w, 4.0)
             val stars40 = LocalStarMatcher.detectStarsGray(w, w, g40)
             val res40 = LocalStarMatcher.match(stars40, w, w)
             val ok40 = res40 != null && angDist(res40.solve.raDeg, res40.solve.decDeg, ra, dec) < fov * 0.25
@@ -222,7 +140,7 @@ class SyntheticMidFieldTest {
             // 画面内全部 mag<=6.5 星表星的像素位置
             val catPos = StarCatalogData.stars
                 .filter { it.mag <= 6.5 }
-                .mapNotNull { project(it.ra, it.dec, ra, dec, pxDeg, w, h) }
+                .mapNotNull { SyntheticSkyRenderer.project(it.ra, it.dec, ra, dec, pxDeg, w, h) }
             var realStars = 0
             for (d in detected) {
                 val hit = catPos.any { p ->

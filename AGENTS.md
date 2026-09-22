@@ -71,7 +71,7 @@ AGENTS.md  本文件
 
 ```bash
 cd C:\starword\code
-gradle :app:testDebugUnitTest --rerun-tasks   # 全量单测（本机素材齐时 176 项）
+gradle :app:testDebugUnitTest --rerun-tasks   # 全量单测（本机素材齐时 179 项）
 gradle :app:assembleDebug                     # 构建 debug APK（约 3 分钟）
 ```
 
@@ -115,7 +115,7 @@ C:\dev\android-ndk-r26d\        NDK r26d（Windows 原生 clang 17）
   `--rerun-tasks` 全量单测由 ~1 分钟膨胀到 **42 分钟**。更坑的是**脚本退出码非零**，
   但结果其实全是好的。**判成败只看这两处，不看退出码**：
   ① 输出里的 `BUILD SUCCESSFUL`；② `code/app/build/test-results/testDebugUnitTest/*.xml`
-  的 `failures` / `errors` 计数（本次：24 类 / 176 项 / 0 失败）。
+  的 `failures` / `errors` 计数（本次：25 类 / 179 项 / 0 失败）。
   要跑 gradle 就让命令**脱离沙箱执行**，否则时间成本极高。
 - 本机 2026-09-17 实测：debug APK 3 分 16 秒、单测 57 秒、`.so` <1 分钟，
   均远快于服务器（后者 1.8GB 内存，R8/全量重编译多次 OOM）。
