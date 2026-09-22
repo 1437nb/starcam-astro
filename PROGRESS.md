@@ -5,7 +5,7 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-09-21
+**最后更新**：2026-09-22（接手核验：与远端内容零差异、素材在位、基线单测 176 项复跑全绿）
 **当前基线**：v1.5.63（versionCode 83）— 分级星表域，窄场支持做到 10°（§0.75，已发版）
 **工作区**：`C:\starword`（唯一，详见 `AGENTS.md` §0）
 **构建环境**：**全部在本机 Windows 完成**（2026-09-17 起，开发者要求）。`.so` 用
@@ -549,11 +549,10 @@
 - [x] ~~**astrometry.net API key 轮换**~~ —— 已核实为误报：`apiKey` 只是
       `PlateSolveClient` 的入参名，仓库（含首发提交 `511c825`）里没有任何 key 字面值，
       `settings.hasApiKey` 也只是用户输入的开关。无需轮换。
-- [ ] **真实照片回归素材不在工程内** —— `RealPhotoMatchTest` / `Photo12RegressionTest` 依赖
-      `testdata/realphotos` 与 `testdata/gray12`，这批素材目前在归档目录
-      （`C:\star\_archive\20260912-pre-merge\starcam-bundle\testdata\`），导致本机跑不了真实照片回归。
-      建议恢复到 `C:\starword\testdata\`（`.gitignore` 已排除 `testdata/`，无入库风险）；
-      临时替代：跑测试时用 `PHOTO_DIR` / `PHOTO12_DIR` 指向归档。
+- [x] ~~**真实照片回归素材不在工程内**~~ —— **已解决**（2026-09-22 接手核验）：
+      素材全部在位，`C:\starword\testdata\` 下有 `realphotos` 47 项、`gray12` 13 项、
+      `photos12` 12 项、`narrowfield` 64 项。真实照片回归在本机可直接跑，
+      **不需要** `PHOTO_DIR` / `PHOTO12_DIR` 指向归档。
 - [ ] **AR 视场/地平线真机复测**（需实体设备）。
 - [ ] 中间提交 `f14b268`（WIP 重建）自身不编译，HEAD 已修复。
       如需整理历史：**本环境 `git rebase` 有删除 `.git` 的前科，务必先备份**。
@@ -570,6 +569,21 @@ git log --oneline origin/main..HEAD   # 看待推送的具体提交
 ```
 
 推送前请确认：本地是否还有不想公开的内容（本机凭据路径、内部稿、机器相关配置）。
+
+> ⚠️ **不要用 `origin/main..HEAD` 的提交数判断"有没有东西没推"。**
+> 本项目推送走 GitHub Git Data API **逐提交重建**（`tools/gh_api_push.py`），
+> 远端每个提交的 SHA 都与本地不同 → 本地与 `origin/main` 恒处于「**已分叉**」，
+> `--is-ancestor` 返回否，`git log origin/main..HEAD` 会列出一长串"待推送"提交。
+> **判同步要看树，不看提交数**：
+>
+> ```bash
+> git diff --name-only HEAD origin/main   # 输出为空 = 内容已完全一致，无需推送
+> ```
+>
+> 实测 2026-09-22：`HEAD` 与 `origin/main` 的树哈希**同为 `2c74c08…`**、零文件差异，
+> 而 `origin/main..HEAD` 却列着 11 条"待推送"提交 —— 纯粹是 SHA 分叉的假象。
+> 若真要让两边 SHA 一致，只能用 `git push --force` 覆盖远端（经 SOCKS 隧道走原生 git），
+> 但那是**改写远端历史**，与 §4「不要改写提交历史」冲突，**不建议**。维持现状即可。
 
 ---
 

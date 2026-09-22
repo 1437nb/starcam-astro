@@ -197,7 +197,7 @@ back gracefully to the JVM catalog matcher).
 │   │   └── src/main/jniLibs/arm64-v8a/      # Prebuilt libstellar_solver.so native engine
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # Engineering architecture and 60 validation reports (§0.11 ~ §0.70)
+├── docs/                   # Engineering architecture and 62 validation reports (§0.11 ~ §0.72)
 ├── tools/                  # Python catalog generators and offline test utilities
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md               # Chinese documentation
@@ -225,7 +225,7 @@ cd code
 ./gradlew :app:assembleDebug
 
 # Run full unit tests (astronomical math, catalog integrity, solar-system
-# ephemerides, cross-engine checks — 150/150 passing)
+# ephemerides, cross-engine checks — 176/176 passing)
 ./gradlew :app:testDebugUnitTest
 
 # Output path
@@ -236,9 +236,11 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI (GitHub Actions) runs 145 of these — it passes `-PskipPhotoTests=true` to skip
-> the 5 photo-regression tests that need real captures. With the material present
-> locally the count is 150.
+> CI (GitHub Actions) runs 165 of these — it passes `-PskipPhotoTests=true` to skip
+> 6 test classes that need locally-built material (`RealPhotoMatchTest` /
+> `Photo12RegressionTest` / `NarrowFieldRegressionTest` / `PhaseTimingBench` /
+> `TieredCatalogTest` / `SyntheticMidFieldTest` — 11 tests in total). With the
+> material present locally the count is **176**.
 
 ### Real-Photo Regression (optional)
 

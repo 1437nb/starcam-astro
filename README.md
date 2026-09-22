@@ -198,7 +198,7 @@
 │   │   └── src/main/jniLibs/arm64-v8a/      # libstellar_solver.so 预编译引擎
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # 完整工程文档与 60 份验证增补报告（§0.11 ~ §0.70）
+├── docs/                   # 完整工程文档与 62 份验证增补报告（§0.11 ~ §0.72）
 ├── tools/                  # Python 星表生成器与离线工具集
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md
@@ -224,7 +224,7 @@ cd code
 # 编译 Debug APK
 ./gradlew :app:assembleDebug
 
-# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；150 项全绿）
+# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；176 项全绿）
 ./gradlew :app:testDebugUnitTest
 
 # 产物位置
@@ -235,8 +235,10 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI（GitHub Actions）跑的是 145 项 —— 它带 `-PskipPhotoTests=true` 跳过 5 项需要
-> 实拍素材的照片回归；本地素材齐备时为 150 项。
+> CI（GitHub Actions）跑的是 165 项 —— 它带 `-PskipPhotoTests=true`，跳过 6 个依赖本机
+> 素材的测试类（`RealPhotoMatchTest` / `Photo12RegressionTest` / `NarrowFieldRegressionTest` /
+> `PhaseTimingBench` / `TieredCatalogTest` / `SyntheticMidFieldTest`，共 11 项）；
+> 本地素材齐备时为 **176 项**。
 
 ### 真实照片回归（可选）
 
