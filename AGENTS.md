@@ -54,10 +54,11 @@
 ```
 code/      Android 工程（app/src 为全部源码；assets/indexes 为 8 个 FITS 离线索引，
            随包必需；jniLibs/arm64-v8a 为求解引擎 .so）
-docs/      78 篇中文文档（编号即 §0.xx 章节；00 总览、01 代码地图、62 篇验证增补
-           §0.11~§0.72，另有 7 份 release-notes。⚠️ §0.73~§0.76 **未补独立报告**，
-           与 §5 约定不符，目前只记在 `PROGRESS.md`，属待还的文档债）
-tools/     32 个 Python 工具脚本（星表生成 / 定标 / 连线 / 评测）
+docs/      83 篇中文文档（编号即 §0.xx 章节；00 总览、01 代码地图、64 篇验证增补
+           §0.11~§0.78，7 份 release-notes，另有代码审查清单 `72-`、
+           外部评估响应 `76-`。⚠️ §0.73~§0.76 与 §0.79/§0.80 仍**未补独立报告**，
+           只记在 `PROGRESS.md`，属待还的文档债）
+tools/     34 个 Python 工具脚本（星表生成 / 定标 / 连线 / 评测 / 发版）
 apk/       可安装验证基线（git 忽略，仅本机保留）
 indexes/   8 个 FITS 索引副本（服务端 solve-field 定标用，git 忽略）
 交接说明.md 项目总纲（公开脱敏版）
@@ -121,6 +122,18 @@ C:\dev\android-ndk-r26d\        NDK r26d（Windows 原生 clang 17）
   均远快于服务器（后者 1.8GB 内存，R8/全量重编译多次 OOM）。
 
 ### 2.1 发版（release）必读 —— 2026-09-17 实测（§0.68）
+
+> **优先用 `tools/release.py`（§0.80）** —— 它把「改版本号三处 → 凭据预检 → 构建 →
+> 验签 + 与历史包比对同签名 → 归档 + SHA-256」串成一条命令，
+> **任一前置条件不满足都立即失败**，不再有「缺了不报错、静默产出未签名 APK」的降级：
+>
+> ```bash
+> python tools/release.py --version 1.5.64 --desc fix-xxx            # 全流程
+> python tools/release.py --version 1.5.64 --desc fix-xxx --dry-run  # 只演算，不改文件不构建
+> python tools/release.py --version 1.5.64 --desc fix-xxx --skip-build  # 只改版本号
+> ```
+>
+> 下文的手工步骤保留，作为**原理说明与故障排查依据**。
 
 发版在本机做，要点：
 
