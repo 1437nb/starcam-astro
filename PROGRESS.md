@@ -5,7 +5,7 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-09-23（§0.80 发版流程脚本化。前一日：接手核验 + 代码审查 + §0.77~§0.79）
+**最后更新**：2026-09-24（§0.81 第一组「会崩溃」的四条修复：179 项 0 失败）
 **当前基线**：v1.5.63（versionCode 83）— 分级星表域，窄场支持做到 10°（§0.75，已发版）
 **工作区**：`C:\starword`（唯一，详见 `AGENTS.md` §0）
 **构建环境**：**全部在本机 Windows 完成**（2026-09-17 起，开发者要求）。`.so` 用
@@ -69,14 +69,22 @@
     （分界约 30%）。若要治，方向是检测端：星云形态学剔除（扁长/大面积 blob 降权）
     或密场提高 maxStars，**不要去动匹配器** —— 合成图 A/B 已证明匹配器 15/15 全能解。
     注意真实长焦照片的星云比 DSS 拉伸图暗得多，实际影响可能远小于回归所示。
-11. **代码审查遗留（§0.77/§0.78 已修 10 条）** —— 完整清单见
+11. **代码审查遗留（§0.77/§0.78/§0.81 已修 14 条）** —— 完整清单见
     `docs/72-代码审查问题清单-20260922.md`（已标注哪些修掉了）。
-    **已修**：A1~A8 全部、B10、B11。**未修**：B 类其余 13 条（主线程 IO 一批、
-    位图不回收、前置摄像头闪光灯、`SimpleDateFormat` 非线程安全、`BatchScreen` 用文案判成败等）
-    + C 类全部 + A6/A7 的收尾小项（见 §0.78 报告第四节）。
-    **其中最值得先做的一条**：`CameraScreen.kt` 的 letterbox 硬编码 `streamAspect = 3/4`
-    —— 它是 AR 视场修复里**唯一无法离线证伪的假设**，只能真机复测。
-    另外 §0.78 全部改动**都没有离线测试能覆盖渲染与内存**，真机验证清单见该报告第五节。
+    **已修**：A1~A8 全部、B10、B11、B15、B12、B9、B1。
+    **未修 9 条**：
+    - **内存 / 主线程**：B4（三个缓存无释放入口、`onTrimMemory` 未覆盖）、
+      B8（位图从不 `recycle()`，批处理 9 张峰值 100~200MB）、
+      B5 / B6 / B7（主线程 IO：EncryptedSharedPreferences 冷启动、设置页全目录遍历、
+      历史页 JSON 解析 + CSV 导出）
+    - **正确性**：B2（视场 90° 上界是窄场路径唯一防线，76.9~90° 的坍缩伪解可能直达用户）、
+      B3（AR 视场标定会被深域解污染）、B13（`BatchScreen` 用文案前缀判成败）
+    - **只能真机查**：B14（letterbox 硬编码 `streamAspect = 3/4` —— AR 视场修复里
+      **唯一无法离线证伪的假设**）
+    另有 C 类全部 + A6/A7 的收尾小项（见 `docs/74` 第四节）。
+    ⚠️ **§0.78 / §0.81 的改动都没有离线测试能覆盖渲染、相机与内存**，
+    真机验证清单见 `docs/74` 第五节。
+    **建议下一步**：B8（位图回收，改动小、收益直接）→ B4 → B5/B6/B7。
 12. **外部评估的剩余项（§0.79/§0.80 已做两条）** —— 见 `docs/76` 第五节。
     ~~发版流程脚本化~~ **已在 §0.80 完成**（`tools/release.py`）。
     仍未做三条：
@@ -87,6 +95,30 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-09-24（§0.81 第一组「会崩溃」的四条）** — 代码审查清单里后果最重的四条，
+  **179 项 0 失败**：
+  - **B15 `renderLiveOverlay` 返回入参**（`CameraScreen.kt`）：合成用的 `frame.copy()`
+    失败（native OOM）时 `?: return frame` —— 而调用方的 `finally` 随即 `recycle()`
+    这个 frame，Compose 拿到废位图 → `trying to use a recycled bitmap` **崩溃**。
+    改为返回 `Bitmap?`、失败返回 null，调用点判空跳过本次叠加
+  - **B12 `SimpleDateFormat` 非线程安全**（`SolveLogStore.kt`）：`line()` 有 synchronized
+    但 `dumpFailure()` 无同步，两者并发会污染同一个静态实例 → 轻则时间串错乱，
+    重则 `ArrayIndexOutOfBoundsException`。三处全改 `DateTimeFormatter`（不可变、线程安全）
+  - **B9 前置摄像头的 `FLASH_MODE_ON`**（`CameraScreen.kt`）：前置无闪光灯时
+    CameraX 在建链阶段抛 `IllegalArgumentException`，被外层 catch 兜成
+    「相机启动失败」→ **用户完全看不到预览**。改为按镜头保守判定，前置强制 OFF
+  - **B1 `OutOfMemoryError` 穿透 catch**（`LocalStarMatcher.kt` / `CameraScreen.kt`）：
+    `OutOfMemoryError` 是 `Error` 不是 `Exception`，调用方的 `catch (Exception)`
+    拦不住 —— 深域索引（55.6 万三角形，项目自己记过它在 512MB 堆里跑不完）构建失败
+    会让**长驻的预览认星分析线程直接崩掉**。`index()` 内包 `catch (Throwable)`
+    降级为空索引（本次求解失败但进程活着，空索引不缓存、下次可重试）；
+    另把 analyzer 的 `catch (Exception)` 也改成 `Throwable` 并加分钟级节流日志
+  - **踩坑记录**：B9 第一版写了 `provider.getCameraInfo(selector).hasFlashUnit()` ——
+    **CameraX 1.3.x 的 `ProcessCameraProvider` 没有这个方法**，编译直接失败。
+    这是**同类错误第二次**（上次是 `res.solve.numInliers` 应为 `nMatch`）：
+    凭印象写 API 名，代价各是一轮十几分钟的编译。**用不熟悉的接口前先查证。**
+  - 状态同步：`docs/72` 头部修复状态已更新（B 类剩 9 条）
 
 - **2026-09-23（§0.80 发版流程脚本化）** — 处理外部评估的风险（六）：
   「发版流程依赖多个隐性前提，且**缺了不报错** —— 签名密钥不在位时 `signingConfig`

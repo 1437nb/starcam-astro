@@ -5,8 +5,8 @@ import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
@@ -45,8 +45,21 @@ object SolveLogStore {
     private const val PREF = "starcam_solve_log"
     private const val KEY_ENABLED = "enabled"
 
-    val timeFmt = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
-    private val dirFmt = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+    /**
+     * §0.81：改用 `DateTimeFormatter` —— 它是**不可变、线程安全**的。
+     *
+     * 原来是 `SimpleDateFormat` 静态实例，而它**不是线程安全的**（内部 Calendar
+     * 是可变状态）。[line] 里有 `synchronized` 保护，但 [dumpFailure] 直接用
+     * `dirFmt` 且**无同步** —— 两者并发会污染同一个实例：轻则时间串错乱，
+     * 重则抛 `ArrayIndexOutOfBoundsException`（并发使用 SimpleDateFormat 的典型
+     * 崩溃形态）。日志路径自己吞异常，所以外在表现是**静默丢日志**，比崩溃更难查。
+     */
+    private val timeFmt: DateTimeFormatter =
+        DateTimeFormatter.ofPattern("MM-dd HH:mm:ss.SSS", Locale.US)
+    private val dirFmt: DateTimeFormatter =
+        DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.US)
+    private val reportTimeFmt: DateTimeFormatter =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.US)
 
     /** 是否启用。默认开启（用户要求 release 也能记录）。 */
     fun isEnabled(context: Context): Boolean =
@@ -74,7 +87,7 @@ object SolveLogStore {
             Log.i(TAG, msg)
             synchronized(this) {
                 val f = logFile(context)
-                f.appendText("${timeFmt.format(Date())}  $msg\n")
+                f.appendText("${timeFmt.format(LocalDateTime.now())}  $msg\n")
                 if (f.length() > LOG_MAX_CHARS) {
                     // 滚动：只留末尾一段，避免无限增长
                     val keep = f.readText().takeLast(LOG_MAX_CHARS / 2)
@@ -102,7 +115,7 @@ object SolveLogStore {
     ): File? {
         if (!isEnabled(context)) return null
         return try {
-            val dir = File(logDir(context), "fail-${dirFmt.format(Date())}")
+            val dir = File(logDir(context), "fail-${dirFmt.format(LocalDateTime.now())}")
             dir.mkdirs()
             File(dir, "report.json").writeText(report.toString(2))
 
@@ -167,7 +180,7 @@ object SolveLogStore {
     /** 建一份报告骨架（含设备与输入信息，便于对照） */
     fun newReport(context: Context, imagePath: String, w: Int, h: Int): JSONObject = JSONObject().apply {
         put("logVersion", 2)
-        put("time", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date()))
+        put("time", reportTimeFmt.format(LocalDateTime.now()))
         put("image", File(imagePath).name)          // 只留文件名，不写完整路径
         put("width", w)
         put("height", h)

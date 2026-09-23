@@ -170,6 +170,9 @@ fun CameraScreen(
     var previewLabel by remember { mutableStateOf("") }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val lastAnalyzeMs = remember { AtomicLong(0) }
+
+    // §0.81：AR 预览分析异常的日志节流（异常帧可能连续出现，避免刷屏日志）
+    val lastAnalyzeErrMs = remember { AtomicLong(0) }
     // §0.66：节流间隔改为运行时可调——低端机可降到 8~10 秒减轻负载，
     // 原先硬编码 5000 无法自适应。芯片核数少时默认放宽。
     val analyzeIntervalMs = remember {
@@ -353,12 +356,32 @@ fun CameraScreen(
                 .build().also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
+            // §0.81：前置摄像头基本都没有闪光灯。若此时 flashOn 仍为 true，
+            // setFlashMode(FLASH_MODE_ON) 会让 CameraX 在建链阶段抛
+            // IllegalArgumentException，被外层 catch 兜成「相机启动失败」——
+            // 用户看到红色提示、完全没有预览。
+            //
+            // 按镜头保守判定：**前置一律视为无闪光灯**。
+            // 没有走 CameraX 的 hasFlashUnit() —— 它要已绑定的 Camera 实例，而此处
+            // 必须在 build ImageCapture **之前**决定闪光灯模式；而
+            // ProcessCameraProvider 在 1.3.x 也没有 getCameraInfo(selector)
+            // （第一版就是误用了它，编译不过）。少数「后置却没有闪光灯」的机型
+            // 仍由外层 catch (Throwable) 兜住，不会崩。
+            val lensHasFlash = facing == CameraSelector.LENS_FACING_BACK
+            if (!lensHasFlash && flashOn) flashOn = false
+
             imageCapture = ImageCapture.Builder()
                 .setTargetAspectRatio(androidx.camera.core.AspectRatio.RATIO_4_3)
                 // 质量优先：星空弱光场景下 MINIMIZE_LATENCY 会以画质换速度，
                 // 识别对星点清晰度敏感（§0.15 提星质量是成功率关键）
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                .setFlashMode(if (flashOn) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF)
+                .setFlashMode(
+                    if (flashOn && lensHasFlash) {
+                        ImageCapture.FLASH_MODE_ON
+                    } else {
+                        ImageCapture.FLASH_MODE_OFF
+                    },
+                )
                 .build()
             // §0.42：实时预览认星 MVP——ImageAnalysis 每 5 秒对帧做本地匹配，
             // 命中后把星座连线叠加到预览（KEEP_ONLY_LATEST 丢帧，不阻塞相机）
@@ -445,17 +468,32 @@ fun CameraScreen(
                                 }
                             }
                         } else {
+                            // §0.81：renderLiveOverlay 在合成失败时返回 null（见其说明）。
+                            // 此时跳过本次叠加即可 —— 绝不能把即将回收的帧交出去。
                             val overlay = renderLiveOverlay(frame, res.solve.wcs!!)
-                            mainHandler.post {
-                                previewOverlay = overlay
-                                previewLabel = label
+                            if (overlay != null) {
+                                mainHandler.post {
+                                    previewOverlay = overlay
+                                    previewLabel = label
+                                }
                             }
                         }
                     } else {
                         mainHandler.post { previewOverlay = null; previewLabel = "" }
                     }
-                } catch (e: Exception) {
-                    // 单帧异常不能阻断 ImageAnalysis；下一帧仍可继续识别。
+                } catch (t: Throwable) {
+                    // §0.81：改成 Throwable —— OOM 等 Error 不是 Exception，原写法会漏掉
+                    // （深域索引构建路径已单独降级，这里是第二道保险）。
+                    // 单帧异常不能阻断 ImageAnalysis，下一帧仍可继续识别；
+                    // 但要留痕便于事后归因（§0.70 的目标），按分钟节流避免刷屏。
+                    val nowMs = System.currentTimeMillis()
+                    if (nowMs - lastAnalyzeErrMs.get() > 60_000L) {
+                        lastAnalyzeErrMs.set(nowMs)
+                        com.starcam.astro.data.SolveLogStore.line(
+                            context,
+                            "AR 预览分析异常(${t.javaClass.simpleName}): ${t.message}",
+                        )
+                    }
                 } finally {
                     // 预览每五秒产生一张约 2MB 的帧。显式回收临时位图，避免长时间
                     // 取景时持续累积 native heap；展示中的 overlay 由 Compose 状态持有。
@@ -1468,9 +1506,13 @@ private class SolarFrameCache {
  * §0.42：实时预览认星叠加层——把星座连线和星座名画到取景帧上。
  * 运行在 ImageAnalysis 后台线程，返回值经 mainHandler.post 赋给 previewOverlay。
  * 使用全限定类名，避免改动 import 区。
+ *
+ * §0.81：合成失败（`copy` 遇 native OOM 返回 null）时返回 **null**，调用方跳过本次叠加。
+ * 曾在此处 `?: return frame` —— 返回入参本身，而调用方的 `finally` 随即会
+ * `recycle()` 它，Compose 拿到废位图后触发 "trying to use a recycled bitmap" 崩溃。
  */
-private fun renderLiveOverlay(frame: Bitmap, wcs: WcsTransform): Bitmap {
-    val out = frame.copy(Bitmap.Config.ARGB_8888, true) ?: return frame
+private fun renderLiveOverlay(frame: Bitmap, wcs: WcsTransform): Bitmap? {
+    val out = frame.copy(Bitmap.Config.ARGB_8888, true) ?: return null
     val w = out.width
     val h = out.height
     val canvas = AndroidCanvas(out)

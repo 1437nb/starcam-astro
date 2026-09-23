@@ -681,7 +681,20 @@ object LocalStarMatcher {
         indexCache[mag]?.let { return it }
         synchronized(this) {
             indexCache[mag]?.let { return it }
-            return buildIndex(mag).also { indexCache[mag] = it }
+            return try {
+                buildIndex(mag).also { indexCache[mag] = it }
+            } catch (t: Throwable) {
+                // §0.81：索引构建可能 OOM —— 深域（mag≤6.5）是 55.6 万三角形，
+                // 项目自己记录过它「在 512MB 堆里连求解阶段都跑不完」。
+                //
+                // **OutOfMemoryError 是 Error 不是 Exception**，调用方的
+                // `catch (e: Exception)` 拦不住，会让 ImageAnalysis 分析线程直接崩掉
+                // （预览认星是长驻路径，用户会看到 App 闪退）。
+                //
+                // 这里降级为「返回空索引」：后续查询查不到候选 → 本次求解失败，
+                // 但进程活着、下一帧还能继续。空索引**不写缓存**，下次仍可重试构建。
+                StarIndex(HashMap())
+            }
         }
     }
 
