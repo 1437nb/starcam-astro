@@ -60,7 +60,7 @@ def token() -> str:
         p = subprocess.run(
             ["git", "credential", "fill"],
             input="protocol=https\nhost=github.com\n\n",
-            capture_output=True, text=True, timeout=40, cwd=r"C:\starword",
+            capture_output=True, text=True, timeout=90, cwd=r"C:\starword",
         )
     except subprocess.TimeoutExpired:
         print("ERROR: git credential fill 超时（凭据管理器可能在等待交互）", file=sys.stderr)
