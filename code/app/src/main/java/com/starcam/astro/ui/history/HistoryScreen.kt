@@ -34,10 +34,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +58,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -70,10 +73,22 @@ fun HistoryScreen(
 ) {
     val context = LocalContext.current
     val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
-    var entries by remember { mutableStateOf(HistoryStore.load(context)) }
+    // §0.81：下面几处原本都在**组合期（主线程）**碰磁盘 —— HistoryStore.load 要解析
+    // JSON，StatsStore.summary 要解析 ≤500 条记录并算平均，CSV 导出还要走
+    // contentResolver(Binder) + 全量写盘。全部改为异步，初值给空。
+    var entries by remember { mutableStateOf<List<HistoryStore.Entry>>(emptyList()) }
     var deleting by remember { mutableStateOf<HistoryStore.Entry?>(null) }
     var toast by remember { mutableStateOf<String?>(null) }
-    val stats = remember(entries) { StatsStore.summary(context) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        entries = withContext(Dispatchers.IO) { HistoryStore.load(context) }
+    }
+    val stats by produceState(
+        initialValue = StatsStore.Summary(0, 0.0, 0L, 0L),
+        entries,
+    ) {
+        value = withContext(Dispatchers.IO) { StatsStore.summary(context) }
+    }
     val dayFmt = remember(isEn) {
         SimpleDateFormat(
             if (isEn) "EEE, MMM d, yyyy" else "yyyy年M月d日 EEEE",
@@ -110,9 +125,14 @@ fun HistoryScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    HistoryStore.remove(context, entry.timestamp)
-                    entries = HistoryStore.load(context)
-                    deleting = null
+                    // §0.81：删除要重写 SharedPreferences（JSON 序列化）—— 移出主线程
+                    scope.launch {
+                        entries = withContext(Dispatchers.IO) {
+                            HistoryStore.remove(context, entry.timestamp)
+                            HistoryStore.load(context)
+                        }
+                        deleting = null
+                    }
                 }) { Text(com.starcam.astro.ui.I18n.delete, color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
@@ -134,15 +154,25 @@ fun HistoryScreen(
                     if (entries.isNotEmpty()) {
                         OutlinedButton(
                             onClick = {
-                                val desc = HistoryStore.exportCsv(context, entries)
-                                toast = desc?.let { com.starcam.astro.ui.I18n.History.exportSuccess(it) } ?: com.starcam.astro.ui.I18n.History.exportFailed
+                                // §0.81：导出会走 contentResolver(Binder) + 全量写盘
+                                scope.launch {
+                                    val desc = withContext(Dispatchers.IO) {
+                                        HistoryStore.exportCsv(context, entries)
+                                    }
+                                    toast = desc?.let {
+                                        com.starcam.astro.ui.I18n.History.exportSuccess(it)
+                                    } ?: com.starcam.astro.ui.I18n.History.exportFailed
+                                }
                             },
                             modifier = Modifier.padding(end = 4.dp),
                         ) { Text(com.starcam.astro.ui.I18n.History.export) }
                         OutlinedButton(
                             onClick = {
-                                HistoryStore.clear(context)
-                                entries = emptyList()
+                                // §0.81：clear 也是 SharedPreferences 写入
+                                scope.launch {
+                                    withContext(Dispatchers.IO) { HistoryStore.clear(context) }
+                                    entries = emptyList()
+                                }
                             },
                             modifier = Modifier.padding(end = 8.dp),
                         ) { Text(com.starcam.astro.ui.I18n.History.clear) }

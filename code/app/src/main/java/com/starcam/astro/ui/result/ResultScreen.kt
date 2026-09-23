@@ -463,6 +463,8 @@ private fun ErrorContent(
     onBack: () -> Unit,
     onOpenViewer: (Bitmap, Bitmap) -> Unit,
 ) {
+    // §0.81：全分辨率诊断图合成要移出主线程（见下方 clickable）
+    val scope = rememberCoroutineScope()
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -479,7 +481,14 @@ private fun ErrorContent(
                     .clip(RoundedCornerShape(16.dp))
                     .background(Color.Black)
                     .clickable {
-                        onOpenViewer(bitmap, renderDiagnosticBitmap(bitmap, diagnostics))
+                        // §0.81：renderDiagnosticBitmap 会新建全分辨率位图（2200px 级
+                        // ≈14MB）并跑一遍全星表投影 —— 原先在点击回调（主线程）里同步执行。
+                        scope.launch {
+                            val anno = withContext(Dispatchers.IO) {
+                                renderDiagnosticBitmap(bitmap, diagnostics)
+                            }
+                            onOpenViewer(bitmap, anno)
+                        }
                     },
             ) {
                 Image(

@@ -699,6 +699,29 @@ object LocalStarMatcher {
     }
 
     /**
+     * §0.81：归还可重建的**托管堆**缓存（内存压力时由 [StarCamApplication] 调用）。
+     *
+     * 这三份都是纯派生数据、随时可重建：[indexCache]（深域单域就是 55.6 万三角形）、
+     * 打分表 [cachedScoreTable]、第 4 星验证网格 [cachedGrid]。此前它们
+     * **没有任何释放入口** —— v1.5.57 的 `onTrimMemory` 只归还原生侧的 8 档索引
+     * （约 11MB），托管堆这几份全留着，低端机上会加剧被系统杀掉的风险。
+     *
+     * 代价：下次求解重建一次（浅域约 0.4s；深域约 9s，且只在窄场失败路径上付，
+     * 之后又会命中缓存）。当前实现是全清；若要更细粒度，可以只清深域槽。
+     *
+     * 线程安全：与写入侧用同一把 `synchronized(this)` 保护。
+     */
+    fun trimCaches() {
+        indexCache.clear()
+        synchronized(this) {
+            cachedScoreTable = null
+            cachedScoreTableMag = Float.NaN
+            cachedGrid = null
+            cachedGridMag = Float.NaN
+        }
+    }
+
+    /**
      * §0.62 候选打分：把星表三角形 (t) 与照片三角形 (a,b,c) 做相似拟合，
      * 统计有多少颗星表星能落在照片检测星上（[ALIGN_TOL_PX] 内）。
      * 返回 intArrayOf(对齐星数 aligned, 落入画面的星表星数 inFrame)，

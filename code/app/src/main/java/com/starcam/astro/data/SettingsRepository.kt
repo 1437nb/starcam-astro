@@ -49,22 +49,41 @@ class SettingsRepository(context: Context) {
         }
     }
 
+    /**
+     * §0.81：apiKey 的内存缓存。
+     *
+     * [securePrefs] 每次 `getString` 都要走一遍 AES-GCM 解密，而 [hasApiKey] 会在
+     * **首页组合期**被读（`StarCamApp` 的 `HomeScreen(hasApiKey = ...)`）。
+     * 冷启动首次读还要连带初始化 Android Keystore，实测 100ms~1s —— 全在主线程。
+     * 首次读后缓存住，后续零成本；写入时同步更新。
+     */
+    @Volatile
+    private var apiKeyCache: String? = null
+
     /** astrometry.net API Key（到 https://nova.astrometry.net/api_help 免费注册获取） */
     var apiKey: String
         get() {
+            apiKeyCache?.let { return it }
             val fromSecure = securePrefs.getString(KEY_API_KEY, "") ?: ""
-            if (fromSecure.isNotEmpty()) return fromSecure
-            // 迁移：旧版本明文存的 key 读出来改写进加密存储，并清掉明文项
-            val legacy = prefs.getString(KEY_API_KEY, "") ?: ""
-            if (legacy.isNotEmpty() && securePrefs !== prefs) {
-                securePrefs.edit().putString(KEY_API_KEY, legacy).apply()
-                prefs.edit().remove(KEY_API_KEY).apply()
+            val value = if (fromSecure.isNotEmpty()) {
+                fromSecure
+            } else {
+                // 迁移：旧版本明文存的 key 读出来改写进加密存储，并清掉明文项
+                val legacy = prefs.getString(KEY_API_KEY, "") ?: ""
+                if (legacy.isNotEmpty() && securePrefs !== prefs) {
+                    securePrefs.edit().putString(KEY_API_KEY, legacy).apply()
+                    prefs.edit().remove(KEY_API_KEY).apply()
+                }
+                legacy
             }
-            return legacy
+            apiKeyCache = value
+            return value
         }
         set(value) {
-            securePrefs.edit().putString(KEY_API_KEY, value.trim()).apply()
+            val v = value.trim()
+            securePrefs.edit().putString(KEY_API_KEY, v).apply()
             if (securePrefs !== prefs) prefs.edit().remove(KEY_API_KEY).apply()
+            apiKeyCache = v
         }
 
     /** 服务器地址（默认 nova.astrometry.net，可改自建服务） */

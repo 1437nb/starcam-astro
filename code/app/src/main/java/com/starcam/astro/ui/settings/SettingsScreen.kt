@@ -32,9 +32,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +50,9 @@ import com.starcam.astro.data.SettingsRepository
 import com.starcam.astro.ui.theme.AppThemeMode
 import com.starcam.astro.ui.theme.LocaleState
 import com.starcam.astro.ui.theme.ThemeState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 设置页：语言、主题、astrometry.net API Key 与服务器地址 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -68,12 +73,22 @@ fun SettingsScreen(
     var logEnabled by remember {
         mutableStateOf(com.starcam.astro.data.SolveLogStore.isEnabled(context))
     }
-    var logStats by remember {
-        mutableStateOf(com.starcam.astro.data.SolveLogStore.stats(context))
+    // §0.81：日志统计会 `walkTopDown` 遍历整个日志目录并累加文件大小，logDir 还会
+    // mkdirs —— 两者都不能放在组合期（每次进设置页都会卡一下主线程）。
+    // 改为异步取，初值给空串，由 LaunchedEffect 触发首次加载。
+    var logStats by remember { mutableStateOf("") }
+    var logDirPath by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    suspend fun loadLogInfo() {
+        withContext(Dispatchers.IO) {
+            logStats = com.starcam.astro.data.SolveLogStore.stats(context)
+            logDirPath = com.starcam.astro.data.SolveLogStore.logDir(context).absolutePath
+        }
     }
     fun refreshStats() {
-        logStats = com.starcam.astro.data.SolveLogStore.stats(context)
+        scope.launch { loadLogInfo() }
     }
+    LaunchedEffect(Unit) { loadLogInfo() }
     val isEn = LocaleState.isEnglish
 
     Scaffold(
@@ -244,14 +259,19 @@ fun SettingsScreen(
                 OutlinedButton(onClick = { refreshStats() }) { Text("刷新统计") }
                 OutlinedButton(
                     onClick = {
-                        com.starcam.astro.data.SolveLogStore.clearAll(context)
-                        refreshStats()
+                        // §0.81：clearAll 会 deleteRecursively 整个日志目录，不能放主线程
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                com.starcam.astro.data.SolveLogStore.clearAll(context)
+                            }
+                            refreshStats()
+                        }
                     },
                 ) { Text("清空日志") }
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                "日志目录：${com.starcam.astro.data.SolveLogStore.logDir(context).absolutePath}",
+                "日志目录：$logDirPath",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )

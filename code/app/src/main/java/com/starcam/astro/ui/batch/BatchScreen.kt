@@ -70,48 +70,60 @@ fun BatchScreen(
             states = states.toMutableList().also { it[i] = 1 to "" }
             val note: String = try {
                 withContext(Dispatchers.IO) {
-                    val bmp = ImageUtils.decodeSampledBitmap(path, 2200)
-                        ?: return@withContext "无法读取照片文件"
-                    val result = StarSolver.solve(context, bmp, path, settings) { }
-                        ?: return@withContext "未能识别（亮星不足或视场不支持）"
-                    val solve = result.solve
-                    // §0.58/§0.59 太阳系天体标注：需拍摄时间 + 位置。位置优先 EXIF GPS，
-                    // 缺失时用当前定位兜底（批量导出没有逐张提示的界面，位置来源在
-                    // 单张结果页展示）
-                    val solarFallback =
-                        if (com.starcam.astro.astro.ExifPriorsReader.needsLocationFallback(path)) {
-                            runCatching { LocationHelper(context).getBestLocation() }.getOrNull()
-                                ?.let { it.latitude to it.longitude }
-                        } else {
-                            null
-                        }
-                    val solar = com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(
-                        path,
-                        solarFallback,
-                    )
-                    val out = OverlayRenderer.render(bmp, solve, solarPositions = solar)
-                        ?: return@withContext "渲染失败（结果缺坐标系）"
-                    val name = "StarCam_${fmt.format(Date())}_$i.jpg"
-                    val loc = ImageUtils.saveBitmapToGallery(context, out, name)
+                    // §0.81：bmp / out 都是 2200px 级位图（各约 14MB）。9 张串行处理
+                    // 若都不回收，原生堆峰值可达 100~200MB。用可变引用 + try/finally
+                    // 兜住下面所有 return 路径（读不出文件 / 未识别 / 渲染失败）。
+                    var bmpRef: android.graphics.Bitmap? = null
+                    var outRef: android.graphics.Bitmap? = null
                     try {
-                        HistoryStore.save(
-                            context,
-                            HistoryStore.Entry(
-                                timestamp = System.currentTimeMillis(),
-                                imagePath = path,
-                                raDeg = solve.raDeg,
-                                decDeg = solve.decDeg,
-                                fovDeg = solve.fieldWidthDeg,
-                                engine = "批量导出",
-                                constellation = HistoryStore.nearestConstellationZh(
-                                    solve.raDeg, solve.decDeg,
-                                ),
-                            ),
+                        val bmp = ImageUtils.decodeSampledBitmap(path, 2200)
+                            ?: return@withContext "无法读取照片文件"
+                        bmpRef = bmp
+                        val result = StarSolver.solve(context, bmp, path, settings) { }
+                            ?: return@withContext "未能识别（亮星不足或视场不支持）"
+                        val solve = result.solve
+                        // §0.58/§0.59 太阳系天体标注：需拍摄时间 + 位置。位置优先 EXIF GPS，
+                        // 缺失时用当前定位兜底（批量导出没有逐张提示的界面，位置来源在
+                        // 单张结果页展示）
+                        val solarFallback =
+                            if (com.starcam.astro.astro.ExifPriorsReader.needsLocationFallback(path)) {
+                                runCatching { LocationHelper(context).getBestLocation() }.getOrNull()
+                                    ?.let { it.latitude to it.longitude }
+                            } else {
+                                null
+                            }
+                        val solar = com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(
+                            path,
+                            solarFallback,
                         )
-                    } catch (_: Exception) {
+                        val out = OverlayRenderer.render(bmp, solve, solarPositions = solar)
+                            ?: return@withContext "渲染失败（结果缺坐标系）"
+                        outRef = out
+                        val name = "StarCam_${fmt.format(Date())}_$i.jpg"
+                        val loc = ImageUtils.saveBitmapToGallery(context, out, name)
+                        try {
+                            HistoryStore.save(
+                                context,
+                                HistoryStore.Entry(
+                                    timestamp = System.currentTimeMillis(),
+                                    imagePath = path,
+                                    raDeg = solve.raDeg,
+                                    decDeg = solve.decDeg,
+                                    fovDeg = solve.fieldWidthDeg,
+                                    engine = "批量导出",
+                                    constellation = HistoryStore.nearestConstellationZh(
+                                        solve.raDeg, solve.decDeg,
+                                    ),
+                                ),
+                            )
+                        } catch (_: Exception) {
+                        }
+                        saved++
+                        loc ?: "已识别但保存相册失败"
+                    } finally {
+                        bmpRef?.takeIf { !it.isRecycled }?.recycle()
+                        outRef?.takeIf { !it.isRecycled }?.recycle()
                     }
-                    saved++
-                    loc ?: "已识别但保存相册失败"
                 }
             } catch (e: Exception) {
                 "处理异常：${e.message ?: "未知错误"}"
