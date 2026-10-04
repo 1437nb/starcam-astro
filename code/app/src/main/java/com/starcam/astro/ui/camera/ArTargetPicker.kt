@@ -87,7 +87,7 @@ fun ArTargetPickerDialog(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 LazyColumn(Modifier.height(420.dp)) {
                     item {
                         SectionHeader(if (isEn) "Messier Objects" else "梅西耶天体")
@@ -114,7 +114,7 @@ fun ArTargetPickerDialog(
                 Text(
                     if (isEn) "✕  Close" else "✕  关闭",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 13.sp,
+                    style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
                         .clickable(onClick = onDismiss)
@@ -130,7 +130,7 @@ private fun SectionHeader(text: String) {
     Text(
         text,
         color = MaterialTheme.colorScheme.primary,
-        fontSize = 12.sp,
+        style = MaterialTheme.typography.bodySmall,
         fontWeight = FontWeight.Bold,
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
     )

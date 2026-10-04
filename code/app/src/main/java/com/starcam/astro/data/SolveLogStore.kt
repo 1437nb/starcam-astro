@@ -216,8 +216,18 @@ object SolveLogStore {
         }
     }
 
-    /** 写入检出星点（坐标 + 亮度），供开发机对照 */
-    fun setStars(report: JSONObject, stars: List<com.starcam.astro.astro.DetectedStar>) {
+    /**
+     * 写入检出星点（坐标 + 亮度），供开发机对照。
+     *
+     * §0.86：[total] 是**未受上限截断**的真实检出总数（simplexy 的 npeaks）。
+     * 不传时退化为 [stars] 的长度 —— 那个列表被 SEP_MATCH_MAX 压住，
+     * 真实星空照片恒为 ~197，读者无法从它判断照片的星密度。
+     */
+    fun setStars(
+        report: JSONObject,
+        stars: List<com.starcam.astro.astro.DetectedStar>,
+        total: Int = stars.size,
+    ) {
         try {
             val arr = JSONArray()
             val n = minOf(stars.size, MAX_STARS_IN_REPORT)
@@ -228,7 +238,7 @@ object SolveLogStore {
                 })
             }
             report.put("stars", arr)
-            report.put("starCount", stars.size)
+            report.put("starCount", if (total > 0) total else stars.size)
         } catch (_: Throwable) {
         }
     }

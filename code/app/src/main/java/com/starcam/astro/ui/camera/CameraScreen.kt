@@ -958,11 +958,11 @@ fun CameraScreen(
                     Text(
                         it,
                         color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                            .background(Color.Black.copy(alpha = 0.45f), MaterialTheme.shapes.medium)
                             .padding(horizontal = 14.dp, vertical = 8.dp),
                     )
                 }
@@ -971,12 +971,12 @@ fun CameraScreen(
                     Text(
                         com.starcam.astro.ui.I18n.Ar.calibratedHint,
                         color = Color(0xFFB9F6CA),
-                        fontSize = 10.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 12.dp)
                             .padding(top = if (focusHint || message != null) 156.dp else 104.dp)
-                            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.4f), MaterialTheme.shapes.small)
                             .padding(horizontal = 6.dp, vertical = 3.dp),
                     )
                 }
@@ -1005,7 +1005,7 @@ fun CameraScreen(
                 if (previewLabel.isNotEmpty()) {
                     Surface(
                         color = Color(0xCC1A237E),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = MaterialTheme.shapes.medium,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .padding(top = 64.dp),
@@ -1178,7 +1178,7 @@ fun CameraScreen(
             message?.let {
                 Surface(
                     color = Color(0xCC000000),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 64.dp),
@@ -1195,7 +1195,7 @@ fun CameraScreen(
             if (focusHint) {
                 Surface(
                     color = Color(0xCC1A237E),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 64.dp),
@@ -1214,7 +1214,7 @@ fun CameraScreen(
                 val isSky = pointingState.altDeg > 0.0
                 Surface(
                     color = if (isSky) Color(0xAA111827) else Color(0xAA7F1D1D),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = MaterialTheme.shapes.large,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = if (focusHint || message != null) 116.dp else 64.dp),
@@ -1252,7 +1252,7 @@ fun CameraScreen(
                     Text(
                         text,
                         color = if (isSky) Color(0xFFE0E7FF) else Color(0xFFFECACA),
-                        fontSize = 11.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     )
@@ -1299,7 +1299,7 @@ fun CameraScreen(
                         Text(
                             "${"%.0f".format(roll)}°",
                             color = if (level) Color(0xFF69F0AE) else Color.White,
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(top = 14.dp),
                         )
@@ -1327,7 +1327,7 @@ fun CameraScreen(
                             com.starcam.astro.ui.I18n.Ar.fovLabel.format(arFovDeg)
                         },
                         color = if (fovAutoCalibrated) Color(0xFFB9F6CA) else Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                     )
                     Slider(
@@ -1355,7 +1355,7 @@ fun CameraScreen(
                     ) {
                         Text(
                             if (proMode) com.starcam.astro.ui.I18n.Pro.proOn else com.starcam.astro.ui.I18n.Pro.proOff,
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                             color = if (proMode) MaterialTheme.colorScheme.primary else Color.White,
                         )
@@ -1367,13 +1367,13 @@ fun CameraScreen(
                             "ISO ${com.starcam.astro.astro.CameraMath.clampIso(proIso, isoRangeState)} · " +
                                 com.starcam.astro.astro.CameraMath.shutterLabel(sec),
                             color = Color.White,
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
                             com.starcam.astro.ui.I18n.Pro.isoLabel,
                             color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 10.sp,
+                            style = MaterialTheme.typography.labelSmall,
                         )
                         Slider(
                             value = proIso.toFloat(),
@@ -1388,7 +1388,7 @@ fun CameraScreen(
                         Text(
                             com.starcam.astro.ui.I18n.Pro.shutterLabel,
                             color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 10.sp,
+                            style = MaterialTheme.typography.labelSmall,
                         )
                         Slider(
                             value = proShutterIdx.toFloat(),
@@ -1400,7 +1400,7 @@ fun CameraScreen(
                             Text(
                                 com.starcam.astro.ui.I18n.Pro.longExposureWarn,
                                 color = Color(0xFFFFE082),
-                                fontSize = 11.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.padding(horizontal = 8.dp),
                             )
@@ -1413,7 +1413,7 @@ fun CameraScreen(
                     Text(
                         com.starcam.astro.ui.I18n.Camera.evLabel(evIndex),
                         color = Color.White,
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     if (maxEvIndex > 0) {
@@ -1429,7 +1429,7 @@ fun CameraScreen(
                 if (evIndex > 0) {
                     Surface(
                         color = Color(0xCC1A237E),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = MaterialTheme.shapes.medium,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 8.dp),
@@ -1437,7 +1437,7 @@ fun CameraScreen(
                         Text(
                             com.starcam.astro.ui.I18n.Camera.nightGuidance,
                             color = Color.White,
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }

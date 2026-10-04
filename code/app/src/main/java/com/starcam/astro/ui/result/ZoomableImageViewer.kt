@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -195,7 +196,7 @@ fun ZoomableImageViewer(
                 Text(
                     title,
                     color = Color.White,
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                 )
@@ -211,7 +212,7 @@ fun ZoomableImageViewer(
                 Text(
                     if (showAnnotated) com.starcam.astro.ui.I18n.original else com.starcam.astro.ui.I18n.annotation,
                     color = Color.White,
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .background(Color.Black.copy(alpha = 0.55f))
@@ -227,7 +228,7 @@ fun ZoomableImageViewer(
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .padding(start = 8.dp)
-                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                            .background(Color.Black.copy(alpha = 0.55f), MaterialTheme.shapes.small)
                             .clickable { showLayerPanel = !showLayerPanel }
                             .padding(horizontal = 12.dp, vertical = 3.dp),
                     )
@@ -252,13 +253,13 @@ fun ZoomableImageViewer(
                         .align(Alignment.TopEnd)
                         .padding(top = 56.dp, end = 12.dp),
                     color = Color.Black.copy(alpha = 0.72f),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.medium,
                 ) {
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                         Text(
                             com.starcam.astro.ui.I18n.Layers.panelTitle,
                             color = Color.White,
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(4.dp))
@@ -298,7 +299,7 @@ fun ZoomableImageViewer(
             Text(
                 com.starcam.astro.ui.I18n.Viewer.gestureHint,
                 color = Color.White.copy(alpha = 0.6f),
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = if (cardObject != null) 150.dp else 20.dp)
@@ -323,6 +324,6 @@ private fun ViewerLayerToggle(label: String, checked: Boolean, onChange: (Boolea
             fontSize = 15.sp,
         )
         Spacer(Modifier.width(6.dp))
-        Text(label, color = Color.White, fontSize = 12.sp)
+        Text(label, color = Color.White, style = MaterialTheme.typography.bodySmall)
     }
 }

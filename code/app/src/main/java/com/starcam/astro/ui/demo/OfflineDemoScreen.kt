@@ -110,9 +110,9 @@ fun OfflineDemoScreen(
             Button(
                 onClick = onRandomDemo,
                 modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(14.dp),
+                shape = MaterialTheme.shapes.large,
             ) {
-                Text(com.starcam.astro.ui.I18n.Demo.randomSky, fontSize = 16.sp)
+                Text(com.starcam.astro.ui.I18n.Demo.randomSky, style = MaterialTheme.typography.bodyLarge)
             }
             Spacer(Modifier.height(16.dp))
             Text(
@@ -166,7 +166,7 @@ private fun OfflinePhotoCell(file: File, onClick: () -> Unit) {
         // 照片名小标（如 5040）
         Text(
             file.name.removePrefix("photo").removeSuffix(".jpg"),
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .align(Alignment.BottomStart)

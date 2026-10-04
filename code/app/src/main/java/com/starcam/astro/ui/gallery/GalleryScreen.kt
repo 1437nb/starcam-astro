@@ -129,7 +129,7 @@ fun GalleryScreen(
                         }) {
                             Text(
                                 if (multi) com.starcam.astro.ui.I18n.Gallery.cancelMulti else com.starcam.astro.ui.I18n.Gallery.multiSelect,
-                                fontSize = 15.sp,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary,
                             )
                         }
@@ -153,7 +153,7 @@ fun GalleryScreen(
                     ) {
                         Text(
                             com.starcam.astro.ui.I18n.Gallery.identifySelected(selected.size, maxSelect),
-                            fontSize = 16.sp,
+                            style = MaterialTheme.typography.bodyLarge,
                         )
                     }
                 }
@@ -249,7 +249,7 @@ private fun GalleryCell(
                     .background(
                         if (selected) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                        RoundedCornerShape(6.dp),
+                        MaterialTheme.shapes.small,
                     ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -257,7 +257,7 @@ private fun GalleryCell(
                     Text(
                         "$selectionOrder",
                         color = MaterialTheme.colorScheme.onPrimary,
-                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
@@ -274,7 +274,7 @@ private fun PermissionDenied(onRetry: () -> Unit, modifier: Modifier = Modifier)
     ) {
         Text(
             com.starcam.astro.ui.I18n.Gallery.permissionTitle,
-            fontSize = 18.sp,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
             textAlign = TextAlign.Center,
         )

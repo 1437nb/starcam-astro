@@ -186,13 +186,13 @@ fun BatchScreen(
                                 Text(
                                     File(paths[i]).name,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
+                                    style = MaterialTheme.typography.titleSmall,
                                     maxLines = 1,
                                 )
                                 if (note.isNotEmpty()) {
                                     Text(
                                         note,
-                                        fontSize = 12.sp,
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
@@ -218,7 +218,7 @@ fun BatchScreen(
                         Spacer(Modifier.height(16.dp))
                         Text(
                             com.starcam.astro.ui.I18n.Batch.exportNotice,
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 4.dp),
                         )

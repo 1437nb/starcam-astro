@@ -193,7 +193,7 @@ fun HistoryScreen(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     com.starcam.astro.ui.I18n.History.emptyDesc,
-                    fontSize = 13.sp,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -213,7 +213,7 @@ fun HistoryScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
                         ),
                     ) {
                         Text(
@@ -227,7 +227,7 @@ fun HistoryScreen(
                             } else {
                                 com.starcam.astro.ui.I18n.History.noStats
                             },
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         )
                     }
@@ -237,7 +237,7 @@ fun HistoryScreen(
                         Text(
                             day,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
+                            style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         )
@@ -294,7 +294,7 @@ private fun HistoryCell(
         } else {
             Text(
                 com.starcam.astro.ui.I18n.History.imageInvalid,
-                fontSize = 10.sp,
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.align(Alignment.Center),
@@ -306,7 +306,7 @@ private fun HistoryCell(
                 if (entry.constellation.isNotEmpty()) append(entry.constellation)
                 append(" ").append(timeFmt.format(Date(entry.timestamp)))
             },
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             modifier = Modifier
@@ -324,7 +324,7 @@ private fun HistoryCell(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(3.dp)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), MaterialTheme.shapes.small)
                 .clickable(onClick = onDelete)
                 .padding(horizontal = 5.dp, vertical = 2.dp),
         )

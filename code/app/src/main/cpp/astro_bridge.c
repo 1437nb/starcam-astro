@@ -611,9 +611,16 @@ static jstring extract_stars_impl(JNIEnv* env, jfloatArray gray, jint w, jint h,
             } else {
                 top_k_by_flux(f, k, idx);
             }
-            size_t sz = 160 + (size_t)k * 64;
+            size_t sz = 192 + (size_t)k * 64;
             out = (char*)malloc(sz);
-            int pos = snprintf(out, sz, "{\"ok\":true,\"n\":%d,\"x\":[", k);
+            /* §0.86 "npeaks" = simplexy 在本幅图上检出的峰值总数（**未截断**）。
+             * 为什么必须单独报：调用方按 maxStars 截断后，"到底检出了多少"这件事
+             * 就丢失了 —— 真实星空照片的 npeaks 常达数百上千，截断到 200 后 UI
+             * 永远显示 ~197，变成一个没有信息量的常数（用户实测 187/195/197）。
+             * 数组仍按 maxStars 截断：喂给匹配器的量有安全上限（SEP_MATCH_MAX），
+             * 但**计数**不该受它约束。 */
+            int pos = snprintf(out, sz, "{\"ok\":true,\"n\":%d,\"npeaks\":%d,\"x\":[", k,
+                               s.npeaks);
             for (int i = 0; i < k; i++)
                 pos += snprintf(out + pos, sz - pos, "%s%.3f", i ? "," : "",
                                 starxy_get_x(f, idx[i]));

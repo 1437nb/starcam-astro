@@ -117,7 +117,7 @@ fun SettingsScreen(
                 .padding(16.dp),
         ) {
             // 语言设置（支持跟随系统 / 简体中文 / English 即时生效）
-            Text(if (isEn) "Language" else "语言", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Text(if (isEn) "Language" else "语言", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
                 if (isEn) "Choose display language for UI, constellation names, star names, and Messier objects."
@@ -146,11 +146,11 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(20.dp))
 
             // 外观（§0.33）：夜视红为暗适应模式——红光不破坏夜间视力，建议观星时使用
-            Text(if (isEn) "Appearance" else "外观", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Text(if (isEn) "Appearance" else "外观", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
                 if (isEn) "Night Red is recommended for dark adaptation: pure black background + low-intensity red light."
@@ -184,11 +184,11 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(20.dp))
 
             // 传感器辅助粗定标
-            Text(com.starcam.astro.ui.I18n.Settings.sensorSection, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Text(com.starcam.astro.ui.I18n.Settings.sensorSection, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier
@@ -216,11 +216,11 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(20.dp))
 
             // §0.70 识别日志：用户报告「识别不了」时，这里是取证据的入口
-            Text("识别日志", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Text("识别日志", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier
@@ -252,7 +252,7 @@ fun SettingsScreen(
             Text(
                 logStats,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -273,14 +273,14 @@ fun SettingsScreen(
             Text(
                 "日志目录：$logDirPath",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(20.dp))
 
-            Text(com.starcam.astro.ui.I18n.Settings.engineSection, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Text(com.starcam.astro.ui.I18n.Settings.engineSection, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
                 com.starcam.astro.ui.I18n.Settings.engineDesc,
@@ -315,10 +315,10 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(20.dp))
 
-            Text(com.starcam.astro.ui.I18n.Settings.onlineSection, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Text(com.starcam.astro.ui.I18n.Settings.onlineSection, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
                 com.starcam.astro.ui.I18n.Settings.onlineDesc,
@@ -355,10 +355,10 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(20.dp))
 
-            Text(com.starcam.astro.ui.I18n.Settings.serverSection, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Text(com.starcam.astro.ui.I18n.Settings.serverSection, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = serverUrl,
@@ -383,7 +383,7 @@ fun SettingsScreen(
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) {
-                Text(com.starcam.astro.ui.I18n.save, fontSize = 16.sp)
+                Text(com.starcam.astro.ui.I18n.save, style = MaterialTheme.typography.bodyLarge)
             }
 
             if (saved) {

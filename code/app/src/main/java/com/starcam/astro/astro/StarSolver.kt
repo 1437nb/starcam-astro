@@ -314,7 +314,7 @@ object StarSolver {
         imagePath: String,
         settings: SettingsRepository,
         onDiagnostics: (SolveDiagnostics) -> Unit = {},
-        onStarsDetected: (List<SolveDiagnostics.DiagStar>) -> Unit = {},
+        onStarsDetected: (List<SolveDiagnostics.DiagStar>, Int) -> Unit = { _, _ -> },
         onProgress: (String) -> Unit,
     ): EngineResult? = withContext(Dispatchers.IO) {
         val fov = readFovDeg(imagePath)
@@ -324,6 +324,8 @@ object StarSolver {
         var currentDisplay = display
         val enginesTried = ArrayList<String>()
         var lastLocalStars: List<DetectedStar>? = null
+        // §0.86 未截断的真实检出总数（UI 显示用；受上限约束的是列表，不是计数）
+        var lastLocalStarTotal = 0
         // 本地弱解被官方复核拒绝后，用自研视场作为官方流程的 scale 先验
         // （避免复核不一致后再走 12s+16s 盲解两段，§0.33.3 性能修复）
         var fovOverride: Double? = null
@@ -569,23 +571,31 @@ object StarSolver {
                 SolveEngine.LOCAL_MATCHER -> {
                     enginesTried.add("内置星表")
                     onProgress("本地星表识别中（内置 ${StarCatalogData.stars.size} 颗亮星）…")
+                    // §0.88：box-blur 备用星表。声明在 try 之外，供「主星表匹配失败后重试」使用。
+                    var boxBlurStars: List<DetectedStar>? = null
                     val stars = try {
                         // SEP 弱星提取优先（分块背景估计+卷积滤波，检出能力更强），
                         // 2σ 阈值星太少时降级 1.5σ；原生库不可用回退 box-blur 检测器
                         // §0.72：提星诊断写入识别日志（用户要求"记录识别过程"）——
                         // 提星是识别链最上游，一旦它返回噪声，后面所有环节都白跑。
                         val extractDiag = StringBuilder()
-                        fun sepStars(sigma: Double): List<DetectedStar>? = try {
-                            StellarSolverNative.sepDetectStars(currentDisplay, sigma, 200, extractDiag)
+                        fun sepStars(sigma: Double): StellarSolverNative.SepStars? = try {
+                            StellarSolverNative.sepDetectStars(
+                                currentDisplay, sigma,
+                                StellarSolverNative.SEP_MATCH_MAX, extractDiag,
+                            )
                         } catch (e: Throwable) {
                             extractDiag.append("sep=${sigma}σ 异常(${e.javaClass.simpleName})；")
                             null
                         }
-                        var s = sepStars(2.0)
-                        if (s == null || s.size < 5) {
+                        var sr = sepStars(2.0)
+                        if (sr == null || sr.stars.size < 5) {
                             val looser = sepStars(1.5)
-                            if (looser != null && looser.size > (s?.size ?: 0)) s = looser
+                            if (looser != null && looser.stars.size > (sr?.stars?.size ?: 0)) sr = looser
                         }
+                        // 列表受 200 上限约束（喂匹配器的安全上限），总数不受约束
+                        var s: List<DetectedStar>? = sr?.stars
+                        var detectedTotal = sr?.totalPeaks ?: 0
                         // §0.72 提星质量核验：SEP 结果若与 box-blur 的重合率过低，
                         // 说明 SEP 这一轮不可信（典型：阈值失配导致全是边界伪影）。
                         // 用 box-blur 结果兜底，避免"上游提星退化 → 整个引擎白跑"。
@@ -596,6 +606,7 @@ object StarSolver {
                             } catch (e: Throwable) {
                                 null
                             }
+                            boxBlurStars = bb
                             if (bb != null && bb.size >= 5) {
                                 val bbTop = bb.take(30)
                                 val hits = bbTop.count { b ->
@@ -611,6 +622,7 @@ object StarSolver {
                                 if (rate < 0.30f) {
                                     extractDiag.append("→SEP不可信，回退box-blur；")
                                     s = bb
+                                    detectedTotal = bb.size
                                 }
                             }
                         }
@@ -620,13 +632,16 @@ object StarSolver {
                             } catch (e: Throwable) {
                                 null
                             }
+                            boxBlurStars = s
                             extractDiag.append("回退box-blur=${s?.size ?: 0}颗；")
+                            detectedTotal = s?.size ?: 0
                         }
                         com.starcam.astro.data.SolveLogStore.line(
                             context, "提星：$extractDiag",
                         )
                         s?.takeIf { it.isNotEmpty() }?.let { det ->
                             lastLocalStars = det
+                            lastLocalStarTotal = detectedTotal
                             val maxB = det.maxOfOrNull { it.brightness } ?: 0f
                             onStarsDetected(
                                 det.map { st ->
@@ -638,26 +653,39 @@ object StarSolver {
                                         } else 0.5f,
                                     )
                                 },
+                                detectedTotal,
                             )
                             det // 保持 try 块返回 List<DetectedStar>?
                         }
                     } catch (e: Throwable) {
                         null
                     }
+                    val hint = if (settings.sensorAssistedPointing) {
+                        PointingHintStore.get(imagePath)
+                    } else null
                     val matched = if (stars != null && stars.size >= 5) {
                         try {
-                            val hint = if (settings.sensorAssistedPointing) {
-                                PointingHintStore.get(imagePath)
-                            } else null
-                            LocalStarMatcher.match(stars, currentDisplay.width, currentDisplay.height, hint)
+                            // §0.88 把 box-blur 星表作为备用交给匹配器：主星表浅域无解时，
+                            // 匹配器会在深域重试之前用它在浅域再试一次（见 LocalStarMatcher.match）。
+                            LocalStarMatcher.match(
+                                stars, currentDisplay.width, currentDisplay.height, hint,
+                                fallbackDetected = boxBlurStars,
+                            )
                         } catch (e: Throwable) {
                             null
                         }
                     } else null
+                    if (matched != null && LocalStarMatcher.lastMatchUsedFallback) {
+                        com.starcam.astro.data.SolveLogStore.line(
+                            context,
+                            "内置星表：主星表(${stars?.size ?: 0}颗)浅域未匹配，" +
+                                "改用 box-blur 备用星表(${boxBlurStars?.size ?: 0}颗)命中",
+                        )
+                    }
                     // §0.70：自研引擎的内部状态（投票轮/打分轮）是排查「为什么匹配不上」
                     // 最直接的证据，全部记入日志与失败现场
                     if (stars != null) {
-                        com.starcam.astro.data.SolveLogStore.setStars(report, stars)
+                        com.starcam.astro.data.SolveLogStore.setStars(report, stars, lastLocalStarTotal)
                         // §0.70：抓一份匹配器实际吃到的像素（失败时落盘，开发机可重放）
                         if (lastGraySnapshot == null) {
                             try {
@@ -769,7 +797,7 @@ object StarSolver {
             val maxB = last?.maxOfOrNull { it.brightness } ?: 0f
             onDiagnostics(
                 SolveDiagnostics(
-                    starCount = last?.size ?: 0,
+                    starCount = if (lastLocalStarTotal > 0) lastLocalStarTotal else (last?.size ?: 0),
                     stars = (last ?: emptyList()).map { s ->
                         SolveDiagnostics.DiagStar(
                             x = s.x / diagDisplay.width.toFloat(),

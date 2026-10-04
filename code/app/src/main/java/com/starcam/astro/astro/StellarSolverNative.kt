@@ -53,6 +53,19 @@ object StellarSolverNative {
     private const val EDGE_MARGIN_PX = 16f
 
     /**
+     * §0.86 喂给匹配器的星点上限。
+     *
+     * 与"检出上限"是两件事：本值只约束**喂进投票轮的清单长度**，
+     * 而"这张图到底检出了多少"由 [SepStars.totalPeaks] 单独回报，不受它截断。
+     * 解耦前两者共用一个 200，导致 UI 上永远显示 ~197（见 §0.86）。
+     *
+     * 取值沿用历史行为 200。注意 [com.starcam.astro.astro.LocalStarMatcher]
+     * 记录了「n≥150 时 apod5 会被噪声星凑出假解」——本值已高于那条标定线；
+     * 收窄到 150 是独立待验证项，需跑宽场回归确认内点无损后再定。
+     */
+    const val SEP_MATCH_MAX = 200
+
+    /**
      * 求解入口（原生实现）。[gray] 为灰度 float 像素（0..255），
      * [indexPaths] 为索引 fits 完整路径列表，[fovLoDeg]/[fovHiDeg] 为
      * 视场宽度估计范围（度），[timeLimitSec] 为求解时间上限。
@@ -138,6 +151,19 @@ object StellarSolverNative {
     }
 
     /**
+     * §0.86 SEP 提星结果：星点列表 + **未截断**的真实检出总数。
+     *
+     * 为什么要分开：[stars] 受 [sepDetectStars] 的 maxStars 截断（喂匹配器的量
+     * 有安全上限），而 [totalPeaks] 是 simplexy 在本幅图上实际检出的峰值总数。
+     * 真实星空照片两者常差一个数量级（截断后 UI 永远显示 ~197，见 §0.86）。
+     */
+    class SepStars(
+        val stars: List<DetectedStar>,
+        /** simplexy 检出峰值总数（未截断）；UI 用它显示"真实检出量" */
+        val totalPeaks: Int,
+    )
+
+    /**
      * 用 SEP 提取星点（不求解）。返回 null 表示原生库不可用或提取失败。
      *
      * §0.72：[thresholdBgMultiple] 是「背景 sigma 倍数」的真实语义（C 层换算成
@@ -151,9 +177,9 @@ object StellarSolverNative {
     fun sepDetectStars(
         bitmap: Bitmap,
         thresholdBgMultiple: Double = 2.0,
-        maxStars: Int = 200,
+        maxStars: Int = SEP_MATCH_MAX,
         lastDiag: StringBuilder? = null,
-    ): List<DetectedStar>? {
+    ): SepStars? {
         val w = bitmap.width
         val h = bitmap.height
         val gray = FloatArray(w * h)
@@ -178,6 +204,8 @@ object StellarSolverNative {
                 return null
             }
             val n = o.optInt("n", 0)
+            // §0.86：未截断的峰值总数（旧版原生库无此字段时退化为 n）
+            val totalPeaks = o.optInt("npeaks", n)
             if (n <= 0) {
                 lastDiag?.append("sep=${thresholdBgMultiple}σ 0 颗；")
                 return null
@@ -200,13 +228,13 @@ object StellarSolverNative {
                 val border = raw.size - out.size
                 val fl = raw.map { it.brightness }.sortedDescending()
                 lastDiag.append(
-                    "sep=${thresholdBgMultiple}σ 检出${raw.size}颗".format() +
+                    "sep=${thresholdBgMultiple}σ 全图检出${totalPeaks}颗/取最亮${raw.size}颗".format() +
                         "（边界剔除${border}颗→${out.size}颗）" +
                         " flux=${"%.1f".format(fl.lastOrNull() ?: 0f)}~${"%.1f".format(fl.firstOrNull() ?: 0f)}" +
                         " 边缘占比=${"%.0f".format(100.0 * border / raw.size)}%；",
                 )
             }
-            out.takeIf { it.size >= 5 }
+            out.takeIf { it.size >= 5 }?.let { SepStars(it, totalPeaks) }
         } catch (e: Exception) {
             null
         }

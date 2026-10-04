@@ -103,6 +103,37 @@ object I18n {
         val labelPixScale: String get() = if (isEn) "Pixel Scale" else "像素比例尺"
         val labelOrientation: String get() = if (isEn) "Orientation" else "方向角"
         val labelTaskId: String get() = if (isEn) "Task ID" else "任务编号"
+        /** §0.90 识别耗时（成功页信息面板与失败页各显示一行） */
+        val labelSolveTime: String get() = if (isEn) "Recognition Time" else "识别耗时"
+
+        /**
+         * §0.90 识别耗时文本：不足 1 分钟保留一位小数（"18.4 秒" / "18.4 s"），
+         * 1 分钟以上用「分 + 秒」（"1 分 23 秒" / "1 m 23 s"）。
+         * 非正数返回空串 —— 调用方据此不显示该行（演示模式与求解前失败无耗时可言）。
+         */
+        fun formatSolveTime(ms: Long): String {
+            if (ms <= 0L) return ""
+            // 先四舍五入到 0.1 秒再决定走「秒」还是「分+秒」，
+            // 免得出现 "60.0 秒" 这种既非秒档也非分档的怪值
+            val tenths = (ms + 50L) / 100L
+            return if (tenths < 600L) {
+                val s = tenths / 10.0
+                if (isEn) "%.1f s".format(s) else "%.1f 秒".format(s)
+            } else {
+                val totalSec = tenths / 10L
+                val m = totalSec / 60L
+                val s = totalSec % 60L
+                if (isEn) "$m m $s s" else "$m 分 $s 秒"
+            }
+        }
+
+        /** §0.90 失败页整行文本（含标签与分隔符，中英标点各自正确）；无耗时为 "" */
+        fun solveTimeLine(ms: Long): String {
+            val t = formatSolveTime(ms)
+            if (t.isEmpty()) return ""
+            return if (isEn) "$labelSolveTime: $t" else "$labelSolveTime：$t"
+        }
+
         val constellationsInField: String get() = if (isEn) "Constellations in field:" else "画面中的星座："
 
         val reSolve: String get() = if (isEn) "Solve Again" else "重新识别"

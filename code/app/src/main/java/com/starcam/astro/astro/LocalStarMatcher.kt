@@ -130,6 +130,13 @@ object LocalStarMatcher {
     /** §0.77 求解互斥：保证星表域在整次求解期间不被另一个求解改写（见 [runtimeCatalogMag]） */
     private val solveLock = Any()
 
+    /**
+     * §0.89 本轮打分轮候选上限（默认 [SCORED_MAX_CANDIDATES]；探测模式下调小）。
+     * 与 [runtimeCatalogMag] 同一约定：受 [solveLock] 保护，只在单次求解内临时改写。
+     */
+    @Volatile
+    private var runtimeScoredCap: Long = SCORED_MAX_CANDIDATES
+
     /** 当前生效的星表域星等上限（调试字段优先级最高，仅测试/标定台会写） */
     private fun catalogMag(): Float = debugForceCatalogMag ?: runtimeCatalogMag
 
@@ -155,12 +162,38 @@ object LocalStarMatcher {
     private const val SCORED_EARLY_RATE = 0.5f
 
     /**
-     * §0.62 打分轮时间预算（毫秒）。评分轮在投票失败后触发，候选可达 7 万个
-     * （实测 45 工作星 × C(14,2) 三角形 × 18 候选 ≈ 70k），按 ~150μs/候选
-     * 需 10.5 秒。给 3 秒预算后，失败路径的额外开销从 ~10s 压到 ~3s，
-     * 而真解候选通常出现在序列前段（用户照片在预算内即命中）。
+     * §0.87 打分轮预算：**确定性候选数上限**（原为 3 秒墙上时钟）。
+     *
+     * 原预算（§0.62）的依据是「真解候选通常出现在序列前段」——该假设在宽场
+     * 照片上不成立：实测 12 张演示照中凡走打分轮的 8 张，**获胜候选恒为序列
+     * 末位**（218/218、1116/1116、8730/8730，重复运行稳定）。原因是候选按
+     * 比值偏差升序排列，而 gnomonic 投影下真三角形的比值偏差最大（同一失真
+     * 见 §0.62 记录）。于是打分轮**没有余量**：墙上时钟一旦在任一检查点触发，
+     * 必然错过唯一正解，同一张照片「快机器解得出来、慢机器解不出来」——
+     * 这正是真机 5031 失败的机制（真机失败页显示的深域数字，是浅域被打断后
+     * 深域重试留下的）。
+     *
+     * 改为候选数上限后，结果与设备速度无关；2 万候选 ≈ 本机 3 秒（与原预算
+     * 同级开销），实测获胜位置最远 19483（窄场抽测 12 张）仍在上限内。
      */
-    private const val SCORED_TIME_BUDGET_MS = 3000L
+    private const val SCORED_MAX_CANDIDATES = 20_000L
+
+    /**
+     * §0.89 低成本试探预算：**有备用星表兜底时**，主星表先只用这么多候选试一次。
+     *
+     * 依据（真机实测 5031，76° 广角欠曝）：主星表（SEP 177 颗）的打分轮会一直跑到
+     * 2 万上限（真机 24.5 秒），而那份列表**无论跑多久都解不出**（候选生成被多余星
+     * 挤坏）；备用的 box-blur 列表只有 32 颗、218 个候选即解出。既有备用兜底，
+     * 就不该先为一份可疑列表付满额。试探失败后的顺序：
+     * 备用星表（完整预算）→ 主星表（完整预算）→ 深域重试。
+     */
+    private const val SCORED_PROBE_CANDIDATES = 2_000L
+
+    /**
+     * §0.87 兜底硬上限：正常设备不会触及，仅防病态慢机在 2 万候选上的无界停留。
+     * 触及时会在打分轮统计串里留下 `CUT=time` 标记（失败页可见）。
+     */
+    private const val SCORED_HARD_TIME_LIMIT_MS = 60_000L
 
     /** §0.63 精拟合阶段：切平面原点向图像中心迭代的轮数（3~4 轮即收敛） */
     private const val SCORED_ORIGIN_ITERATIONS = 4
@@ -213,7 +246,7 @@ object LocalStarMatcher {
      * §0.74 调试：matchInternal 各阶段耗时（毫秒，按调用顺序）。
      * 形如 "primary=1230;multi=0;weak=0;backup=0;scored=0"。值为 0 表示该阶段未执行
      * （提前退出或前置条件不满足）。用于定位耗时瓶颈 —— 实测宽场失败路径的时间
-     * 并不在常被怀疑的打分轮（它有 [SCORED_TIME_BUDGET_MS] 预算兜底），
+     * 并不在常被怀疑的打分轮（它有 [SCORED_MAX_CANDIDATES] 上限兜底），
      * 而在投票轮被完整跑遍的阶梯上。
      */
     @Volatile
@@ -320,6 +353,21 @@ object LocalStarMatcher {
     var debugScoredInFrame: Int? = null
         private set
 
+    // ── §0.86 浅域留档 ───────────────────────────────────────────────
+    // 上面那组是**单槽**，每次 matchInternal 都覆盖。而 §0.75 之后一次求解最多
+    // 跑两遍（浅域 + 深域重试），失败页读到的永远是**深域**那一遍的数字。
+    // 实测 5031：浅域打分轮 16/30=0.533（可解），深域只有 7/715 的伪解 ——
+    // 只看深域会误判成"打分轮找不到解"，而真正该查的是浅域为什么没解出来。
+    // 故在切深域之前把浅域那一轮原样留档，失败页两轮都显示。
+    @Volatile var debugShallowVoteStats: String? = null
+        private set
+    @Volatile var debugShallowScoredStats: String? = null
+        private set
+    @Volatile var debugShallowScoredBest: Int? = null
+        private set
+    @Volatile var debugShallowScoredInFrame: Int? = null
+        private set
+
     /** §0.62 调试：打分轮最佳候选的对齐对数与展开后对数（诊断用） */
     @Volatile
     var debugScoredWinPairs: Int? = null
@@ -332,6 +380,25 @@ object LocalStarMatcher {
     /** §0.71e 调试：打分轮获胜候选（照片坐标 + HIP）与展开明细（诊断用） */
     @Volatile
     var debugScoredWinSeed: String? = null
+
+    /**
+     * §0.87 调试：获胜候选被刷新时的**已评分序号**（1 起；未刷新保持 -1）。
+     *
+     * 存在的理由：宽场照片的获胜候选恒在候选序列**末位**（实测 8/8 张凡是走
+     * 打分轮的照片，`winAt == scored`），故打分轮必须跑完整串才能解出 ——
+     * 这正是「打分轮不能用时间预算截断」的依据。回归测试
+     * `ScoredRoundBudgetTest` 用它把该性质钉住。
+     */
+    @Volatile
+    var debugScoredWinAt: Long = -1
+        private set
+
+    /**
+     * §0.88 上次 [match] 是否由**备用星表**解出（由调用方读取，用于识别日志与统计）。
+     * 每次求解入口清零；主星表浅域成功时不置位。
+     */
+    @Volatile
+    var lastMatchUsedFallback: Boolean = false
         private set
 
     @Volatile
@@ -1090,6 +1157,11 @@ object LocalStarMatcher {
      * 改进（v1.5.31 传感器粗定标支持）：
      *  - 当传入 [pointingHint] 时，优先执行以指向天区为中心、半径受限的快速匹配；
      *  - 若先验快速匹配未果（如地磁异常），自动平滑回退至原有全天盲解，保证识别率绝不下降。
+     *
+     * @param fallbackDetected §0.88 备用星表（第二个检测器的星点列表）。主星表浅域无解时，
+     *   在**深域重试之前**用它在浅域再试一次：两个检测器是独立证据，主列表不可用
+     *   （如被多余星挤坏候选生成）不代表备用列表也解不出。编号在前的顺序保持不变，
+     *   仅在失败路径上多一次便宜的浅域尝试（备用列表通常更稀疏、候选更少）。
      */
     fun match(
         detected: List<DetectedStar>,
@@ -1097,11 +1169,12 @@ object LocalStarMatcher {
         height: Int,
         pointingHint: PointingHint? = null,
         allowDeepRetry: Boolean = true,
+        fallbackDetected: List<DetectedStar>? = null,
     ): LocalMatchResult? = synchronized(solveLock) {
         // §0.77：整个求解在 solveLock 内执行。域（runtimeCatalogMag）是对象级状态，
         // 必须保证它在整次求解期间不被另一个求解改写；投票轮的 worker 线程也因此
         // 与主线程看到同一个域（**不能**用 ThreadLocal，原因见 runtimeCatalogMag）。
-        matchLocked(detected, width, height, pointingHint, allowDeepRetry)
+        matchLocked(detected, width, height, pointingHint, allowDeepRetry, fallbackDetected)
     }
 
     /** [match] 的实现体。**必须在 [solveLock] 内调用**（见 [runtimeCatalogMag]）。 */
@@ -1111,14 +1184,50 @@ object LocalStarMatcher {
         height: Int,
         pointingHint: PointingHint?,
         allowDeepRetry: Boolean,
+        fallbackDetected: List<DetectedStar>? = null,
     ): LocalMatchResult? {
         if (detected.size < 5) return null
+        // §0.86：清掉上一张图的留档，避免失败页显示陈旧的浅域数字
+        debugShallowVoteStats = null
+        debugShallowScoredStats = null
+        debugShallowScoredBest = null
+        debugShallowScoredInFrame = null
+        lastMatchUsedFallback = false
         if (pointingHint != null) {
             val hintResult = matchInternal(detected, width, height, pointingHint)
             if (hintResult != null) return hintResult
         }
         val shallow = matchInternal(detected, width, height, null)
         if (shallow != null) return shallow
+        // §0.88 备用星表：主星表浅域无解时，用第二个检测器的列表再试一次。两个检测器
+        // 是独立证据 —— 真机实测（5031，宽场欠曝）：SEP 列表 177 颗把打分轮打到 2 万
+        // 候选上限仍只有 8/206（对齐率 0.04，**真解候选根本生成不出来**），而同一张
+        // 照片的 box-blur 列表只有 32 颗、本机同口径像素复刻 16/30=0.533 过门。
+        //
+        // §0.89 顺序与预算（在 §0.88 之上收紧延迟）：有备用列表兜底时，主星表**先只用
+        // 低成本试探预算**（[SCORED_PROBE_CANDIDATES]）—— 真机实测那份 177 颗的列表
+        // 要跑满 2 万候选才罢休（24.5 秒）却永远解不出，先付满额是纯浪费。试探失败后：
+        // ① 备用星表（完整预算）→ ② 主星表（完整预算）→ ③ 深域重试。
+        val hasAlt = fallbackDetected != null && fallbackDetected !== detected &&
+            fallbackDetected.size >= 5
+        if (hasAlt) {
+            val savedCap = runtimeScoredCap
+            runtimeScoredCap = SCORED_PROBE_CANDIDATES
+            val probe = try {
+                matchInternal(detected, width, height, null)
+            } finally {
+                runtimeScoredCap = savedCap
+            }
+            if (probe != null) return probe
+            val alt = matchInternal(fallbackDetected!!, width, height, null)
+            if (alt != null) {
+                lastMatchUsedFallback = true
+                return alt
+            }
+            // 备用列表也没解出：回到主星表的完整预算（即未启用备用时的默认搜索）
+            val full = matchInternal(detected, width, height, null)
+            if (full != null) return full
+        }
         // §0.77 深域准入闸门：深域重试的触发条件是「浅域整条阶梯无解」，而这个词对
         // **任何**失败帧都成立 —— 白天、室内、纯噪声帧全都算。相机预览是每 5~8s 一次
         // 的长驻循环，不做准入就要首帧付 9.3s 的索引构建、之后每帧都跑一遍 16 倍
@@ -1141,6 +1250,13 @@ object LocalStarMatcher {
         // §0.77 切域方式：改对象级 runtimeCatalogMag。整个求解已在 solveLock 内
         // （见 match / matchLocked），所以这次改域不会与另一个求解交错；投票轮的
         // worker 线程读到的也是同一个值 —— 原实现的毛病正是「写入侧加锁、读取侧裸奔」。
+        // §0.86：切深域会覆盖单槽调试字段 —— 先把「浅域（主星表）」那一轮留档。
+        // 此刻单槽里是主星表**最后一次**调用的数字（有备用列表时是完整预算那一遍），
+        // 正是失败页需要与深域并列显示的那组。
+        debugShallowVoteStats = debugVoteStats
+        debugShallowScoredStats = debugScoredStats
+        debugShallowScoredBest = debugScoredBest
+        debugShallowScoredInFrame = debugScoredInFrame
         val savedMag = runtimeCatalogMag
         runtimeCatalogMag = DEEP_CATALOG_MAG
         val deep = try {
@@ -1294,9 +1410,13 @@ object LocalStarMatcher {
         var bestPairs: List<Pair<Int, StarEntry>>? = null
         val seen = HashSet<Long>()
         val tStart = System.nanoTime()
+        val capThisRound = runtimeScoredCap
         var nCand = 0L
         var nScored = 0L
         var earlyOut = false
+        var cutByCap = false
+        var cutByTime = false
+        debugScoredWinAt = -1
 
         for (pi in work.indices) {
             val a = work[pi]
@@ -1356,6 +1476,7 @@ object LocalStarMatcher {
                             if (eA != null && eB != null && eC != null) {
                                 bestScore = aligned
                                 bestInFrame = inFrame
+                                debugScoredWinAt = nScored
                                 bestPairs = listOf(
                                     workIdx[pi] to eA,
                                     workIdx[bi] to eB,
@@ -1377,9 +1498,15 @@ object LocalStarMatcher {
                             }
                         }
                         if (earlyOut) break
+                        if (nScored >= capThisRound) {
+                            cutByCap = true
+                            earlyOut = true
+                            break
+                        }
                         if ((nScored and 0x3F) == 0L &&
-                            (System.nanoTime() - tStart) / 1_000_000 > SCORED_TIME_BUDGET_MS
+                            (System.nanoTime() - tStart) / 1_000_000 > SCORED_HARD_TIME_LIMIT_MS
                         ) {
+                            cutByTime = true
                             earlyOut = true
                             break
                         }
@@ -1394,7 +1521,13 @@ object LocalStarMatcher {
         debugScoredInFrame = bestInFrame
         debugScoredWinPairs = bestPairs?.size
         debugScoredStats = "cand=$nCand scored=$nScored work=${work.size} " +
-            "ms=${(System.nanoTime() - tStart) / 1_000_000}"
+            "ms=${(System.nanoTime() - tStart) / 1_000_000}" +
+            (
+                if (cutByCap) {
+                    if (capThisRound < SCORED_MAX_CANDIDATES) " CUT=soft" else " CUT=cap"
+                } else ""
+                ) +
+            (if (cutByTime) " CUT=time" else "")
         if (bestPairs == null) {
             return null
         }

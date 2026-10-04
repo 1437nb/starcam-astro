@@ -118,6 +118,11 @@ internal sealed interface ResultUiState {
         /** 引擎详情（索引档位/内点数/任务号等） */
         val engineDetail: String?,
         /**
+         * §0.90 本次识别耗时（毫秒，与 §0.40 打点计时的口径一致：只计 StarSolver.solve
+         * 本身，不含照片解码）。≤0 表示无耗时可言（演示模式），信息面板据此不显示该行。
+         */
+        val elapsedMs: Long = 0,
+        /**
          * §0.58 太阳系天体标记（月亮/行星/太阳）。
          * 需要拍摄时间，以及位置（EXIF GPS，或 §0.59 的当前定位兜底）；
          * 两者缺一都无法确定拍摄瞬间的行星位置，宁可不标也不能标错。
@@ -135,6 +140,8 @@ internal sealed interface ResultUiState {
         /** 失败可视化诊断（§0.33）：照片 + 检出星点标注；null 为无法诊断的失败 */
         val bitmap: Bitmap? = null,
         val diagnostics: SolveDiagnostics? = null,
+        /** §0.90 本次识别耗时（毫秒）；≤0 表示求解根本没开始（读图失败等），不显示 */
+        val elapsedMs: Long = 0,
     ) : ResultUiState
 }
 
@@ -168,6 +175,9 @@ fun ResultScreen(
     val starTolScreenPx = with(LocalDensity.current) { 32.dp.toPx() }
     // 加载阶段实时预览：本地提星完成后立即回调（§0.36）
     var detectedStars by remember { mutableStateOf<List<SolveDiagnostics.DiagStar>>(emptyList()) }
+    // §0.86 真实检出总数（未受 200 上限截断）：旧版直接显示 detectedStars.size，
+    // 而那个列表被上限压住，真实星空照片恒为 ~197，读数没有信息量。
+    var detectedStarTotal by remember { mutableIntStateOf(0) }
 
     // 识别成功 → 投影星表并切换到成功页；失败返回 false
     fun showSuccess(
@@ -176,6 +186,7 @@ fun ResultScreen(
         engine: SolveEngine?,
         engineDetail: String?,
         isDemo: Boolean,
+        elapsedMs: Long = 0,
     ): Boolean {
         val w = bitmap.width
         val h = bitmap.height
@@ -218,7 +229,8 @@ fun ResultScreen(
             }.getOrDefault(emptyList())
         }
         state = ResultUiState.Success(
-            solve, bitmap, stars, lines, labels, messier, isDemo, engine, engineDetail, solar,
+            solve, bitmap, stars, lines, labels, messier, isDemo, engine, engineDetail,
+            elapsedMs, solar,
             locationIsFallback = fallbackLoc != null,
         )
         return true
@@ -227,6 +239,7 @@ fun ResultScreen(
     LaunchedEffect(imagePath, demoRegion, attempt) {
         state = ResultUiState.Loading(null, com.starcam.astro.ui.I18n.Result.preparingPhoto)
         detectedStars = emptyList()
+        detectedStarTotal = 0
         try {
             if (demoRegion != null) {
                 // 离线演示：内置天区合成的模拟星空照片，不与真实求解链路交互
@@ -257,7 +270,10 @@ fun ResultScreen(
                     context, display, imagePath, settings,
                     onProgress = { msg -> state = ResultUiState.Loading(display, msg) },
                     onDiagnostics = { diag = it },
-                    onStarsDetected = { detectedStars = it },
+                    onStarsDetected = { list, total ->
+                        detectedStars = list
+                        detectedStarTotal = total
+                    },
                 )
                 val elapsedMs = System.currentTimeMillis() - t0
                 if (result == null) {
@@ -267,7 +283,7 @@ fun ResultScreen(
                     } else {
                         com.starcam.astro.ui.I18n.Result.solveFailedWithKey
                     }
-                    state = ResultUiState.Error(message, display, diag)
+                    state = ResultUiState.Error(message, display, diag, elapsedMs)
                     return@LaunchedEffect
                 }
                 if (!showSuccess(
@@ -276,6 +292,7 @@ fun ResultScreen(
                         result.engine,
                         result.detail,
                         isDemo = false,
+                        elapsedMs = elapsedMs,
                     )
                 ) return@LaunchedEffect
                 // 识别打点（§0.40）：成功记录引擎与耗时
@@ -330,7 +347,7 @@ fun ResultScreen(
         ) { padding ->
             when (val s = state) {
                 is ResultUiState.Loading -> LoadingContent(
-                    s, tip, detectedStars, Modifier.padding(padding),
+                    s, tip, detectedStars, detectedStarTotal, Modifier.padding(padding),
                 )
                 is ResultUiState.Success -> SuccessContent(
                     state = s,
@@ -355,6 +372,7 @@ fun ResultScreen(
                     message = s.message,
                     bitmap = s.bitmap,
                     diagnostics = s.diagnostics,
+                    elapsedMs = s.elapsedMs,
                     modifier = Modifier.padding(padding),
                     onRetry = { attempt++ },
                     onBack = onBack,
@@ -383,6 +401,7 @@ private fun LoadingContent(
     state: ResultUiState.Loading,
     tip: String,
     stars: List<SolveDiagnostics.DiagStar>,
+    starTotal: Int,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -397,7 +416,7 @@ private fun LoadingContent(
                 modifier = Modifier
                     .fillMaxWidth(0.85f)
                     .aspectRatio(state.bitmap.width.toFloat() / state.bitmap.height.toFloat())
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(MaterialTheme.shapes.large)
                     .background(Color.Black),
             ) {
                 Image(
@@ -432,7 +451,9 @@ private fun LoadingContent(
         if (stars.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             Text(
-                com.starcam.astro.ui.I18n.Result.starsDetectedMatching(stars.size),
+                com.starcam.astro.ui.I18n.Result.starsDetectedMatching(
+                    if (starTotal > 0) starTotal else stars.size,
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -442,7 +463,7 @@ private fun LoadingContent(
         Text(
             "🔭 $tip",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 32.dp),
         )
@@ -458,6 +479,7 @@ private fun ErrorContent(
     message: String,
     bitmap: Bitmap?,
     diagnostics: SolveDiagnostics?,
+    elapsedMs: Long,
     modifier: Modifier = Modifier,
     onRetry: () -> Unit,
     onBack: () -> Unit,
@@ -478,7 +500,7 @@ private fun ErrorContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(bitmap.width.toFloat() / bitmap.height.toFloat())
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(MaterialTheme.shapes.large)
                     .background(Color.Black)
                     .clickable {
                         // §0.81：renderDiagnosticBitmap 会新建全分辨率位图（2200px 级
@@ -512,7 +534,7 @@ private fun ErrorContent(
                 Text(
                     "🔍 点击图片放大查看",
                     color = Color.White.copy(alpha = 0.65f),
-                    fontSize = 12.sp,
+                    style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(8.dp)
@@ -535,7 +557,7 @@ private fun ErrorContent(
             Spacer(Modifier.height(16.dp))
             Text(
                 diagnostics.verdictTitle(isEn),
-                fontSize = 19.sp,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
             )
@@ -551,7 +573,7 @@ private fun ErrorContent(
                 Text(
                     diagnostics.enginesText(isEn),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             // 原引导文案（API Key / GPS 提示）降级为补充说明
@@ -559,7 +581,7 @@ private fun ErrorContent(
             Text(
                 message,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
             // §0.70 技术细节（可折叠）：把引擎尝试轨迹与内部统计摊开。
@@ -572,6 +594,19 @@ private fun ErrorContent(
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+
+        // §0.90 识别耗时：失败页同样给出本次尝试花了多久（求解前失败时为空，不显示）
+        val solveTimeText = com.starcam.astro.ui.I18n.Result.solveTimeLine(elapsedMs)
+        if (solveTimeText.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                solveTimeText,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
         }
 
@@ -860,7 +895,7 @@ private fun StarPhotoOverlay(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(top = 10.dp, end = 10.dp)
-                .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                .background(Color.Black.copy(alpha = 0.45f), MaterialTheme.shapes.small)
                 .clickable { showPanel = !showPanel }
                 .padding(horizontal = 10.dp, vertical = 2.dp),
         )
@@ -876,19 +911,19 @@ private fun StarPhotoOverlay(
         // 按住看原图提示（§0.47）
         Text(
             if (holdingOriginal) com.starcam.astro.ui.I18n.Layers.releaseToRestore else com.starcam.astro.ui.I18n.Layers.holdOriginal,
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             color = Color.White.copy(alpha = 0.7f),
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(8.dp)
-                .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                .background(Color.Black.copy(alpha = 0.35f), MaterialTheme.shapes.small)
                 .padding(horizontal = 6.dp, vertical = 3.dp),
         )
         // 点击放大提示（§0.34，支持双语）
         Text(
             if (isEn) "🔍 Tap to zoom · Tap markers for info" else "🔍 点击放大 · 轻点标记看详情",
             color = Color.White.copy(alpha = 0.65f),
-            fontSize = 12.sp,
+            style = MaterialTheme.typography.bodySmall,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(8.dp)
@@ -920,13 +955,13 @@ private fun LayerPanel(
     Surface(
         modifier = modifier,
         color = Color.Black.copy(alpha = 0.72f),
-        shape = RoundedCornerShape(12.dp),
+        shape = MaterialTheme.shapes.medium,
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text(
                 com.starcam.astro.ui.I18n.Layers.panelTitle,
                 color = Color.White,
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(4.dp))
@@ -953,7 +988,7 @@ private fun LayerToggle(label: String, checked: Boolean, onChange: (Boolean) -> 
             fontSize = 15.sp,
         )
         Spacer(Modifier.width(6.dp))
-        Text(label, color = Color.White, fontSize = 12.sp)
+        Text(label, color = Color.White, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -1026,7 +1061,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
     Surface(
         modifier = modifier,
         color = if (night) Color(0xF01A0505) else Color(0xF00D1B2A),
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.large,
     ) {
         Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
             when (ref) {
@@ -1039,7 +1074,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                         Text(
                             obj.label(isEn),
                             color = Color.White,
-                            fontSize = 17.sp,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.weight(1f),
                         )
@@ -1062,7 +1097,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                             }
                         },
                         color = typeColor,
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Medium,
                     )
                     info?.let {
@@ -1073,13 +1108,13 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                                 append(if (isEn) it.distLyEn else it.distLyZh)
                             },
                             color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
                             if (isEn) it.descEn else it.descZh,
                             color = Color.White.copy(alpha = 0.92f),
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             lineHeight = 19.sp,
                         )
                     }
@@ -1094,7 +1129,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                         Text(
                             if (displayName.isNotEmpty()) displayName else "HIP ${entry.hip}",
                             color = Color.White,
-                            fontSize = 17.sp,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.weight(1f),
                         )
@@ -1115,7 +1150,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                             append(conName)
                         },
                         color = Color(0xFFFFE082),
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                     )
                     info?.let {
@@ -1126,13 +1161,13 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                                 append(if (isEn) it.distLyEn else it.distLyZh)
                             },
                             color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
                             if (isEn) it.descEn else it.descZh,
                             color = Color.White.copy(alpha = 0.92f),
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             lineHeight = 19.sp,
                         )
                     }
@@ -1147,7 +1182,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                         Text(
                             com.starcam.astro.astro.SolarSystemCatalog.name(body, isEn),
                             color = Color.White,
-                            fontSize = 17.sp,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.weight(1f),
                         )
@@ -1162,7 +1197,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                     Text(
                         com.starcam.astro.astro.SolarSystemCatalog.typeLabel(body, isEn),
                         color = bodyColor,
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.bodySmall,
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -1180,7 +1215,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                             }
                         },
                         color = bodyColor,
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                     )
                     info?.let {
@@ -1194,13 +1229,13 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                                 append("${"%.1f".format(pos.angularDiameterDeg * 60)}′")
                             },
                             color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
                             if (isEn) it.descEn else it.descZh,
                             color = Color.White.copy(alpha = 0.92f),
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             lineHeight = 19.sp,
                         )
                     }
@@ -1229,7 +1264,7 @@ private fun InfoPanel(state: ResultUiState.Success, modifier: Modifier = Modifie
                     else -> com.starcam.astro.ui.I18n.Result.titleDefault
                 },
                 fontWeight = FontWeight.Bold,
-                fontSize = 17.sp,
+                style = MaterialTheme.typography.titleMedium,
             )
             if (state.engine != null) {
                 Spacer(Modifier.height(4.dp))
@@ -1249,13 +1284,17 @@ private fun InfoPanel(state: ResultUiState.Success, modifier: Modifier = Modifie
                 )
             }
             Spacer(Modifier.height(10.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(10.dp))
             state.engine?.let {
                 InfoRow(com.starcam.astro.ui.I18n.Result.labelEngine, it.label(isEn))
             }
             InfoRow(com.starcam.astro.ui.I18n.Result.labelCenter, "RA ${formatRa(solve.raDeg)}    Dec ${formatDec(solve.decDeg)}")
             InfoRow(com.starcam.astro.ui.I18n.Result.labelFov, "${"%.1f".format(solve.fieldWidthDeg)}° × ${"%.1f".format(solve.fieldHeightDeg)}°")
+            // §0.90 识别耗时（演示模式无耗时可言，为空则不显示该行）
+            com.starcam.astro.ui.I18n.Result.formatSolveTime(state.elapsedMs)
+                .takeIf { it.isNotEmpty() }
+                ?.let { InfoRow(com.starcam.astro.ui.I18n.Result.labelSolveTime, it) }
             InfoRow(com.starcam.astro.ui.I18n.Result.labelPixScale, "${"%.1f".format(solve.pixScaleArcsec)}${if (isEn) "″/px" else "″/像素"}")
             InfoRow(com.starcam.astro.ui.I18n.Result.labelOrientation, "${"%.1f".format(solve.orientationDeg)}°（parity ${solve.parity}）")
             solve.subId?.let { InfoRow(com.starcam.astro.ui.I18n.Result.labelTaskId, "#$it") }
@@ -1328,10 +1367,34 @@ private fun SolveLogDetails(diagnostics: SolveDiagnostics?) {
         buildString {
             appendLine("检星 ${diagnostics?.starCount ?: 0} 颗")
             appendLine("引擎轨迹：${diagnostics?.enginesTried?.joinToString(" → ") ?: "-"}")
-            appendLine("投票轮：${LocalStarMatcher.debugVoteStats ?: "-"}")
-            appendLine("打分轮：${LocalStarMatcher.debugScoredStats ?: "-"}")
-            LocalStarMatcher.debugScoredBest?.let { appendLine("打分轮最优对齐：$it 颗") }
-            LocalStarMatcher.debugScoredInFrame?.let { appendLine("画面内星表星：$it 颗") }
+            // §0.86 逐轮显示：§0.75 之后一次求解最多跑两遍（浅域 + 深域重试），
+            // 而调试字段是单槽、后写的深域会覆盖浅域。实测 5031 浅域打分轮
+            // 16/30 可解、深域只有 7/715 的伪解 —— 只显示后者会把死因判错，
+            // 所以两轮分开列，并各自标出对齐率是否过了 20% 门槛。
+            fun rate(best: Int?, inFrame: Int?): String =
+                if (best != null && inFrame != null && inFrame > 0) {
+                    val r = best.toFloat() / inFrame
+                    "%.2f%s".format(r, if (r >= 0.20f) " 过门" else " 未过门")
+                } else "-"
+            val shallowVote = LocalStarMatcher.debugShallowVoteStats
+            if (shallowVote != null) {
+                appendLine("── 浅域（mag≤4.0）──")
+                appendLine("  投票轮：$shallowVote")
+                appendLine("  打分轮：${LocalStarMatcher.debugShallowScoredStats ?: "-"}")
+                appendLine(
+                    "  最优对齐 ${LocalStarMatcher.debugShallowScoredBest ?: 0} 颗" +
+                        " / 画面内 ${LocalStarMatcher.debugShallowScoredInFrame ?: 0} 颗" +
+                        "（对齐率 ${rate(LocalStarMatcher.debugShallowScoredBest, LocalStarMatcher.debugShallowScoredInFrame)}）",
+                )
+            }
+            appendLine("── 深域重试（mag≤6.5）──")
+            appendLine("  投票轮：${LocalStarMatcher.debugVoteStats ?: "-"}")
+            appendLine("  打分轮：${LocalStarMatcher.debugScoredStats ?: "-"}")
+            appendLine(
+                "  最优对齐 ${LocalStarMatcher.debugScoredBest ?: 0} 颗" +
+                    " / 画面内 ${LocalStarMatcher.debugScoredInFrame ?: 0} 颗" +
+                    "（对齐率 ${rate(LocalStarMatcher.debugScoredBest, LocalStarMatcher.debugScoredInFrame)}）",
+            )
         }
     }
     Spacer(Modifier.height(14.dp))
@@ -1345,7 +1408,7 @@ private fun SolveLogDetails(diagnostics: SolveDiagnostics?) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
             ),
         ) {
             Column(Modifier.padding(12.dp)) {
@@ -1383,7 +1446,7 @@ private fun SolveLogDetails(diagnostics: SolveDiagnostics?) {
                     "完整现场（含匹配器输入的像素）已存于应用日志目录，" +
                         "可在「设置 → 识别日志」导出。",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
