@@ -197,7 +197,7 @@ back gracefully to the JVM catalog matcher).
 │   │   └── src/main/jniLibs/arm64-v8a/      # Prebuilt libstellar_solver.so native engine
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # Engineering architecture and 68 validation reports (§0.11 ~ §0.90)
+├── docs/                   # Engineering architecture and 71 validation reports (§0.11 ~ §0.97)
 ├── tools/                  # Python catalog generators and offline test utilities
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md               # Chinese documentation

@@ -12,14 +12,21 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.69](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.69)** —
+最新版本 **[v1.5.74](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.74)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.69-defect-report-wave3-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.69/StarCam-v1.5.69-defect-report-wave3-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.69-defect-report-wave3-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.69/StarCam-v1.5.69-defect-report-wave3-debug.apk) | 26.9 MB | 含调试日志 |
+| [StarCam-v1.5.74-recognition-speed-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.74/StarCam-v1.5.74-recognition-speed-fix-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.74-recognition-speed-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.74/StarCam-v1.5.74-recognition-speed-fix-debug.apk) | 26.9 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
+
+> **v1.5.74 识别提速：74 秒 → 约 5 秒**：真机日志显示，慢在"主星表（172 颗）那条路要把
+> 投票轮五轮阶梯跑完、66 秒仍解不出"，而**另一张更小的星表（28 颗）2.1 秒就解出来了** ——
+> 解药一直排在死路后面。本版把本地引擎改为**便宜的先试**（box-blur 星表首选、SEP 降为备用，
+> 后者仍需通过重合率核验）——项目本地的真值回归台本来就是用 box-blur 星表跑的，换过来
+> 等于让生产路径与回归保护口径一致。同版：**批量识别并行**（有界并发，低内存设备自动退回
+> 串行）、**版本号随处可查**（设置页标题下 + 识别日志首行）。
 
 > **v1.5.69 按外部代码走查报告做的三批加固**：修掉跨赤经接缝的候选验证（投影中心误用
 > 算术平均，接缝天区会把中心算到天区对面）、历史与统计的并发写丢数据、结果页主线程
@@ -193,6 +200,11 @@
   "Missing classes" 检查把它当**致命错误**。已补 `-dontwarn` 规则修复，
   并修正了构建服务器上签名密钥缺失导致产物**静默未签名**的问题。
 
+- **识别提速：74 秒 → 约 5 秒**（v1.5.74）：本地引擎改为「便宜的先试」——box-blur 星表
+  首选（星少、阶梯短），SEP 星表降为备用（仍需通过重合率核验）。依据是真机日志：主星表
+  172 颗要把投票轮五轮跑完、66 秒仍解不出，而 28 颗的 box-blur 表 2.1 秒就解出。同版把
+  批量识别改为**有界并发**（低内存设备自动退回串行），并让**版本号随处可查**（设置页标题下
+  与识别日志首行）。
 - **按外部代码走查报告加固**（v1.5.69）：接缝天区的候选验证改用球面平均（原为 RA 算术
   平均，跨 0°/360° 时投影中心会算到天区对面）；历史与统计的四条写路径加互斥（单张/批量
   并发时不再静默丢条目）；结果页的统计写入、历史写入、最近星座计算、EXIF 读取与阻塞式
@@ -236,7 +248,7 @@
 │   │   └── src/main/jniLibs/arm64-v8a/      # libstellar_solver.so 预编译引擎
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # 完整工程文档与 68 份验证增补报告（§0.11 ~ §0.90）
+├── docs/                   # 完整工程文档与 71 份验证增补报告（§0.11 ~ §0.97）
 ├── tools/                  # Python 星表生成器与离线工具集
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md
