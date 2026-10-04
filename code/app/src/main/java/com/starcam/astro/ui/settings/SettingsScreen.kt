@@ -78,11 +78,18 @@ fun SettingsScreen(
     // 改为异步取，初值给空串，由 LaunchedEffect 触发首次加载。
     var logStats by remember { mutableStateOf("") }
     var logDirPath by remember { mutableStateOf("") }
+    // §0.94：加密存储是否可用（null = 尚未探测）。探测要初始化 Keystore，
+    // 属 IO，故与日志信息一并放在 LaunchedEffect + IO 里取。
+    var encryptedStorage by remember { mutableStateOf<Boolean?>(null) }
+    // §0.95 原生引擎可用性（null = 尚未探测；loadLibrary 可能较慢，故同样放 IO）
+    var nativeEngine by remember { mutableStateOf<Boolean?>(null) }
     val scope = rememberCoroutineScope()
     suspend fun loadLogInfo() {
         withContext(Dispatchers.IO) {
             logStats = com.starcam.astro.data.SolveLogStore.stats(context)
             logDirPath = com.starcam.astro.data.SolveLogStore.logDir(context).absolutePath
+            encryptedStorage = settings.isApiKeyStorageEncrypted()
+            nativeEngine = com.starcam.astro.astro.NativeEngineProbe.available
         }
     }
     fun refreshStats() {
@@ -275,6 +282,24 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // §0.95：原生引擎可用性上报（缺陷报告 S3）。原生库只编了 arm64-v8a，
+            // 32 位 / x86 设备能装上包但原生引擎整体不可用，此前用户与支持者都看不到。
+            nativeEngine?.let { available ->
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (available) {
+                        com.starcam.astro.ui.I18n.Settings.nativeEngineOk
+                    } else {
+                        com.starcam.astro.ui.I18n.Settings.nativeEngineMissing
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (available) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
 
             Spacer(Modifier.height(20.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -341,6 +366,16 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // §0.94：加密存储降级必须让用户看得见 —— 否则「可计费凭据以明文落盘」
+            // 只在 logcat 留痕，与 README 的隐私承诺不符（仅当探测到降级才显示）。
+            if (encryptedStorage == false) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    com.starcam.astro.ui.I18n.Settings.apiKeyPlaintextWarning,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = {

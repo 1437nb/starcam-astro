@@ -31,20 +31,43 @@ class SettingsRepository(context: Context) {
      * （AndroidManifest 已设 allowBackup=false，adb backup 这条路径已封）。
      * 加密存储初始化失败时回退普通 prefs——宁可降级也不能让用户配不了 key。
      */
+    /**
+     * §0.94：加密存储是否**真正**可用。
+     *
+     * 加密初始化失败会静默回退明文 prefs（见 [securePrefs]）—— 这本身是刻意的
+     * 可用性取舍，但此前只在 logcat 留一行警告，**用户完全无感知**：可计费的
+     * API Key 在降级设备上以明文落盘，与 README 的隐私承诺不符。
+     * 设置页据此明示「当前为明文存储」。
+     *
+     * 首次调用会触发 [securePrefs] 初始化（代价与任何一次 apiKey 读取相同，
+     * 且 §0.81 的预热线程通常已初始化过）—— 故建议在 IO 线程调用。
+     */
+    fun isApiKeyStorageEncrypted(): Boolean {
+        securePrefs
+        return secureOk
+    }
+
+    /** 加密 prefs 是否创建成功（由 [securePrefs] 初始化时写入） */
+    @Volatile
+    private var secureOk = false
+
     private val securePrefs: SharedPreferences by lazy {
         try {
             val masterKey = MasterKey.Builder(appContext)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build()
-            EncryptedSharedPreferences.create(
+            val created = EncryptedSharedPreferences.create(
                 appContext,
                 "starcam_secure_settings",
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
             )
+            secureOk = true
+            created
         } catch (e: Throwable) {
             Log.w(TAG, "加密存储不可用，API Key 回退普通存储", e)
+            secureOk = false
             prefs
         }
     }

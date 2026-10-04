@@ -36,6 +36,15 @@ object HistoryStore {
         val constellation: String,
     )
 
+    /**
+     * §0.92：写入必须串行化。
+     *
+     * 三条写路径（单张识别在结果页、批量识别在 IO 线程、历史页删除）都会
+     * load→改→写回；并发时后写覆盖先写，历史条目会**静默丢失**。
+     * 底层是 SharedPreferences（`edit().apply()` 自身原子），所以只需保证
+     * 「读-改-写」整段互斥：加在对象上的监视器即可（同 JVM 内串行）。
+     */
+    @Synchronized
     fun save(context: Context, entry: Entry) {
         val all = load(context)
         val newList = ArrayList<Entry>(MAX_ENTRIES)
@@ -47,7 +56,8 @@ object HistoryStore {
         write(context, newList)
     }
 
-    /** 删除单条（§0.40） */
+    /** 删除单条（§0.40）；§0.92：与 [save] 共用同一把锁，避免丢更新 */
+    @Synchronized
     fun remove(context: Context, timestamp: Long) {
         write(context, load(context).filterNot { it.timestamp == timestamp })
     }
@@ -100,6 +110,8 @@ object HistoryStore {
         return out
     }
 
+    /** §0.92：与 [save]/[remove] 同一把锁 —— 避免「清空」与「保存」交错后条目复活 */
+    @Synchronized
     fun clear(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().remove(KEY).apply()

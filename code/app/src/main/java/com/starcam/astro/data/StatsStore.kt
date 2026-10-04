@@ -21,6 +21,11 @@ object StatsStore {
         val ms: Long,
     )
 
+    /**
+     * §0.92：统计写入同样必须串行化 —— 与 [HistoryStore] 同理，
+     * load→改→写回在并发（单张识别 + 批量识别）时会丢记录。
+     */
+    @Synchronized
     fun record(context: Context, ok: Boolean, engine: String, ms: Long) {
         val all = load(context)
         val newList = ArrayList<Record>(MAX_RECORDS)

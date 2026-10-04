@@ -645,32 +645,36 @@ object LocalStarMatcher {
         }
         varr /= n
         val thr = mean + 6.0 * sqrt(varr)
-        // 前缀和：O(n) 得任意窗口均值
-        val cs = Array(height) { FloatArray(width) }
-        for (y in 0 until height) {
-            val row = y * width
-            for (x in 0 until width) {
-                cs[y][x] = gray[row + x] +
-                    (if (x > 0) cs[y][x - 1] else 0f) +
-                    (if (y > 0) cs[y - 1][x] else 0f) -
-                    (if (x > 0 && y > 0) cs[y - 1][x - 1] else 0f)
-            }
-        }
+        // §0.95：改用**滑动窗口求和**，不再为每次检测分配整幅前缀和。
+        // 原实现是 `Array(height) { FloatArray(width) }` —— 2200px 图即 1650 个小数组、
+        // 约 14.5MB，而绝大多数场景掩码为空；且积分图要在大数之间做相减，抵消误差明显。
+        // 现按「逐行取 60 宽窗口和 → 网格行内垂直累加」直接算窗口均值：
+        // O(n) 时间、O(gridW) 内存、零大对象分配。
         val win = 60
         val gridW = (width + 29) / 30
         val gridH = (height + 29) / 30
         val grid = BooleanArray(gridW * gridH)
+        val colSums = DoubleArray(gridW)
         for (gy in 0 until gridH) {
+            val y0 = gy * 30
+            val y1 = min(height - 1, y0 + win - 1)
+            java.util.Arrays.fill(colSums, 0.0)
+            for (y in y0..y1) {
+                val base = y * width
+                for (gx in 0 until gridW) {
+                    val x0 = gx * 30
+                    val x1 = min(width - 1, x0 + win - 1)
+                    var s = 0.0
+                    for (x in x0..x1) s += gray[base + x]
+                    colSums[gx] += s
+                }
+            }
+            val rows = y1 - y0 + 1
             for (gx in 0 until gridW) {
                 val x0 = gx * 30
-                val y0 = gy * 30
                 val x1 = min(width - 1, x0 + win - 1)
-                val y1 = min(height - 1, y0 + win - 1)
-                var s = cs[y1][x1].toDouble()
-                if (x0 > 0) s -= cs[y1][x0 - 1]
-                if (y0 > 0) s -= cs[y0 - 1][x1]
-                if (x0 > 0 && y0 > 0) s += cs[y0 - 1][x0 - 1]
-                if (s / ((x1 - x0 + 1) * (y1 - y0 + 1)) > thr) {
+                val area = (x1 - x0 + 1) * rows
+                if (colSums[gx] / area > thr) {
                     grid[gy * gridW + gx] = true
                 }
             }
@@ -1745,7 +1749,9 @@ object LocalStarMatcher {
         //    依据双通道方案传入，见 voteThresholds），取前 45 颗参与投票。
         val votes = HashMap<Long, Int>() // key = photoIdx shl 20 | hip
         val maxSide = max(width, height) * 0.45f
-        val hipToEntry = StarCatalogData.stars.associateBy { it.hip }
+        // §0.95：改用已有的 lazy [hipMap] —— 原实现每轮投票重建一份 8419 项
+        // `StarCatalogData.stars.associateBy { it.hip }`（一次求解最多 6 轮 =
+        // 6 次全表建表 + 4 万次装箱），而内容与 [hipMap] 完全相同。
         val work = detected
             .filter { it.brightness >= threshold }
             .take(45)
@@ -1757,25 +1763,22 @@ object LocalStarMatcher {
         } else {
             val chunkCount = Runtime.getRuntime().availableProcessors().coerceIn(2, work.size)
             val chunkSize = (work.size + chunkCount - 1) / chunkCount
-            val pool = Executors.newFixedThreadPool(chunkCount)
-            try {
-                val futures = ArrayList<Future<HashMap<Long, Int>>>(chunkCount)
-                for (c in 0 until chunkCount) {
-                    val from = c * chunkSize
-                    val to = min(work.size, from + chunkSize)
-                    if (from >= to) break
-                    futures.add(pool.submit(Callable {
-                        val local = HashMap<Long, Int>()
-                        voteChunk(local, work, from, to, idx, maxSide)
-                        local
-                    }))
-                }
-                for (f in futures) {
-                    val local = f.get()
-                    for ((k, v) in local) votes[k] = (votes[k] ?: 0) + v
-                }
-            } finally {
-                pool.shutdown()
+            // §0.95：线程池改为**复用** —— 原实现每轮 newFixedThreadPool(chunkCount)
+            // 建完即 shutdown，而一次求解最多跑 6 轮投票 = 6 次线程建/销毁。
+            val futures = ArrayList<Future<HashMap<Long, Int>>>(chunkCount)
+            for (c in 0 until chunkCount) {
+                val from = c * chunkSize
+                val to = min(work.size, from + chunkSize)
+                if (from >= to) break
+                futures.add(votePool.submit(Callable {
+                    val local = HashMap<Long, Int>()
+                    voteChunk(local, work, from, to, idx, maxSide)
+                    local
+                }))
+            }
+            for (f in futures) {
+                val local = f.get()
+                for ((k, v) in local) votes[k] = (votes[k] ?: 0) + v
             }
         }
 
@@ -1814,7 +1817,7 @@ object LocalStarMatcher {
             val runnerUp = if (sorted.size > 1) sorted[1].value else 0
             var added = 0
             if (v >= 2 && (runnerUp == 0 || v >= runnerUp * 1.2f)) {
-                hipToEntry[hip]?.let {
+                hipMap[hip]?.let {
                     pairs.add(photoIdx to it)
                     added++
                 }
@@ -1826,7 +1829,7 @@ object LocalStarMatcher {
             if (multi) {
                 for (i in 1 until sorted.size) {
                     if (sorted[i].value < 2 || added >= 3) break
-                    hipToEntry[sorted[i].key]?.let {
+                    hipMap[sorted[i].key]?.let {
                         pairs.add(photoIdx to it)
                         added++
                     }
@@ -2053,6 +2056,20 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
 
     private val hipMap by lazy { StarCatalogData.stars.associateBy { it.hip } }
 
+    /**
+     * §0.95 投票轮共享线程池：惰性创建一次，守护线程，不随轮次销毁。
+     *
+     * 原实现每轮 `Executors.newFixedThreadPool(chunkCount)` + `shutdown()`，
+     * 而一次求解最多跑 6 轮投票（主轮 → 多候选 → 弱星 → 备用 → 备用多候选 → 深域），
+     * 每轮都要建/销毁线程。块数上限是核数，故按核数建池即可覆盖。
+     * 不进 [trimCaches]：线程本身不占大量内存，且反复建池正是要避免的开销。
+     */
+    private val votePool: java.util.concurrent.ExecutorService by lazy {
+        java.util.concurrent.Executors.newFixedThreadPool(
+            Runtime.getRuntime().availableProcessors().coerceAtLeast(2),
+        ) { r -> Thread(r, "starcam-vote").apply { isDaemon = true } }
+    }
+
     @Volatile
     private var cachedGrid: HashMap<Int, MutableList<StarEntry>>? = null
 
@@ -2141,8 +2158,15 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
         val eA = hipMap[t.hipA] ?: return false
         val eB = hipMap[t.hipB] ?: return false
         val eC = hipMap[t.hipC] ?: return false
-        val ra0 = (eA.ra + eB.ra + eC.ra) / 3.0
-        val dec0 = (eA.dec + eB.dec + eC.dec) / 3.0
+        // §0.91：投影中心必须用**球面平均**（RA 跨 0°/360° 接缝安全）。
+        // 原为算术平均 (eA.ra+eB.ra+eC.ra)/3 —— 跨接缝的三角形（如 359.5° 与 0.9°）
+        // 会把中心算到天区对面，投影错位 → 该候选的第 4 星验证恒失败。
+        // 同文件的 fitPairs 早已改用 sphericalMean（§0.60 记过同一教训），此处是漏改的一处。
+        // 实测口径：接缝天区的整场仍可由**不跨接缝**的候选解出（见 RaSeamRegressionTest），
+        // 故该缺陷是「丢部分候选」而非「整片天区零产出」。
+        val sm = sphericalMean(eA, eB, eC)
+        val ra0 = sm[0]
+        val dec0 = sm[1]
         val (xA, yA) = tanXY(eA.ra, eA.dec, ra0, dec0)
         val (xB, yB) = tanXY(eB.ra, eB.dec, ra0, dec0)
         val (xC, yC) = tanXY(eC.ra, eC.dec, ra0, dec0)

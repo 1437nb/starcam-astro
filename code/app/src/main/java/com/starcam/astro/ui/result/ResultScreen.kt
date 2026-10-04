@@ -146,6 +146,19 @@ internal sealed interface ResultUiState {
 }
 
 /**
+ * §0.94 成功页的重活产物：在 IO 线程算好后再回主线程赋 `state`，
+ * 使 [ResultScreen] 的主线程只做一次状态写入。
+ */
+private data class PreparedSuccess(
+    val stars: List<StarChartOverlay.Star2D>,
+    val lines: List<StarChartOverlay.Line2D>,
+    val labels: List<StarChartOverlay.Label2D>,
+    val messier: List<StarChartOverlay.Messier2D>,
+    val solar: List<StarChartOverlay.Solar2D>,
+    val locationIsFallback: Boolean,
+)
+
+/**
  * 识别结果页：展示照片 + 星座连线/星名叠加，以及天区信息。
  * [demoRegion] 非空时走离线演示流程（不联网）。
  */
@@ -180,7 +193,12 @@ fun ResultScreen(
     var detectedStarTotal by remember { mutableIntStateOf(0) }
 
     // 识别成功 → 投影星表并切换到成功页；失败返回 false
-    fun showSuccess(
+    //
+    // §0.94：投影、EXIF 读取与定位都是 CPU 或 IO 重活 —— `projectStars` 遍历全星表，
+    // `ExifPriorsReader` 读文件，`LocationHelper.getBestLocation()` 是**阻塞式定位**；
+    // 它们原先都在主线程执行（LaunchedEffect 默认主调度器）。现全部下沉到 IO，
+    // 只有 `state` 赋值留在主线程（Compose 状态必须在主线程写）。
+    suspend fun showSuccess(
         solve: SolveResult,
         bitmap: Bitmap,
         engine: SolveEngine?,
@@ -194,44 +212,47 @@ fun ResultScreen(
             state = ResultUiState.Error(com.starcam.astro.ui.I18n.Result.missingWcs)
             return false
         }
-        // 若求解尺寸与显示尺寸不一致，做等比换算
-        val wcs = if (solve.imageWidth == w && solve.imageHeight == h) {
-            rawWcs
-        } else {
-            rawWcs.rescaledFor(solve.imageWidth, solve.imageHeight, w, h)
-        }
         val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
-        val stars = StarChartOverlay.projectStars(wcs, w, h)
-        val lines = StarChartOverlay.projectLines(stars)
-        val labels = StarChartOverlay.constellationLabels(stars, isEn)
-        val messier = StarChartOverlay.projectMessier(wcs, w, h)
-        // §0.58/§0.59 太阳系天体（月亮/行星）：位置随时刻变化，需拍摄时间 + 位置。
-        // 时间必来自 EXIF；位置优先 EXIF GPS，缺失时用当前定位兜底（未必是拍摄地）。
-        // 演示模式为合成天区，直接跳过。
-        val needFallback =
-            com.starcam.astro.astro.ExifPriorsReader.needsLocationFallback(imagePath)
-        val fallbackLoc = if (needFallback) {
-            runCatching { LocationHelper(context).getBestLocation() }.getOrNull()
-        } else {
-            null
-        }
-        val solar = if (isDemo) {
-            emptyList()
-        } else {
-            runCatching {
-                StarChartOverlay.projectSolarSystem(
-                    wcs, w, h,
-                    com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(
-                        imagePath,
-                        fallbackLoc?.let { it.latitude to it.longitude },
-                    ),
-                )
-            }.getOrDefault(emptyList())
+        val prepared = withContext(Dispatchers.IO) {
+            // 若求解尺寸与显示尺寸不一致，做等比换算
+            val wcs = if (solve.imageWidth == w && solve.imageHeight == h) {
+                rawWcs
+            } else {
+                rawWcs.rescaledFor(solve.imageWidth, solve.imageHeight, w, h)
+            }
+            val stars = StarChartOverlay.projectStars(wcs, w, h)
+            val lines = StarChartOverlay.projectLines(stars)
+            val labels = StarChartOverlay.constellationLabels(stars, isEn)
+            val messier = StarChartOverlay.projectMessier(wcs, w, h)
+            // §0.58/§0.59 太阳系天体（月亮/行星）：位置随时刻变化，需拍摄时间 + 位置。
+            // 时间必来自 EXIF；位置优先 EXIF GPS，缺失时用当前定位兜底（未必是拍摄地）。
+            // 演示模式为合成天区，直接跳过。
+            val needFallback =
+                com.starcam.astro.astro.ExifPriorsReader.needsLocationFallback(imagePath)
+            val fallbackLoc = if (needFallback) {
+                runCatching { LocationHelper(context).getBestLocation() }.getOrNull()
+            } else {
+                null
+            }
+            val solar = if (isDemo) {
+                emptyList()
+            } else {
+                runCatching {
+                    StarChartOverlay.projectSolarSystem(
+                        wcs, w, h,
+                        com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(
+                            imagePath,
+                            fallbackLoc?.let { it.latitude to it.longitude },
+                        ),
+                    )
+                }.getOrDefault(emptyList())
+            }
+            PreparedSuccess(stars, lines, labels, messier, solar, fallbackLoc != null)
         }
         state = ResultUiState.Success(
-            solve, bitmap, stars, lines, labels, messier, isDemo, engine, engineDetail,
-            elapsedMs, solar,
-            locationIsFallback = fallbackLoc != null,
+            solve, bitmap, prepared.stars, prepared.lines, prepared.labels, prepared.messier,
+            isDemo, engine, engineDetail, elapsedMs, prepared.solar,
+            locationIsFallback = prepared.locationIsFallback,
         )
         return true
     }
@@ -277,7 +298,11 @@ fun ResultScreen(
                 )
                 val elapsedMs = System.currentTimeMillis() - t0
                 if (result == null) {
-                    StatsStore.record(context, ok = false, engine = "无", ms = elapsedMs)
+                    // §0.93：统计落盘是 IO（500 条 JSON 全量重写），不能在主线程做 ——
+                    // LaunchedEffect 默认跑在主调度器上，直接调用会掉帧、极端情况 ANR。
+                    withContext(Dispatchers.IO) {
+                        StatsStore.record(context, ok = false, engine = "无", ms = elapsedMs)
+                    }
                     val message = if (!settings.hasApiKey) {
                         com.starcam.astro.ui.I18n.Result.solveFailedNoKey
                     } else {
@@ -295,30 +320,33 @@ fun ResultScreen(
                         elapsedMs = elapsedMs,
                     )
                 ) return@LaunchedEffect
-                // 识别打点（§0.40）：成功记录引擎与耗时
-                StatsStore.record(
-                    context,
-                    ok = true,
-                    engine = result.engine?.name ?: "?",
-                    ms = elapsedMs,
-                )
-                // 写入识别历史（成功后）：时间/路径/天区/引擎/最近星座
+                // §0.40 识别打点 + §0.40 历史写入：§0.93 起整段下沉到 IO 线程 ——
+                // 统计是 500 条 JSON 全量重写，nearestConstellation 还要遍历全星表算角距，
+                // 两者原本都在主线程执行（LaunchedEffect 默认主调度器）。
                 try {
-                    HistoryStore.save(
-                        context,
-                        HistoryStore.Entry(
-                            timestamp = System.currentTimeMillis(),
-                            imagePath = imagePath,
-                            raDeg = result.solve.raDeg,
-                            decDeg = result.solve.decDeg,
-                            fovDeg = result.solve.fieldWidthDeg,
-                            engine = result.detail ?: (result.engine?.name ?: ""),
-                            constellation = HistoryStore.nearestConstellation(
-                                result.solve.raDeg, result.solve.decDeg,
-                                com.starcam.astro.ui.theme.LocaleState.isEnglish,
+                    withContext(Dispatchers.IO) {
+                        StatsStore.record(
+                            context,
+                            ok = true,
+                            engine = result.engine?.name ?: "?",
+                            ms = elapsedMs,
+                        )
+                        HistoryStore.save(
+                            context,
+                            HistoryStore.Entry(
+                                timestamp = System.currentTimeMillis(),
+                                imagePath = imagePath,
+                                raDeg = result.solve.raDeg,
+                                decDeg = result.solve.decDeg,
+                                fovDeg = result.solve.fieldWidthDeg,
+                                engine = result.detail ?: (result.engine?.name ?: ""),
+                                constellation = HistoryStore.nearestConstellation(
+                                    result.solve.raDeg, result.solve.decDeg,
+                                    com.starcam.astro.ui.theme.LocaleState.isEnglish,
+                                ),
                             ),
-                        ),
-                    )
+                        )
+                    }
                 } catch (_: Exception) {
                 }
             }

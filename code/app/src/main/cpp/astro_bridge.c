@@ -227,6 +227,7 @@ static pthread_mutex_t g_index_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static index_t* get_or_load_index(const char* path) {
     int i;
+    if (!path) return NULL; /* §0.94：NULL 路径不得进入 strcmp —— 段错误无 Java 堆栈 */
     for (i = 0; i < g_index_cache_n; i++) {
         if (strcmp(g_index_paths[i], path) == 0)
             return g_index_cache[i];
@@ -242,6 +243,9 @@ static index_t* get_or_load_index(const char* path) {
     if (!idx)
         return NULL;
     strncpy(g_index_paths[g_index_cache_n], path, sizeof(g_index_paths[0]) - 1);
+    /* §0.94：显式补 NUL（strncpy 在源串≥目标容量时不终止；此处缓冲区为静态零初始化，
+     * 实践上安全，但不写死这条隐式前提 —— 一旦改为非静态/复用就不再成立） */
+    g_index_paths[g_index_cache_n][sizeof(g_index_paths[0]) - 1] = '\0';
     g_index_cache[g_index_cache_n] = idx;
     g_index_cache_n++;
     g_index_load_count++;
@@ -279,6 +283,7 @@ static void run_solver(
     double fov_lo_deg, double fov_hi_deg,
     double ra_deg, double dec_deg, double radius_deg, int use_radec,
     double plim_override, double time_limit_sec,
+    int ext_len,
     const float* ext_stars,
     char* out, size_t outsz) {
 
@@ -308,13 +313,20 @@ static void run_solver(
     starxy_t* ext_field = NULL;
     if (ext_stars) {
         ext_n = (int)ext_stars[0];
-        if (ext_n >= 4) {
+        /* §0.94：ext_stars 是 Java float[]，可读长度必须由**调用方传进来的数组长度**
+         * 决定 —— 原先只信数组内容里的 ext_n，随后按 1+i*3 直接下标读取，
+         * 数组一旦被截断就是越界读（native 越界读没有 Java 堆栈，线上极难排查）。
+         * 校验不过就整体放弃外部星点，退回 simplexy 主路径。 */
+        int max_n = (ext_len - 1) / 3;
+        if (ext_n >= 4 && ext_n <= max_n) {
             ext_field = starxy_new(ext_n, TRUE, FALSE);
             for (int i = 0; i < ext_n; i++) {
                 starxy_set_x(ext_field, i, ext_stars[1 + i*3]);
                 starxy_set_y(ext_field, i, ext_stars[2 + i*3]);
                 starxy_set_flux(ext_field, i, ext_stars[3 + i*3]);
             }
+        } else if (ext_n >= 4) {
+            ext_n = 0; /* 畸形/截断的外部星表：忽略，不留半份数据 */
         }
     }
     field = detect_stars(gray, w, h, plim_override, &ext_rc, &ext_peaks,
@@ -447,11 +459,22 @@ static int jstring_array_to_c(JNIEnv* env, jobjectArray arr, char*** out) {
     int n = arr ? (*env)->GetArrayLength(env, arr) : 0;
     if (n <= 0) { *out = NULL; return 0; }
     char** paths = (char**)calloc(n, sizeof(char*));
+    if (!paths) { *out = NULL; return 0; }
     for (int i = 0; i < n; i++) {
         jstring js = (jstring)(*env)->GetObjectArrayElement(env, arr, i);
         const char* cs = js ? (*env)->GetStringUTFChars(env, js, NULL) : NULL;
         paths[i] = cs ? strdup(cs) : NULL;
         if (js && cs) (*env)->ReleaseStringUTFChars(env, js, cs);
+        if (!paths[i]) {
+            /* §0.94：strdup / GetStringUTFChars 失败会留下 NULL 槽位，
+             * 而加载循环会把它送进 get_or_load_index → strcmp(NULL) 段错误。
+             * 宁可整体放弃索引加载（返回 0 条，调用方报 no-index-loaded），
+             * 也不能带 NULL 进循环。 */
+            for (int j = 0; j <= i; j++) free(paths[j]);
+            free(paths);
+            *out = NULL;
+            return 0;
+        }
     }
     *out = paths;
     return n;
@@ -487,7 +510,7 @@ Java_com_starcam_astro_astro_StellarSolverNative_solve(
     char out[JSON_BUF];
     run_solver(g, w, h, (const char* const*)paths, np,
                fovLoDeg, fovHiDeg, 0.0, 0.0, 0.0, 0, plimOverride, timeLimitSec,
-               es, out, sizeof(out));
+               en, es, out, sizeof(out));
     if (es) (*env)->ReleaseFloatArrayElements(env, extStars, es, JNI_ABORT);
 
     (*env)->ReleaseFloatArrayElements(env, gray, g, JNI_ABORT);
@@ -522,7 +545,7 @@ Java_com_starcam_astro_astro_StellarSolverNative_solvePriors(
     run_solver(g, w, h, (const char* const*)paths, np,
                fovLoDeg, fovHiDeg,
                raDeg, decDeg, radiusDeg, use_radec,
-               plimOverride, timeLimitSec, es2, out, sizeof(out));
+               plimOverride, timeLimitSec, en2, es2, out, sizeof(out));
     if (es2) (*env)->ReleaseFloatArrayElements(env, extStars, es2, JNI_ABORT);
 
     (*env)->ReleaseFloatArrayElements(env, gray, g, JNI_ABORT);

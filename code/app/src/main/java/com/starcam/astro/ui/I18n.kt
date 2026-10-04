@@ -58,6 +58,20 @@ object I18n {
         val onlineDesc: String get() = if (isEn) "Uses astrometry.net open plate-solving service to solve night sky photos. Free service, registration required to get API Key." else "「拍照认星」使用 astrometry.net 开源底片求解服务识别照片天区。\n该服务免费，需注册获取 API Key。"
         val apiKeyPlaceholder: String get() = if (isEn) "e.g. AbCdEf123456…" else "例如：AbCdEf123456…"
         val apiKeyHelp: String get() = if (isEn) "API Key is an alphanumeric string. Found in \"My Profile\" after login; avoid extra spaces." else "API Key 是一串字母数字（无标点），注册登录后在网站右上角「My Profile」页可见；粘贴时注意不要带上多余空格。"
+        /** §0.94：加密存储降级时的明示（此时 API Key 落在明文 prefs） */
+        /** §0.95 原生引擎可用性上报（S3）：缺失时官方引擎与 SEP 提星整体不可用 */
+        val nativeEngineOk: String get() = if (isEn) "Native solver engine: available (arm64)" else "原生引擎：可用（arm64）"
+        val nativeEngineMissing: String get() = if (isEn) {
+            "⚠️ Native solver engine: unavailable on this device (only arm64-v8a is shipped) — recognition falls back to the built-in catalog engine."
+        } else {
+            "⚠️ 原生引擎：本机不可用（仅提供 arm64-v8a 原生库），识别将回退到内置星表引擎"
+        }
+
+        val apiKeyPlaintextWarning: String get() = if (isEn) {
+            "⚠️ Encrypted storage is unavailable on this device — the API Key will be saved in plain text (readable by this app only, but not protected against root or forensic tools)."
+        } else {
+            "⚠️ 本机加密存储不可用，API Key 将以明文保存（仍仅本应用可读，但挡不住 root / 取证工具）"
+        }
         val openWebsiteButton: String get() = if (isEn) "Open nova.astrometry.net (My Profile) ↗" else "打开 nova.astrometry.net（注册后在 My Profile 查看 Key）↗"
         val serverSection: String get() = if (isEn) "Advanced: Server URL" else "高级：服务器地址"
         val serverLabel: String get() = if (isEn) "Server URL" else "服务器地址"

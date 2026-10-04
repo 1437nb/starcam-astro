@@ -43,6 +43,7 @@ object StellarSolverNative {
         System.loadLibrary("stellar_solver")
     }
 
+
     /**
      * §0.72 SEP 检出点的边界剔除带宽（像素）。
      * simplexy 的背景估计在图像边缘失效，会把边界噪声判成峰值；实测失败样本
@@ -533,6 +534,28 @@ object StellarSolverNative {
             )
         } catch (e: Exception) {
             null
+        }
+    }
+}
+
+/**
+ * §0.95 原生引擎可用性探测（缺陷报告 S3 的「能力上报」那一半）。
+ *
+ * 原生库只编译了 arm64-v8a，`build.gradle.kts` 也没有声明 `abiFilters` —— 于是 32 位
+ * 与 x86 设备**能装上包**，但 [StellarSolverNative] 的 `System.loadLibrary` 会失败，
+ * 官方引擎与 SEP 提星整体不可用，而此前只在调用点静默 catch，用户与支持者都看不到。
+ *
+ * 之所以单独放一个对象：库缺失时 [StellarSolverNative] 的 `init` 会抛
+ * `ExceptionInInitializerError`，**该对象本身不可用** —— 探测必须独立于它。
+ * `loadLibrary` 幂等，重复加载无副作用；结果缓存（成败不会随运行变化）。
+ */
+object NativeEngineProbe {
+    val available: Boolean by lazy {
+        try {
+            System.loadLibrary("stellar_solver")
+            true
+        } catch (e: Throwable) {
+            false
         }
     }
 }
