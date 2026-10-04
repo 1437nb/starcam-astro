@@ -60,6 +60,9 @@ object I18n {
         val apiKeyHelp: String get() = if (isEn) "API Key is an alphanumeric string. Found in \"My Profile\" after login; avoid extra spaces." else "API Key 是一串字母数字（无标点），注册登录后在网站右上角「My Profile」页可见；粘贴时注意不要带上多余空格。"
         /** §0.94：加密存储降级时的明示（此时 API Key 落在明文 prefs） */
         /** §0.95 原生引擎可用性上报（S3）：缺失时官方引擎与 SEP 提星整体不可用 */
+        /** §0.99 版本号显示（设置页底部的诊断信息区） */
+        fun appVersion(v: String): String = if (isEn) "App version: $v" else "版本：$v"
+
         val nativeEngineOk: String get() = if (isEn) "Native solver engine: available (arm64)" else "原生引擎：可用（arm64）"
         val nativeEngineMissing: String get() = if (isEn) {
             "⚠️ Native solver engine: unavailable on this device (only arm64-v8a is shipped) — recognition falls back to the built-in catalog engine."

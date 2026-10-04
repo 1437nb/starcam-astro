@@ -341,11 +341,16 @@ object StarSolver {
         var lastGraySnapshot: FloatArray? = null
         var lastGrayW = 0
         var lastGrayH = 0
+        // §0.99b：首行带 App 版本号 —— 排查「设备上跑的到底是哪一版」时，日志本身就是答案
+        val appVer = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "?"
         com.starcam.astro.data.SolveLogStore.line(
             context,
             "=== 开始识别 ${java.io.File(imagePath).name} ${display.width}x${display.height} " +
                 "计划=${steps.joinToString(",")} " +
-                "fov=${fov?.let { "%.1f°".format(it) } ?: "无EXIF"}",
+                "fov=${fov?.let { "%.1f°".format(it) } ?: "无EXIF"} " +
+                "App=v$appVer",
         )
         for (engine in steps) {
             when (engine) {
@@ -571,8 +576,11 @@ object StarSolver {
                 SolveEngine.LOCAL_MATCHER -> {
                     enginesTried.add("内置星表")
                     onProgress("本地星表识别中（内置 ${StarCatalogData.stars.size} 颗亮星）…")
-                    // §0.88：box-blur 备用星表。声明在 try 之外，供「主星表匹配失败后重试」使用。
+                    // §0.88/§0.97：两张星表都算出来，交给匹配器按「便宜的先试」使用。
+                    // 首选 = box-blur 表（星少、阶梯便宜），备用 = SEP 表（检出能力更强）。
                     var boxBlurStars: List<DetectedStar>? = null
+                    var sepListForFallback: List<DetectedStar>? = null
+                    var previewStars: List<DetectedStar>? = null
                     val stars = try {
                         // SEP 弱星提取优先（分块背景估计+卷积滤波，检出能力更强），
                         // 2σ 阈值星太少时降级 1.5σ；原生库不可用回退 box-blur 检测器
@@ -594,52 +602,87 @@ object StarSolver {
                             if (looser != null && looser.stars.size > (sr?.stars?.size ?: 0)) sr = looser
                         }
                         // 列表受 200 上限约束（喂匹配器的安全上限），总数不受约束
-                        var s: List<DetectedStar>? = sr?.stars
+                        val sepList: List<DetectedStar>? = sr?.stars
                         var detectedTotal = sr?.totalPeaks ?: 0
-                        // §0.72 提星质量核验：SEP 结果若与 box-blur 的重合率过低，
+                        // §0.72 提星质量核验（保留）：SEP 结果若与 box-blur 的重合率过低，
                         // 说明 SEP 这一轮不可信（典型：阈值失配导致全是边界伪影）。
-                        // 用 box-blur 结果兜底，避免"上游提星退化 → 整个引擎白跑"。
-                        val sepCandidate = s
-                        if (sepCandidate != null && sepCandidate.size >= 5) {
-                            val bb = try {
+                        var sepTrustworthy = sepList != null && sepList.size >= 5
+                        val bb = if (sepTrustworthy) {
+                            try {
                                 LocalStarMatcher.detectStars(currentDisplay)
                             } catch (e: Throwable) {
                                 null
                             }
-                            boxBlurStars = bb
-                            if (bb != null && bb.size >= 5) {
-                                val bbTop = bb.take(30)
-                                val hits = bbTop.count { b ->
-                                    sepCandidate.any { p ->
-                                        kotlin.math.abs(p.x - b.x) < 8f && kotlin.math.abs(p.y - b.y) < 8f
-                                    }
-                                }
-                                val rate = hits.toFloat() / bbTop.size
-                                extractDiag.append(
-                                    "与box-blur重合=${hits}/${bbTop.size}(${"%.0f".format(rate * 100)}%)；",
-                                )
-                                // 重合率 <30%：SEP 没检出 box-blur 看到的亮星 → 不可信
-                                if (rate < 0.30f) {
-                                    extractDiag.append("→SEP不可信，回退box-blur；")
-                                    s = bb
-                                    detectedTotal = bb.size
-                                }
-                            }
+                        } else {
+                            null
                         }
-                        if (s == null || s.size < 5) {
-                            s = try {
+                        boxBlurStars = bb
+                        if (sepTrustworthy && bb != null && bb.size >= 5) {
+                            val bbTop = bb.take(30)
+                            val hits = bbTop.count { b ->
+                                sepList!!.any { p ->
+                                    kotlin.math.abs(p.x - b.x) < 8f && kotlin.math.abs(p.y - b.y) < 8f
+                                }
+                            }
+                            val rate = hits.toFloat() / bbTop.size
+                            extractDiag.append(
+                                "与box-blur重合=${hits}/${bbTop.size}(${"%.0f".format(rate * 100)}%)；",
+                            )
+                            // 重合率 <30%：SEP 没检出 box-blur 看到的亮星 → 不可信，不参与
+                            sepTrustworthy = rate >= 0.30f
+                            if (!sepTrustworthy) extractDiag.append("→SEP不可信，只留box-blur；")
+                        }
+                        // §0.97 首选顺序：**便宜的表先试**。真机日志（5031）实测：SEP 表 172 颗
+                        // 要把投票轮 5 轮全跑完、66 秒仍解不出；同一张照片的 box-blur 表 28 颗
+                        // **2.1 秒**就解出。而本地真值回归台（12 张演示照、假阳性对照、窄场台）
+                        // 本身就是用 box-blur 表跑的 —— 换过来等于让生产首选与回归保护口径一致；
+                        // SEP 表仍作备用，弱星场景不失能力。
+                        val primaryByBox = (bb ?: emptyList()).takeIf { it.size >= 5 }
+                        val primarySep = sepList?.takeIf { it.size >= 5 }
+                        // §0.97b：**必须显式记录喂给匹配器的那张表**。
+                        // 原先这里依赖 try 块的「末表达式」，而我后来把末表达式改成了给界面预览的
+                        // 列表（更全的 SEP 表）→ 匹配输入被顶掉、且备用表与主表成了同一个对象
+                        //（匹配器据此判定「无备用」，box-blur 表从未被使用）→ 真机 5031
+                        // 从「2 秒解出」退化成「230 秒失败」。日志里「星点 172 颗」是它的指纹。
+                        var chosen: List<DetectedStar>? = null
+                        val primary = primaryByBox ?: primarySep
+                        if (primary == null) {
+                            val retry = try {
                                 LocalStarMatcher.detectStars(currentDisplay)
                             } catch (e: Throwable) {
                                 null
                             }
-                            boxBlurStars = s
-                            extractDiag.append("回退box-blur=${s?.size ?: 0}颗；")
-                            detectedTotal = s?.size ?: 0
+                            boxBlurStars = retry
+                            extractDiag.append("回退box-blur=${retry?.size ?: 0}颗；")
+                            detectedTotal = retry?.size ?: 0
+                            previewStars = retry
+                            chosen = retry
+                        } else {
+                            if (primaryByBox != null) {
+                                sepListForFallback = primarySep?.takeIf { sepTrustworthy }
+                                extractDiag.append(
+                                    "首选box-blur(${primary.size}颗)" +
+                                        (sepListForFallback?.let { "，备用SEP(${it.size}颗)" } ?: "") + "；",
+                                )
+                            } else {
+                                extractDiag.append("box-blur 表不可用，直接用 SEP 表(${primary.size}颗)；")
+                            }
+                            if (detectedTotal <= 0) detectedTotal = primary.size
+                            // 预览给「看得更全」的那张表；匹配输入始终是 chosen（= primary）
+                            previewStars = primarySep ?: primary
+                            chosen = primary
+                            // §0.97b 自查：备用表若与主表是**同一个对象**，匹配器会判定
+                            // 「没有备用」，备用机制静默失效 —— 真机 5031 曾因此从
+                            // 「2 秒解出」退化成「230 秒失败」（日志指纹：星点 172 颗）。
+                            if (sepListForFallback != null && sepListForFallback === chosen) {
+                                extractDiag.append("【内部告警：备用表与主表相同，备用机制将失效】")
+                            }
                         }
                         com.starcam.astro.data.SolveLogStore.line(
                             context, "提星：$extractDiag",
                         )
-                        s?.takeIf { it.isNotEmpty() }?.let { det ->
+                        // §0.97b：try 的返回值在这里显式给出 —— 就是喂给匹配器的那张表
+                        previewStars?.takeIf { it.isNotEmpty() }?.let { det ->
                             lastLocalStars = det
                             lastLocalStarTotal = detectedTotal
                             val maxB = det.maxOfOrNull { it.brightness } ?: 0f
@@ -655,8 +698,8 @@ object StarSolver {
                                 },
                                 detectedTotal,
                             )
-                            det // 保持 try 块返回 List<DetectedStar>?
                         }
+                        chosen
                     } catch (e: Throwable) {
                         null
                     }
@@ -665,11 +708,11 @@ object StarSolver {
                     } else null
                     val matched = if (stars != null && stars.size >= 5) {
                         try {
-                            // §0.88 把 box-blur 星表作为备用交给匹配器：主星表浅域无解时，
-                            // 匹配器会在深域重试之前用它在浅域再试一次（见 LocalStarMatcher.match）。
+                            // §0.97：首选 box-blur 表，SEP 表作为**备用**交给匹配器。
+                            // 匹配器内部顺序：首选表低成本试探 → 备用表 → 首选表完整 → 深域。
                             LocalStarMatcher.match(
                                 stars, currentDisplay.width, currentDisplay.height, hint,
-                                fallbackDetected = boxBlurStars,
+                                fallbackDetected = sepListForFallback,
                             )
                         } catch (e: Throwable) {
                             null
@@ -678,8 +721,8 @@ object StarSolver {
                     if (matched != null && LocalStarMatcher.lastMatchUsedFallback) {
                         com.starcam.astro.data.SolveLogStore.line(
                             context,
-                            "内置星表：主星表(${stars?.size ?: 0}颗)浅域未匹配，" +
-                                "改用 box-blur 备用星表(${boxBlurStars?.size ?: 0}颗)命中",
+                            "内置星表：box-blur 表(${stars?.size ?: 0}颗)浅域未匹配，" +
+                                "改用 SEP 备用星表(${sepListForFallback?.size ?: 0}颗)命中",
                         )
                     }
                     // §0.70：自研引擎的内部状态（投票轮/打分轮）是排查「为什么匹配不上」

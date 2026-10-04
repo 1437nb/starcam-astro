@@ -33,6 +33,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import com.starcam.astro.astro.OverlayRenderer
 import com.starcam.astro.data.HistoryStore
 import com.starcam.astro.data.SettingsRepository
@@ -65,10 +67,17 @@ fun BatchScreen(
     val fmt = remember { SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()) }
 
     LaunchedEffect(Unit) {
-        var saved = 0
-        for ((i, path) in paths.withIndex()) {
-            states = states.toMutableList().also { it[i] = 1 to "" }
-            val note: String = try {
+        // §0.96 批量识别改为**并行**（并发度按内存定，见下）。可行性已逐项核实：
+        //  - native 求解器每次调用自带 job（calloc，不是全局静态）、索引加载持
+        //    g_index_mutex 且**在求解前释放**；§0.67 当年专门做过 3 线程并发求解验证；
+        //  - 本地匹配器有 solveLock 整段互斥 —— 并发走到那一步会排队，不会互相踩
+        //    （代价是那一段不会更快）；
+        //  - 历史/统计（§0.92 起 @Synchronized）与识别日志（synchronized(this)）均已线程安全。
+        // 真正的约束是内存：每张在飞的照片峰值约 30~80MB（2200px 位图 + 求解中间数组），
+        // 故低内存设备退回串行，常规设备 2 路。
+        val saved = java.util.concurrent.atomic.AtomicInteger(0)
+
+        suspend fun processOne(i: Int, path: String): String = try {
                 withContext(Dispatchers.IO) {
                     // §0.81：bmp / out 都是 2200px 级位图（各约 14MB）。9 张串行处理
                     // 若都不回收，原生堆峰值可达 100~200MB。用可变引用 + try/finally
@@ -118,24 +127,54 @@ fun BatchScreen(
                             )
                         } catch (_: Exception) {
                         }
-                        saved++
+                        saved.incrementAndGet()
                         loc ?: "已识别但保存相册失败"
                     } finally {
                         bmpRef?.takeIf { !it.isRecycled }?.recycle()
                         outRef?.takeIf { !it.isRecycled }?.recycle()
                     }
                 }
-            } catch (e: Exception) {
-                "处理异常：${e.message ?: "未知错误"}"
-            }
-            val ok = !note.startsWith("未能") && !note.startsWith("无法") &&
-                !note.startsWith("渲染") && !note.startsWith("处理")
-            states = states.toMutableList().also {
-                it[i] = (if (ok) 2 else 3) to note
-            }
-            if (ok) doneCount = saved
+        } catch (e: Exception) {
+            "处理异常：${e.message ?: "未知错误"}"
         }
-        doneCount = saved
+
+        val workers = (
+            if ((context.getSystemService(android.content.Context.ACTIVITY_SERVICE)
+                    as? android.app.ActivityManager)?.isLowRamDevice == true
+            ) {
+                1
+            } else {
+                2
+            }
+            ).coerceAtMost(paths.size.coerceAtLeast(1))
+        val queue = paths.withIndex().toMutableList()
+        val lock = Any()
+        coroutineScope {
+            repeat(workers) {
+                launch(Dispatchers.IO) {
+                    while (true) {
+                        val next = synchronized(lock) {
+                            if (queue.isEmpty()) null else queue.removeAt(0)
+                        } ?: break
+                        val (i, path) = next
+                        withContext(Dispatchers.Main) {
+                            states = states.toMutableList().also { it[i] = 1 to "" }
+                        }
+                        val note = processOne(i, path)
+                        val ok = !note.startsWith("未能") && !note.startsWith("无法") &&
+                            !note.startsWith("渲染") && !note.startsWith("处理")
+                        val done = saved.get()
+                        withContext(Dispatchers.Main) {
+                            states = states.toMutableList().also {
+                                it[i] = (if (ok) 2 else 3) to note
+                            }
+                            doneCount = done
+                        }
+                    }
+                }
+            }
+        }
+        doneCount = saved.get()
         finished = true
     }
 

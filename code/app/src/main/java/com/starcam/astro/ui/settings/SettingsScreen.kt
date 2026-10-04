@@ -83,6 +83,8 @@ fun SettingsScreen(
     var encryptedStorage by remember { mutableStateOf<Boolean?>(null) }
     // §0.95 原生引擎可用性（null = 尚未探测；loadLibrary 可能较慢，故同样放 IO）
     var nativeEngine by remember { mutableStateOf<Boolean?>(null) }
+    // §0.99 版本号：排查"我装的到底是哪一版"时最直接的依据
+    var appVersion by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     suspend fun loadLogInfo() {
         withContext(Dispatchers.IO) {
@@ -90,6 +92,9 @@ fun SettingsScreen(
             logDirPath = com.starcam.astro.data.SolveLogStore.logDir(context).absolutePath
             encryptedStorage = settings.isApiKeyStorageEncrypted()
             nativeEngine = com.starcam.astro.astro.NativeEngineProbe.available
+            appVersion = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+            }.getOrDefault("")
         }
     }
     fun refreshStats() {
@@ -101,7 +106,20 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (isEn) "Settings" else "设置") },
+                // §0.99b：标题栏下常显版本号 —— 放在页面顶部，不需要滚动到日志区、
+                // 也不依赖任何折叠状态（原先放在"识别日志"区里，用户按「底部」去找会落空）
+                title = {
+                    Column {
+                        Text(if (isEn) "Settings" else "设置")
+                        if (appVersion.isNotEmpty()) {
+                            Text(
+                                com.starcam.astro.ui.I18n.Settings.appVersion(appVersion),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -282,6 +300,15 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // §0.99：版本号（便于确认设备上跑的是哪一版）
+            if (appVersion.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    com.starcam.astro.ui.I18n.Settings.appVersion(appVersion),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             // §0.95：原生引擎可用性上报（缺陷报告 S3）。原生库只编了 arm64-v8a，
             // 32 位 / x86 设备能装上包但原生引擎整体不可用，此前用户与支持者都看不到。
             nativeEngine?.let { available ->
