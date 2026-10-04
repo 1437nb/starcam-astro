@@ -12,14 +12,22 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.63](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.63)** —
+最新版本 **[v1.5.66](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.66)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.63-narrow-field-10deg-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.63/StarCam-v1.5.63-narrow-field-10deg-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.63-narrow-field-10deg-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.63/StarCam-v1.5.63-narrow-field-10deg-debug.apk) | 26.9 MB | 含调试日志 |
+| [StarCam-v1.5.66-recognition-fix-and-m3-ui-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.66/StarCam-v1.5.66-recognition-fix-and-m3-ui-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.66-recognition-fix-and-m3-ui-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.66/StarCam-v1.5.66-recognition-fix-and-m3-ui-debug.apk) | 26.9 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
+
+> **v1.5.66 识别不再挑设备**：同一张照片"开发机上解得出来、手机上认不出"的根因是
+> 打分轮的 **3 秒墙上时钟预算** —— 该轮的候选按比值偏差升序排列，而投影畸变使真解
+> **恒排最后一位**（12 张演示照中走打分轮的 8 张全部如此），于是预算一触发就必然
+> 错过唯一正解。改为**确定性候选数上限**后结果与设备速度无关。同时在主星表解不出时
+> 启用**第二个检测器的备用星表**兜底（并用低成本试探把这段耗时从 24.5 秒压到
+> 2.4 秒量级）。同版一并：**Material 3 界面重做**、修正"检星数"显示截断值的问题、
+> 失败页改为逐轮显示、结果页新增**识别耗时**。
 
 > **v1.5.63 窄场支持做到 10° 视场**：此前 10°~20° 视场（望远镜/长焦）基本认不出，
 > 根因是星表深度不够（索引只用 4.0 等以上的 514 颗星，10° 视场凑不齐匹配所需的
@@ -178,6 +186,22 @@
   "Missing classes" 检查把它当**致命错误**。已补 `-dontwarn` 规则修复，
   并修正了构建服务器上签名密钥缺失导致产物**静默未签名**的问题。
 
+- **识别不再挑设备**（v1.5.66，**重要**）：修复「同一张照片开发机解得出来、手机认不出」。
+  根因是**宽场打分轮的 3 秒墙上时钟预算** —— 该轮候选按"与照片边长的比值偏差"升序排列，
+  而 gnomonic 投影下真三角形的比值偏差最大，于是**真解恒排候选序列末位**（12 张演示照中
+  走打分轮的 8 张无一例外：218/218、1116/1116、8730/8730，重复运行稳定）。预算一旦在任一
+  检查点触发就必然错过唯一正解 —— 同一张照片的成败取决于设备快慢。改为**确定性候选数上限**
+  后结果与设备速度无关，失败页还会用 `CUT=` 标记出某轮是否被截断。
+  同版：**第二个检测器的备用星表兜底**（主星表 177 颗无法解出时，改用 box-blur 星表在
+  浅域重试并解出）、**低成本试探**（有兜底时主星表先跑 2000 候选，失败路径耗时 24.5 秒 →
+  2.4 秒量级）、**结果页与失败页显示识别耗时**（v1.5.66）。
+- **Material 3 界面重做**（v1.5.65）：字阶按 M3 规范重排、5 档圆角体系、深浅两套主题补齐
+  `surfaceContainer*` 色调阶梯、补上 M3 未定义的「成功」语义色；相机叠加层的功能色与
+  「零每帧分配」绘制代码保持不动（夜间红光模式依赖它们）。
+- **检星数与失败页修正**（v1.5.65）：界面「检星 N 颗」此前显示的是喂给匹配器的截断列表
+  长度（上限 200）而非真实检出总数（常出现"满天星却显示 197 颗"）；失败页改为**逐轮显示**
+  （浅域/深域分别列出投票轮与打分轮统计），此前只看得到最后一遍的数字、会误导排查方向。
+
 - **专业天文工具**：
   - 原图相册直接读取（绕过系统安全中心降采样，保留真实星点）；
   - 双图层全屏缩放查看器（原图 vs 标注图对比）；
@@ -198,7 +222,7 @@
 │   │   └── src/main/jniLibs/arm64-v8a/      # libstellar_solver.so 预编译引擎
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── docs/                   # 完整工程文档与 62 份验证增补报告（§0.11 ~ §0.72）
+├── docs/                   # 完整工程文档与 68 份验证增补报告（§0.11 ~ §0.90）
 ├── tools/                  # Python 星表生成器与离线工具集
 ├── LICENSE                 # GNU General Public License v2.0
 ├── README.md
@@ -224,7 +248,7 @@ cd code
 # 编译 Debug APK
 ./gradlew :app:assembleDebug
 
-# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；179 项全绿）
+# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；188 项全绿）
 ./gradlew :app:testDebugUnitTest
 
 # 产物位置
@@ -235,10 +259,11 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI（GitHub Actions）跑的是 168 项 —— 它带 `-PskipPhotoTests=true`，跳过 6 个依赖本机
+> CI（GitHub Actions）跑的是 173 项 —— 它带 `-PskipPhotoTests=true`，跳过 8 个依赖本机
 > 素材的测试类（`RealPhotoMatchTest` / `Photo12RegressionTest` / `NarrowFieldRegressionTest` /
-> `PhaseTimingBench` / `TieredCatalogTest` / `SyntheticMidFieldTest`，共 11 项）；
-> 本地素材齐备时为 **179 项**。
+> `PhaseTimingBench` / `TieredCatalogTest` / `SyntheticMidFieldTest` / `ScoredRoundBudgetTest` /
+> `FallbackStarListTest`，共 15 项）；
+> 本地素材齐备时为 **188 项**。
 
 ### 真实照片回归（可选）
 
@@ -279,7 +304,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties    # 该文件不入库
 完整说明见 **[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
 （依赖清单、跨平台重建 `.so` 的命令、可贡献方向、提交红线）。
 
-> **测试覆盖的已知折扣**：CI 跑 **168 项**，比本地少 11 项 —— 真值回归台依赖
+> **测试覆盖的已知折扣**：CI 跑 **173 项**，比本地少 15 项 —— 真值回归台依赖
 > **不入库**的实拍素材（含私拍原图，属隐私与体积上的必要取舍），在 CI 中按
 > `-PskipPhotoTests=true` 跳过。CI 侧另有一层**纯合成素材的替代回归**
 > （`SyntheticRegressionTest`）作为降级保护 —— 它验证「匹配管线在已知真值下

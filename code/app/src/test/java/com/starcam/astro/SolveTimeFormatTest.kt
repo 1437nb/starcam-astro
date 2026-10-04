@@ -14,6 +14,19 @@ import org.junit.Test
  */
 class SolveTimeFormatTest {
 
+    /** 语言是全局状态：用完必须还原，避免污染同一 JVM 里后续的测试类 */
+    private var saved: AppLanguage? = null
+
+    @org.junit.Before
+    fun saveLanguage() {
+        saved = LocaleState.language
+    }
+
+    @org.junit.After
+    fun restoreLanguage() {
+        saved?.let { LocaleState.language = it }
+    }
+
     private fun zh() { LocaleState.language = AppLanguage.ZH }
     private fun en() { LocaleState.language = AppLanguage.EN }
 

@@ -34,7 +34,7 @@ android {
 
     // 每版更新内容简述（用户规则：在 APK 文件名上带上更新内容）
     val updateDesc = project.findProperty("updateDesc") as? String
-        ?: "识别耗时显示"
+        ?: "recognition-fix-and-m3-ui"
 
     // APK 产物自动带版本号、更新内容与变体名（用户规则：文件名标注版本与更新内容）
     applicationVariants.all {
@@ -102,6 +102,9 @@ android {
                 excludeTestsMatching("com.starcam.astro.PhaseTimingBench")
                 excludeTestsMatching("com.starcam.astro.TieredCatalogTest")
                 excludeTestsMatching("com.starcam.astro.SyntheticMidFieldTest")
+                // §0.87/§0.88 新增的两台也读 testdata/gray12（不入库），CI 必须一并排除
+                excludeTestsMatching("com.starcam.astro.ScoredRoundBudgetTest")
+                excludeTestsMatching("com.starcam.astro.FallbackStarListTest")
             }
         }
     }

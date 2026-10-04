@@ -107,6 +107,8 @@
   - 验证：新增 `SolveTimeFormatTest` **5 项 0 失败**；debug 包构建成功，APK 核验
     `versionCode 86 / versionName 1.5.66` + dex 含中英标签。详见
     `docs/80-验证报告增补-§0.90-识别耗时显示.md`。
+  - **已发版 v1.5.66**（GitHub Release，`recognition-fix-and-m3-ui`，release + debug 两包，
+    签名证书与历史一致）；README 中英两版与 `docs/release-notes-v1.5.66.md` 同步。
 
 - **2026-10-04（§0.89 备用兜底下的低成本试探）** — 真机复测「识别出来了但 40 余秒」的耗时治理：
   - **耗时结构**：主星表（SEP 177 颗）浅域打分轮跑满 2 万上限 = **24.5 秒**（1.22 ms/候选），
