@@ -225,7 +225,7 @@ cd code
 ./gradlew :app:assembleDebug
 
 # Run full unit tests (astronomical math, catalog integrity, solar-system
-# ephemerides, cross-engine checks — 188/188 passing)
+# ephemerides, cross-engine checks — 190/190 passing)
 ./gradlew :app:testDebugUnitTest
 
 # Output path
@@ -236,12 +236,12 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI (GitHub Actions) runs 173 of these — it passes `-PskipPhotoTests=true` to skip
+> CI (GitHub Actions) runs 175 of these — it passes `-PskipPhotoTests=true` to skip
 > 8 test classes that need locally-built material (`RealPhotoMatchTest` /
 > `Photo12RegressionTest` / `NarrowFieldRegressionTest` / `PhaseTimingBench` /
 > `TieredCatalogTest` / `SyntheticMidFieldTest` / `ScoredRoundBudgetTest` /
 > `FallbackStarListTest` — 15 tests in total). With the
-> material present locally the count is **188**.
+> material present locally the count is **190**.
 
 ### Real-Photo Regression (optional)
 
@@ -285,7 +285,7 @@ ideas, and submission rules — are in
 **[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
 (Chinese).
 
-> **Known gap in test coverage**: CI runs **173** of the 188 tests. The truth-regression
+> **Known gap in test coverage**: CI runs **175** of the 190 tests. The truth-regression
 > suites depend on real-photo fixtures that are **not** in the repo (privacy and size) and
 > are skipped via `-PskipPhotoTests=true`. As a degraded fallback, CI also runs a purely
 > synthetic regression (`SyntheticRegressionTest`) that renders the star catalog through a

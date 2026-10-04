@@ -12,14 +12,21 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.66](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.66)** —
+最新版本 **[v1.5.69](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.69)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.66-recognition-fix-and-m3-ui-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.66/StarCam-v1.5.66-recognition-fix-and-m3-ui-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.66-recognition-fix-and-m3-ui-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.66/StarCam-v1.5.66-recognition-fix-and-m3-ui-debug.apk) | 26.9 MB | 含调试日志 |
+| [StarCam-v1.5.69-defect-report-wave3-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.69/StarCam-v1.5.69-defect-report-wave3-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.69-defect-report-wave3-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.69/StarCam-v1.5.69-defect-report-wave3-debug.apk) | 26.9 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
+
+> **v1.5.69 按外部代码走查报告做的三批加固**：修掉跨赤经接缝的候选验证（投影中心误用
+> 算术平均，接缝天区会把中心算到天区对面）、历史与统计的并发写丢数据、结果页主线程
+> IO（含阻塞式定位）、JNI 边界的越界读与空指针路径；API Key 加密降级时会**明确提示**，
+> 原生引擎不可用时也会在设置页说明；投票轮热路径去掉了每轮重建的星表索引与线程池，
+> 亮源掩码从每次检测分配 ~14.5MB 前缀和改为零大对象。含"下载远程内容并执行"的自测
+> 入口已移出正式包。
 
 > **v1.5.66 识别不再挑设备**：同一张照片"开发机上解得出来、手机上认不出"的根因是
 > 打分轮的 **3 秒墙上时钟预算** —— 该轮的候选按比值偏差升序排列，而投影畸变使真解
@@ -186,6 +193,13 @@
   "Missing classes" 检查把它当**致命错误**。已补 `-dontwarn` 规则修复，
   并修正了构建服务器上签名密钥缺失导致产物**静默未签名**的问题。
 
+- **按外部代码走查报告加固**（v1.5.69）：接缝天区的候选验证改用球面平均（原为 RA 算术
+  平均，跨 0°/360° 时投影中心会算到天区对面）；历史与统计的四条写路径加互斥（单张/批量
+  并发时不再静默丢条目）；结果页的统计写入、历史写入、最近星座计算、EXIF 读取与阻塞式
+  定位全部下沉 IO；JNI 边界补四道校验（外部星点按调用方长度校验、拒绝空路径、复制失败
+  整体放弃、显式终止符）；API Key 加密降级与原生引擎不可用都会在设置页**明确提示**；
+  投票轮不再每轮重建 8419 项星表索引与线程池，亮源掩码由每次检测 ~14.5MB 前缀和改为
+  零大对象；含下载执行链路的自测入口移出正式包（`src/debug`）。
 - **识别不再挑设备**（v1.5.66，**重要**）：修复「同一张照片开发机解得出来、手机认不出」。
   根因是**宽场打分轮的 3 秒墙上时钟预算** —— 该轮候选按"与照片边长的比值偏差"升序排列，
   而 gnomonic 投影下真三角形的比值偏差最大，于是**真解恒排候选序列末位**（12 张演示照中
@@ -248,7 +262,7 @@ cd code
 # 编译 Debug APK
 ./gradlew :app:assembleDebug
 
-# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；188 项全绿）
+# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；190 项全绿）
 ./gradlew :app:testDebugUnitTest
 
 # 产物位置
@@ -259,11 +273,11 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI（GitHub Actions）跑的是 173 项 —— 它带 `-PskipPhotoTests=true`，跳过 8 个依赖本机
+> CI（GitHub Actions）跑的是 175 项 —— 它带 `-PskipPhotoTests=true`，跳过 8 个依赖本机
 > 素材的测试类（`RealPhotoMatchTest` / `Photo12RegressionTest` / `NarrowFieldRegressionTest` /
 > `PhaseTimingBench` / `TieredCatalogTest` / `SyntheticMidFieldTest` / `ScoredRoundBudgetTest` /
 > `FallbackStarListTest`，共 15 项）；
-> 本地素材齐备时为 **188 项**。
+> 本地素材齐备时为 **190 项**。
 
 ### 真实照片回归（可选）
 
@@ -304,7 +318,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties    # 该文件不入库
 完整说明见 **[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
 （依赖清单、跨平台重建 `.so` 的命令、可贡献方向、提交红线）。
 
-> **测试覆盖的已知折扣**：CI 跑 **173 项**，比本地少 15 项 —— 真值回归台依赖
+> **测试覆盖的已知折扣**：CI 跑 **175 项**，比本地少 15 项 —— 真值回归台依赖
 > **不入库**的实拍素材（含私拍原图，属隐私与体积上的必要取舍），在 CI 中按
 > `-PskipPhotoTests=true` 跳过。CI 侧另有一层**纯合成素材的替代回归**
 > （`SyntheticRegressionTest`）作为降级保护 —— 它验证「匹配管线在已知真值下
