@@ -56,8 +56,10 @@
 
 ## 验证
 
-- 全量单元测试 **181 项 0 失败**（含 12 张真实照片回归 `true=12 / false=0 / miss=0`，
+- 全量单元测试 **188 项 0 失败**（含 12 张真实照片回归 `true=12 / false=0 / miss=0`，
   以及假阳性对照 apod3 / apod5 / pleiades 全部保持 UNSOLVED）。
+  CI（GitHub Actions）侧运行其中 **173 项** —— 跳过 8 个依赖不入库实拍素材的测试类，
+  并另跑一遍 gitleaks 凭据扫描。
 - 新增回归测试：`ScoredRoundBudgetTest`（钉住"打分轮必须跑完整串才能解出"）、
   `FallbackStarListTest`（主星表被污染时备用列表必须接管并解到正确天区）、
   `SolveTimeFormatTest`。
