@@ -881,7 +881,8 @@
 
 ## 四、与远端的关系
 
-本地 `main` 领先 `origin/main`（未推送的提交会在这里累积）。**本文不写死数字**，以命令为准：
+本地 `main` 与 `origin/main` 现为**同一条链**（2026-10-05 收敛，见下）；未推送的提交会在这里累积。
+**本文不写死数字**，以命令为准：
 
 ```bash
 cd C:/starword
@@ -892,11 +893,11 @@ git log --oneline origin/main..HEAD   # 看待推送的具体提交
 
 推送前请确认：本地是否还有不想公开的内容（本机凭据路径、内部稿、机器相关配置）。
 
-> ⚠️ **不要用 `origin/main..HEAD` 的提交数判断"有没有东西没推"。**
-> 本项目推送走 GitHub Git Data API **逐提交重建**（`tools/gh_api_push.py`），
+> ⚠️ **判断"有没有东西没推"要看树，不要只看提交数。**
+> 2026-09-20~10-05 期间推送走 GitHub Git Data API **逐提交重建**（`tools/gh_api_push.py`），
 > 远端每个提交的 SHA 都与本地不同 → 本地与 `origin/main` 恒处于「**已分叉**」，
-> `--is-ancestor` 返回否，`git log origin/main..HEAD` 会列出一长串"待推送"提交。
-> **判同步要看树，不看提交数**：
+> `git log origin/main..HEAD` 会列出一长串"待推送"提交（该问题已收敛，见本节末尾）。
+> 稳妥的判据始终是内容：
 >
 > ```bash
 > git diff --name-only HEAD origin/main   # 输出为空 = 内容已完全一致，无需推送
@@ -917,9 +918,13 @@ git log --oneline origin/main..HEAD   # 看待推送的具体提交
 > parent 都指向"新 SHA"，于是**链式传播**成两条永久平行的历史。
 > **只影响 commit 对象，不影响文件内容**（两侧 tree 哈希一致，代码与文档零差异）。
 >
-> 若想让两边 SHA 一致（或收敛影子历史），只能 `git push --force` 覆盖远端
-> （经 SOCKS 隧道走原生 git），但那是**改写远端历史**，且会让已有的 v1.5.26/37/39/48~63
-> 轻量 tag 脱离主干，与 §4「不要改写提交历史」冲突 —— **不建议，维持现状即可**。
+> **2026-10-05 已收敛**：方向是**本地采用远端链**（不改写公开历史，tag / release / CI
+> 全不动）—— `main` 重置到远端 tip，本地旧链保留在分支 `backup-main-local-3f8c79e`。
+> 同时修掉源头：`gh_api_push.py` 改为从 `git cat-file commit` 逐字节取消息、
+> author / committer 分开回填；探针实测重建提交与本地 **同 SHA**。
+> 此后经该脚本推送的提交与本地 SHA 一致，`git log origin/main..HEAD` 应恒为空。
+> （另一方向——force push 本地链覆盖远端——会让 v1.5.26/37/39/48~63 轻量 tag 脱离主干，
+> 与 §4「不要改写提交历史」冲突，故不采用。）
 
 ---
 

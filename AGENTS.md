@@ -197,7 +197,8 @@ R8 若报 `Missing class xxx` → **不是 OOM，是缺 keep 规则**。R8 会�
      （ghfast.top 代理只读，**不能 push**）；
   2. **推送**：用 GitHub **Git Data API**（`api.github.com` 可达，凭据从
      `git credential fill` 取）：blobs → tree(base_tree) → commit → PATCH refs/heads/main。
-     逐提交重建，先确认远端是本地祖先（fast-forward）。
+     逐提交重建（2026-10-05 起逐字节还原 message / author / committer，重建结果与本地
+     **同 SHA**，不再产生平行链），先确认远端是本地祖先（fast-forward）。
      **务必用 `git show <sha>:<path>` 读内容**——直接读工作区文件会带 CRLF
      （`core.autocrlf=true`），把整仓库行尾污染成 CRLF（v1.5.55 踩过，已用
      `git add --renormalize` 修回）。
