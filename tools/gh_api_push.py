@@ -187,13 +187,23 @@ def upload_commit(local_sha, parent_sha):
         return parent_sha, 0, skipped_workflow
     tree = gh("POST", f"/repos/{OWNER}/{REPO}/git/trees",
               {"base_tree": base_tree, "tree": items})
-    msg = subprocess.run((GIT, "log", "-1", "--format=%B", local_sha), cwd=WD,
-                         capture_output=True, text=True, check=True).stdout.strip()
-    ident = {"name": "1437nb", "email": "1437nb@users.noreply.github.com",
-             "date": git("log", "-1", "--format=%aI", local_sha)}
+    # 提交信息必须逐字节还原。原先用 `git log -1 --format=%B` 再 .strip()，会把 Git
+    # 惯例的消息末尾换行吃掉 → 远端重建的 commit 少 1 字节、SHA 与本地必然不同。
+    # 又因为新提交的 parent 只能填远端已有提交，这一字节差异会随 parent 链级联成
+    # 两条永久平行的历史（2026-09-20…10-05 实测 28 对、内容零差异）。改为直接读
+    # 提交对象的原始字节；author / committer 也按本地对象分别取，不再共用一个 ident。
+    raw = subprocess.run((GIT, "cat-file", "commit", local_sha), cwd=WD,
+                         capture_output=True, check=True).stdout
+    msg = raw.partition(b"\n\n")[2].decode("utf-8")
+    author = {"name": git("log", "-1", "--format=%an", local_sha),
+              "email": git("log", "-1", "--format=%ae", local_sha),
+              "date": git("log", "-1", "--format=%aI", local_sha)}
+    committer = {"name": git("log", "-1", "--format=%cn", local_sha),
+                 "email": git("log", "-1", "--format=%ce", local_sha),
+                 "date": git("log", "-1", "--format=%cI", local_sha)}
     commit = gh("POST", f"/repos/{OWNER}/{REPO}/git/commits",
                 {"message": msg, "tree": tree["sha"], "parents": [parent_sha],
-                 "author": ident, "committer": ident})
+                 "author": author, "committer": committer})
     return commit["sha"], len(items), skipped_workflow
 
 
