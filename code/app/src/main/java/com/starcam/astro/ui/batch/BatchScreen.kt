@@ -60,9 +60,9 @@ fun BatchScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    // status: 0=排队 1=识别中 2=成功 3=失败
+    // status: 0=排队 1=识别中 2=已导出 3=失败 4=已识别·未导出（P0-2.2 起）
     var states by remember { mutableStateOf(paths.map { 0 to "" }) }
-    var doneCount by remember { mutableStateOf(0) }
+    var counts by remember { mutableStateOf(BatchCounts(0, 0, 0)) }
     var finished by remember { mutableStateOf(false) }
     // P0-2.1（外部审计 2026-10-06）：原为 SimpleDateFormat —— **非线程安全**（内部
     // Calendar 是可变状态），而下方两个 worker 并发调用 format()。出错后果：文件名
@@ -80,9 +80,9 @@ fun BatchScreen(
         //  - 历史/统计（§0.92 起 @Synchronized）与识别日志（synchronized(this)）均已线程安全。
         // 真正的约束是内存：每张在飞的照片峰值约 30~80MB（2200px 位图 + 求解中间数组），
         // 故低内存设备退回串行，常规设备 2 路。
-        val saved = java.util.concurrent.atomic.AtomicInteger(0)
+        val tally = BatchTally()
 
-        suspend fun processOne(i: Int, path: String): String = try {
+        suspend fun processOne(i: Int, path: String): BatchOutcome = try {
                 withContext(Dispatchers.IO) {
                     // §0.81：bmp / out 都是 2200px 级位图（各约 14MB）。9 张串行处理
                     // 若都不回收，原生堆峰值可达 100~200MB。用可变引用 + try/finally
@@ -91,10 +91,10 @@ fun BatchScreen(
                     var outRef: android.graphics.Bitmap? = null
                     try {
                         val bmp = ImageUtils.decodeSampledBitmap(path, 2200)
-                            ?: return@withContext "无法读取照片文件"
+                            ?: return@withContext BatchOutcome.ProcessingFailed("无法读取照片文件")
                         bmpRef = bmp
                         val result = StarSolver.solve(context, bmp, path, settings) { }
-                            ?: return@withContext "未能识别（亮星不足或视场不支持）"
+                            ?: return@withContext BatchOutcome.SolveFailed("未能识别（亮星不足或视场不支持）")
                         val solve = result.solve
                         // §0.58/§0.59 太阳系天体标注：需拍摄时间 + 位置。位置优先 EXIF GPS，
                         // 缺失时用当前定位兜底（批量导出没有逐张提示的界面，位置来源在
@@ -111,7 +111,7 @@ fun BatchScreen(
                             solarFallback,
                         )
                         val out = OverlayRenderer.render(bmp, solve, solarPositions = solar)
-                            ?: return@withContext "渲染失败（结果缺坐标系）"
+                            ?: return@withContext BatchOutcome.ProcessingFailed("渲染失败（结果缺坐标系）")
                         outRef = out
                         val name = "StarCam_${LocalDateTime.now().format(fmt)}_$i.jpg"
                         val loc = ImageUtils.saveBitmapToGallery(context, out, name)
@@ -132,15 +132,19 @@ fun BatchScreen(
                             )
                         } catch (_: Exception) {
                         }
-                        saved.incrementAndGet()
-                        loc ?: "已识别但保存相册失败"
+                        // P0-2.3：保存失败不再计入"已导出"——计数由 tally 按结果类型记
+                        if (loc != null) {
+                            BatchOutcome.Saved(loc)
+                        } else {
+                            BatchOutcome.SolvedButSaveFailed("已识别但保存相册失败")
+                        }
                     } finally {
                         bmpRef?.takeIf { !it.isRecycled }?.recycle()
                         outRef?.takeIf { !it.isRecycled }?.recycle()
                     }
                 }
         } catch (e: Exception) {
-            "处理异常：${e.message ?: "未知错误"}"
+            BatchOutcome.ProcessingFailed("处理异常：${e.message ?: "未知错误"}")
         }
 
         val workers = (
@@ -165,21 +169,21 @@ fun BatchScreen(
                         withContext(Dispatchers.Main) {
                             states = states.toMutableList().also { it[i] = 1 to "" }
                         }
-                        val note = processOne(i, path)
-                        val ok = !note.startsWith("未能") && !note.startsWith("无法") &&
-                            !note.startsWith("渲染") && !note.startsWith("处理")
-                        val done = saved.get()
+                        val outcome = processOne(i, path)
+                        // P0-2.2：成败只看强类型结果，不再用 note 的文案前缀判断
+                        tally.record(outcome)
+                        val snapshot = tally.snapshot()
                         withContext(Dispatchers.Main) {
                             states = states.toMutableList().also {
-                                it[i] = (if (ok) 2 else 3) to note
+                                it[i] = outcome.statusCode() to outcome.note
                             }
-                            doneCount = done
+                            counts = snapshot
                         }
                     }
                 }
             }
         }
-        doneCount = saved.get()
+        counts = tally.snapshot()
         finished = true
     }
 
@@ -201,7 +205,9 @@ fun BatchScreen(
                 .padding(padding),
         ) {
             Text(
-                com.starcam.astro.ui.I18n.Batch.summary(paths.size, doneCount, finished),
+                com.starcam.astro.ui.I18n.Batch.summary(
+                    paths.size, counts.solved, counts.saved, counts.failed, finished,
+                ),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -246,11 +252,13 @@ fun BatchScreen(
                                     0 -> com.starcam.astro.ui.I18n.Batch.queued
                                     1 -> com.starcam.astro.ui.I18n.Batch.processing
                                     2 -> com.starcam.astro.ui.I18n.Batch.exported
+                                    4 -> com.starcam.astro.ui.I18n.Batch.solvedNotExported
                                     else -> "✗"
                                 },
                                 color = when (status) {
                                     2 -> MaterialTheme.colorScheme.primary
                                     3 -> MaterialTheme.colorScheme.error
+                                    4 -> MaterialTheme.colorScheme.tertiary
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                             )
@@ -272,4 +280,15 @@ fun BatchScreen(
             }
         }
     }
+}
+
+/**
+ * 列表状态码（P0-2.2）：成败判定与文案解耦后，状态由**结果类型**决定，不再靠
+ * `note` 前缀字符串。
+ * 0=排队 1=识别中 2=已导出 3=失败 4=已识别·未导出（保存失败但成果可用）
+ */
+private fun BatchOutcome.statusCode(): Int = when (this) {
+    is BatchOutcome.Saved -> 2
+    is BatchOutcome.SolvedButSaveFailed -> 4
+    is BatchOutcome.SolveFailed, is BatchOutcome.ProcessingFailed -> 3
 }

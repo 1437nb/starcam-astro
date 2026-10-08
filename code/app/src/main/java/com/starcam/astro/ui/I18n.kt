@@ -189,9 +189,27 @@ object I18n {
         val processing: String get() = if (isEn) "Solving…" else "识别中…"
         val exported: String get() = if (isEn) "✓ Exported" else "✓ 已导出"
         val cancel: String get() = if (isEn) "Cancel" else "取消"
-        fun summary(total: Int, done: Int, finished: Boolean): String =
-            if (isEn) "Selected $total · Succeeded $done" + (if (finished) " · Finished" else " · Processing…")
-            else "已选 $total 张 · 成功并导出 $done 张" + (if (finished) " · 完成" else " · 处理中…")
+        /**
+         * P0-2.3：汇总按**三计数**显示（识别成功 / 已导出 / 失败）。
+         * 原实现只有一个无条件自增的计数器，"成功并导出 N 张"在保存失败时是假话。
+         */
+        fun summary(total: Int, solved: Int, saved: Int, failed: Int, finished: Boolean): String {
+            val failPart = if (failed > 0) {
+                if (isEn) " · Failed $failed" else " · 失败 $failed 张"
+            } else {
+                ""
+            }
+            return if (isEn) {
+                "Selected $total · Solved $solved · Exported $saved$failPart" +
+                    (if (finished) " · Finished" else " · Processing…")
+            } else {
+                "已选 $total 张 · 识别成功 $solved 张 · 已导出 $saved 张$failPart" +
+                    (if (finished) " · 完成" else " · 处理中…")
+            }
+        }
+
+        /** P0-2.2：已识别但未导出（保存相册失败）的列表状态标签。 */
+        val solvedNotExported: String get() = if (isEn) "Solved · Not exported" else "已识别 · 未导出"
         val exportNotice: String get() = if (isEn) "Exported photos are saved in Pictures/StarCam/. Records added to History." else "导出的叠加图在相册 Pictures/StarCam/ 目录；识别记录已写入「识别历史」。"
     }
 
