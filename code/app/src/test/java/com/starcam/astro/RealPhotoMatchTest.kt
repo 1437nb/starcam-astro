@@ -30,7 +30,6 @@ class RealPhotoMatchTest {
             "../../testdata/realphotos",
             "../testdata/realphotos",
             "testdata/realphotos",
-            "C:/starcam-bundle/testdata/realphotos",
             "/opt/realphotos",
         ).firstOrNull { File(it).isDirectory } ?: "/opt/realphotos"
 

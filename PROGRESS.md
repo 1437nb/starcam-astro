@@ -5,15 +5,24 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-05（§0.97b 修复星表选择顺序的回归；工作区 v1.5.73）
-**当前基线**：v1.5.69（versionCode 89，已发版）；工作区 v1.5.71（§0.96/§0.97，未发布）
-**工作区**：`C:\starword`（唯一，详见 `AGENTS.md` §0）
-**构建环境**：**全部在本机 Windows 完成**（2026-09-17 起，开发者要求）。`.so` 用
-`tools\build_so.bat`，APK/单测用本机 gradle；不再依赖远端构建服务器。
+**最后更新**：2026-10-08（迁移落地 Linux 服务器 `/opt/starword`；接手核查）
+**当前基线**：v1.5.74（versionCode 94，已发版）
+**工作区**：`/opt/starword`（Linux 服务器；2026-10-08 由迁移包解出，HEAD = `f2033f2`
+与 GitHub `main` 同 SHA；原 Windows `C:\starword` 已归档为 `starword-migration-20261005.7z`）
+**构建环境**：⚠️ 本服务器 1.87GB 内存**无法完成 app 模块的 Kotlin 编译**（2026-10-08
+实测 4 次均被内核 OOM 杀掉）——全量单测/打包请在 ≥4GB 内存机器执行；工具链与密钥
+已就位，详见 `AGENTS.md` §2。
 
 ---
 
 ## 一、下一步（建议优先级，待开发者拍板）
+
+> **2026-10-08 接手提示**：外部审计（2026-10-06）与逐条核实版施工清单在服务器
+> `/root/starword-handoff-20261006/`（`StarCam_Astro_项目审计与改进建议_20261006.txt`、
+> `StarCam_待修清单_核实版_20261006.md`）。P0 五条 —— BatchScreen/ExifPriors 的
+> `SimpleDateFormat` 线程安全、BatchOutcome 强类型 + 三计数、solveId + 失败目录防碰撞、
+> 深域上界收紧 + FOV hint、native detach 所有权接盘 —— 加「文档绝对路径收敛」
+> 是建议的下一批施工内容（顺序见清单 §六；其中代码侧路径收敛已于 2026-10-08 完成）。
 
 1. ~~**窄场能力是否继续往下探**~~ — **已决策（2026-09-21，开发者拍板）：做到 10° 即收尾，
    不投入 5° 以下。** 理由：产品目标是手机拍星空，5° 以下的望远镜场景不是当前方向；
@@ -95,6 +104,23 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-10-08（迁移落地与接手核查）** — 工作区迁至 Linux 服务器 `/opt/starword`：
+  - 从 `starword-migration-20261005.7z` 解出工程全量（含 `.git`）；核验
+    HEAD=`f2033f2` 与 GitHub `main` 同 SHA、`origin/main` 同点、无未推送/未拉取提交。
+  - 工具链恢复：`code/local.properties` → `/opt/android-sdk`；签名密钥
+    `~/.starcam/`（与迁移包逐字节一致）、`debug.keystore` 换回开发者密钥
+    （真机可覆盖安装同一签名）；`testdata/` 全量在位（gray12 / photos12 / realphotos /
+    narrowfield / nova50 / sky50 / userphoto×3）。
+  - **测试素材路径收敛**：`NarrowFieldRegressionTest`、`SyntheticMidFieldTest`、
+    `TieredCatalogTest`、`PhaseTimingBench` 的 `C:/starword/...` 硬编码默认值改为
+    「环境变量 → 相对路径探测」；`RealPhotoMatchTest`、`Photo12RegressionTest` 中
+    已失效的 `C:/starcam-bundle` 兜底删除。
+  - ⚠️ **本服务器 1.87GB 内存无法完成 app 模块 Kotlin 编译**：4 次尝试
+    （in-process 512m / Kotlin 守护 768m+640m / in-process 1024m）均在
+    `compileDebugKotlin` 阶段被内核 OOM 杀掉；编译需 ~1.1GB+ 堆，叠加代理运行时
+    后超机器上限。→ 全量单测与打包请在 ≥4GB 内存机器执行；服务器角色定位为
+    改码 / 文档 / Python 工具 / native `.so` 重编（内存需求小）。
 
 - **2026-10-05（发布 v1.5.74）** — 开发者真机验证通过后发版：
   - README 中英两版同步到 v1.5.74（下载表、识别提速条目、文档数 71 份 / §0.11~§0.97）；
@@ -856,6 +882,10 @@
 
 ## 三、阻塞 / 待开发者处理
 
+- [ ] **全量单测尚未在新工作区跑过**（2026-10-08 工作区迁至服务器 `/opt/starword`；
+      本服务器 1.87GB 内存不足，见「最近完成」2026-10-08）。需在 ≥4GB 内存机器上
+      执行 `:app:testDebugUnitTest --rerun-tasks`（含真图回归台），跑完把结果
+      （项数 / 失败数）回填本文件与 README。
 - [x] ~~**`.github/workflows/ci.yml` 需手动添加到 GitHub**~~ —— **已解决**
       （2026-09-17）：用户在 GitHub 上给 token 补了 `workflow` scope，推送成功。
       顺带发现并解决了两件事：

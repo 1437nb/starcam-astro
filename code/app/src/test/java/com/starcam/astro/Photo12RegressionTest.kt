@@ -31,7 +31,6 @@ class Photo12RegressionTest {
                 "../../testdata/gray12",
                 "../testdata/gray12",
                 "testdata/gray12",
-                "C:/starcam-bundle/testdata/gray12",
             ).firstOrNull { File(it).isDirectory } ?: "testdata/gray12"
 
     /** 照片号 → 真值（中心 RA/Dec、长边视场度） */

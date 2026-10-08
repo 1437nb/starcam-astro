@@ -46,7 +46,13 @@ class SyntheticMidFieldTest {
 
     @Test
     fun syntheticVsReal() {
-        val dir = File(System.getenv("NF_DIR") ?: "C:/starword/testdata/narrowfield")
+        // NF_DIR 环境变量优先；否则按相对路径探测（工作区可迁移，勿再写死盘符路径）
+        val dir = File(
+            System.getenv("NF_DIR")
+                ?: listOf("../../testdata/narrowfield", "../testdata/narrowfield", "testdata/narrowfield")
+                    .firstOrNull { File(it).isDirectory }
+                ?: "testdata/narrowfield"
+        )
         val truth = JSONObject(File(dir, "truth.json").readText())
         val band = truth.keys().asSequence()
             .map { it to truth.getJSONObject(it) }
@@ -121,7 +127,13 @@ class SyntheticMidFieldTest {
      */
     @Test
     fun realDetectedStarAudit() {
-        val dir = File(System.getenv("NF_DIR") ?: "C:/starword/testdata/narrowfield")
+        // NF_DIR 环境变量优先；否则按相对路径探测（工作区可迁移，勿再写死盘符路径）
+        val dir = File(
+            System.getenv("NF_DIR")
+                ?: listOf("../../testdata/narrowfield", "../testdata/narrowfield", "testdata/narrowfield")
+                    .firstOrNull { File(it).isDirectory }
+                ?: "testdata/narrowfield"
+        )
         val truth = JSONObject(File(dir, "truth.json").readText())
         val band = truth.keys().asSequence()
             .map { it to truth.getJSONObject(it) }

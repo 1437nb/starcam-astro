@@ -48,7 +48,13 @@ class NarrowFieldRegressionTest {
 
     @Test
     fun narrowFieldSolveRate() {
-        val dir = File(System.getenv("NF_DIR") ?: "C:/starword/testdata/narrowfield")
+        // NF_DIR 环境变量优先；否则按相对路径探测（工作区可迁移，勿再写死盘符路径）
+        val dir = File(
+            System.getenv("NF_DIR")
+                ?: listOf("../../testdata/narrowfield", "../testdata/narrowfield", "testdata/narrowfield")
+                    .firstOrNull { File(it).isDirectory }
+                ?: "testdata/narrowfield"
+        )
         val truthFile = File(dir, "truth.json")
         org.junit.Assert.assertTrue(
             "缺 truth.json：$dir（先跑 tools/fetch_narrowfield.py + convert_narrowfield.py）",

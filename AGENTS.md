@@ -14,10 +14,15 @@
 
 ## 0. 唯一工作区（重要）
 
-- **唯一开发目录：`C:\starword`。**
-- 历史上本项目有多份副本（`C:\star\StarCam` 等）曾互相分叉，导致换工具就丢进度。
-  **已于 2026-09-12 合并为本仓库**，旧副本全部归档到 `C:\star\_archive\`。
-- **不要再从别处开发、不要手工同步副本。** 改代码只在这里改。
+- **当前工作区：`/opt/starword`（2026-10-08 起，Linux 构建服务器）。**
+  由迁移包 `starword-migration-20261005.7z` 解出（含完整 `.git`），HEAD = `f2033f2`
+  与 GitHub `main` 同 SHA。`testdata/`、`apk/`、`indexes/` 为机器相关本地目录，不入库。
+- 仓库外的不可再生资产（发布签名密钥、astrometry 交叉静态库、星表原始输入、
+  git bundle 快照等）在 `/opt/starcam-migration-assets/`（即迁移包内 `_migration/`）。
+- 历史：本项目曾有多份副本互相分叉（`C:\star\StarCam` 等），已于 2026-09-12 合并；
+  原 Windows 工作区 `C:\starword` 的完整快照在 2026-10-05 打包为上述 7z
+  （归档副本在服务器 `/root/starword-handoff-20261006/`）。
+- **不要再从别处开发、不要手工同步副本。** 改代码只在当前工作区改。
 - 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），分支 `main`。
 
 ### 凭据管理规范（务必遵守）
@@ -65,7 +70,29 @@ indexes/   8 个 FITS 索引副本（服务端 solve-field 定标用，git 忽�
 AGENTS.md  本文件
 ```
 
-## 2. 构建与测试（**全部在本机 Windows 完成**，2026-09-17 起）
+## 2. 构建与测试
+
+> **2026-10-08 迁移说明（先读这段）**：工作区现于 Linux 服务器 `/opt/starword`。
+> 工具链已就位：JDK 17（`/usr/lib/jvm/java-17-openjdk`）、Android SDK 34
+> （`/opt/android-sdk`，`code/local.properties` 已指向）、Gradle 8.12.1
+> （`/opt/gradle-8.12.1/bin/gradle`）、NDK r26d（`/opt/ndk/android-ndk-r26d`）。
+> ⚠️ **本服务器仅 1.87GB 内存，无法完成 app 模块的 Kotlin 编译**（2026-10-08 实测
+> 4 次：in-process 512m / Kotlin 守护 768m / in-process 1024m 均在
+> `compileDebugKotlin` 阶段被内核 OOM 杀掉 —— 编译需 ~1.1GB+ 堆）。
+> → **全量单测与打包请在 ≥4GB 内存的机器执行**；本服务器适合：改代码、写文档、
+> 跑 Python 工具、重编 native `.so`（内存需求小）。
+> Linux 调用示例（在内存足够的机器上）：
+> ```bash
+> cd <工作区>/code
+> PHOTO_DIR=../testdata/realphotos PHOTO12_DIR=../testdata/gray12 NF_DIR=../testdata/narrowfield \
+>   gradle --no-daemon --console=plain :app:testDebugUnitTest --rerun-tasks
+> ```
+> （后两个环境变量自 2026-10-08 起可不设 —— 素材路径已改为相对路径自动探测。）
+> native `.so` 重编的 Linux 路径：服务器脚本 `/opt/build_so_server.sh` + 交叉静态库
+> `/opt/starcam-migration-assets/astrometry-local/`（依赖 astrometry 源码树
+> `/tmp/astrometry.net-0.97`，重启后需按 `docs/03` 恢复；未完整验证）。
+
+**以下为原 Windows 机约定，保留备查：**
 
 > **铁律（开发者 2026-09-17 明确要求）：所有编译必须在本机运行。**
 > 不再依赖远端构建服务器。下方命令均在本机实测通过。
@@ -174,6 +201,12 @@ R8 若报 `Missing class xxx` → **不是 OOM，是缺 keep 规则**。R8 会�
    内部按 `§0.xx` 注释分区；须保持**零每帧分配**（Paint / 数组在 `remember` 里一次性创建）。
 
 ## 4. git 规矩
+
+> **2026-10-08 起（工作区在 Linux 服务器）**：原生 `git` 直连 GitHub 已实测可用
+> （`git ls-remote https://github.com/1437nb/starcam-astro.git main` 正常返回，
+> 与 `f2033f2` 一致）—— fetch / push 可直接用原生 git；提交前仍必须跑
+> `python tools/check_secrets.py`（`core.hooksPath=.githooks` 的 pre-commit 钩子已装）。
+> 下文「`git push` 在本机不可用」的两条替代通道是原 Windows 机的历史记录，保留备查。
 
 - 提交身份：仓库级 `1437nb <1437nb@users.noreply.github.com>`。
   **不要用真实邮箱提交**（会永久写进公开历史），不要用 `--global` 覆盖。

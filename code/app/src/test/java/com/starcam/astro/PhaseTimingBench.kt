@@ -49,6 +49,11 @@ class PhaseTimingBench {
 
     @Test
     fun phaseTiming() {
-        bench("宽场 gray12", File(System.getenv("PHOTO12_DIR") ?: "C:/starword/testdata/gray12"))
+        bench("宽场 gray12", File(
+            System.getenv("PHOTO12_DIR")
+                ?: listOf("../../testdata/gray12", "../testdata/gray12", "testdata/gray12")
+                    .firstOrNull { File(it).isDirectory }
+                ?: "testdata/gray12"
+        ))
     }
 }
