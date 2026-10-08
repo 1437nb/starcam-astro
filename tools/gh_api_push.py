@@ -31,15 +31,30 @@ REPO = "starcam-astro"
 BRANCH = "main"
 WD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GIT = os.environ.get("GIT_EXE", "git")
+# 统一关闭非 ASCII 路径转义：`git ls-tree` 默认会把中文文件名输出成 "\344\272\244..."
+# 形式，随后 `git show <sha>:<path>` 必然失败（服务器实测：交接说明.md 直接中止推送）。
+GIT_C = (GIT, "-c", "core.quotepath=false")
+
+
+def _run(cmd, **kw):
+    """subprocess.run 的兼容包装：capture_output / text 是 Python 3.7+ 关键字，
+    本构建服务器（Alibaba Cloud Linux 3，Python 3.6）需要降级成 3.6 写法。"""
+    if sys.version_info < (3, 7):
+        if kw.pop("capture_output", False):
+            kw.setdefault("stdout", subprocess.PIPE)
+            kw.setdefault("stderr", subprocess.PIPE)
+        if kw.pop("text", False):
+            kw["universal_newlines"] = True
+    return subprocess.run(cmd, **kw)
 
 
 def git(*args):
-    return subprocess.run((GIT,) + args, cwd=WD, capture_output=True, text=True,
+    return _run(GIT_C + args, cwd=WD, capture_output=True, text=True,
                           check=True).stdout.strip()
 
 
 def get_token():
-    out = subprocess.run((GIT, "credential", "fill"),
+    out = _run(GIT_C + ("credential", "fill"),
                          input="protocol=https\nhost=github.com\n\n",
                          capture_output=True, text=True, cwd=WD).stdout
     for line in out.splitlines():
@@ -107,7 +122,7 @@ def find_local_base(remote_sha, remote_tree):
     remote_first = remote_msg.strip().splitlines()[0].strip()
     for line in lines:
         h = line.split()[0]
-        msg = subprocess.run((GIT, "log", "-1", "--format=%s", h), cwd=WD,
+        msg = _run(GIT_C + ("log", "-1", "--format=%s", h), cwd=WD,
                              capture_output=True, text=True).stdout.strip()
         if msg == remote_first:
             return h, "message"
@@ -166,7 +181,7 @@ def upload_commit(local_sha, parent_sha):
             skipped_workflow.append(path)
             continue
         # 关键：从 git 对象读（LF），不读工作区（CRLF）
-        content = subprocess.run((GIT, "show", f"{local_sha}:{path}"), cwd=WD,
+        content = _run(GIT_C + ("show", "%s:%s" % (local_sha, path)), cwd=WD,
                                  capture_output=True, check=True).stdout
         blob = gh("POST", f"/repos/{OWNER}/{REPO}/git/blobs",
                   {"content": base64.b64encode(content).decode(), "encoding": "base64"})
@@ -192,7 +207,7 @@ def upload_commit(local_sha, parent_sha):
     # 又因为新提交的 parent 只能填远端已有提交，这一字节差异会随 parent 链级联成
     # 两条永久平行的历史（2026-09-20…10-05 实测 28 对、内容零差异）。改为直接读
     # 提交对象的原始字节；author / committer 也按本地对象分别取，不再共用一个 ident。
-    raw = subprocess.run((GIT, "cat-file", "commit", local_sha), cwd=WD,
+    raw = _run(GIT_C + ("cat-file", "commit", local_sha), cwd=WD,
                          capture_output=True, check=True).stdout
     msg = raw.partition(b"\n\n")[2].decode("utf-8")
     author = {"name": git("log", "-1", "--format=%an", local_sha),
@@ -216,7 +231,7 @@ def cmd_push():
     # 强制闸门：本脚本是绕过本地 git 钩子（pre-commit / pre-push）的**唯一**
     # 推送通道，因此必须自己先扫一遍凭据。发现疑似凭据即中止（退出码非 0）。
     print("推送前凭据自检…")
-    chk = subprocess.run(
+    chk = _run(
         (sys.executable, os.path.join(WD, "tools", "check_secrets.py")),
         cwd=WD, capture_output=True, text=True,
     )
