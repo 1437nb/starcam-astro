@@ -5,8 +5,8 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-08（迁移落地 Linux 服务器 `/opt/starword`；接手核查）
-**当前基线**：v1.5.74（versionCode 94，已发版）
+**最后更新**：2026-10-09（§0.100 P0-2.1 并发线程安全修复 + CI 验证）
+**当前基线**：v1.5.74（versionCode 94，已发版）；工作区含 §0.100（未发布）
 **工作区**：`/opt/starword`（Linux 服务器；2026-10-08 由迁移包解出，HEAD = `f2033f2`
 与 GitHub `main` 同 SHA；原 Windows `C:\starword` 已归档为 `starword-migration-20261005.7z`）
 **构建环境**：⚠️ 本服务器 1.87GB 内存**无法完成 app 模块的 Kotlin 编译**（2026-10-08
@@ -17,12 +17,13 @@
 
 ## 一、下一步（建议优先级，待开发者拍板）
 
-> **2026-10-08 接手提示**：外部审计（2026-10-06）与逐条核实版施工清单在服务器
+> **2026-10-08 接手提示**（2026-10-09 更新：P0-2.1 已完成，见 `docs/84`）：
+> 外部审计（2026-10-06）与逐条核实版施工清单在服务器
 > `/root/starword-handoff-20261006/`（`StarCam_Astro_项目审计与改进建议_20261006.txt`、
-> `StarCam_待修清单_核实版_20261006.md`）。P0 五条 —— BatchScreen/ExifPriors 的
-> `SimpleDateFormat` 线程安全、BatchOutcome 强类型 + 三计数、solveId + 失败目录防碰撞、
-> 深域上界收紧 + FOV hint、native detach 所有权接盘 —— 加「文档绝对路径收敛」
-> 是建议的下一批施工内容（顺序见清单 §六；其中代码侧路径收敛已于 2026-10-08 完成）。
+> `StarCam_待修清单_核实版_20261006.md`）。P0 五条 —— ~~BatchScreen/ExifPriors 的
+> `SimpleDateFormat` 线程安全~~（✅ 2026-10-09 §0.100）、BatchOutcome 强类型 + 三计数、
+> solveId + 失败目录防碰撞、深域上界收紧 + FOV hint、native detach 所有权接盘 ——
+> 加「文档绝对路径收敛」是建议施工内容（顺序见清单 §六；代码侧路径收敛已于 2026-10-08 完成）。
 
 1. ~~**窄场能力是否继续往下探**~~ — **已决策（2026-09-21，开发者拍板）：做到 10° 即收尾，
    不投入 5° 以下。** 理由：产品目标是手机拍星空，5° 以下的望远镜场景不是当前方向；
@@ -104,6 +105,20 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-10-09（§0.100 P0-2.1：并发线程安全修复）** — 审计 P0 批次第一条：
+  - 两处**共享 `SimpleDateFormat`**（非线程安全）均在批量并发路径上，一并改为
+    不可变、线程安全的 `DateTimeFormatter`（先例 `SolveLogStore` §0.81）：
+    ① `ui/batch/BatchScreen.kt` 相册文件名格式化器（两 worker 并发调用）；
+    ② `astro/ExifPriors.kt` 的 `utcFormat`/`localFormat`（object 级共享，批量与
+    单张流程都会走到）。时区/容错语义逐条保持（UTC→`ZoneOffset.UTC`、
+    本地→`ZoneId.systemDefault()`、坏输入仍返回 null、新增 `.trim()` 容忍空白）。
+  - **新增回归测试** `ExifPriorsTimeParseTest`（10 项）：语义锚定（手算常量
+    `1723501815`）+ 8 线程×200 轮并发回归 + 「不得再持有 SimpleDateFormat」守卫。
+    全量测试数 190 → **200 项**。
+  - 顺带核实其余 3 处 `SimpleDateFormat`（CameraScreen 回调内局部实例、
+    HistoryScreen 主线程 remember）**无并发风险**，未改动（见 `docs/84` §3）。
+  - 详见 `docs/84-验证报告增补-§0.100-并发线程安全修复P0-2.1.md`。
 
 - **2026-10-08（迁移落地与接手核查）** — 工作区迁至 Linux 服务器 `/opt/starword`：
   - 从 `starword-migration-20261005.7z` 解出工程全量（含 `.git`）；核验
@@ -889,9 +904,9 @@
 - [ ] **全量单测尚未在新工作区跑过**（2026-10-08 工作区迁至服务器 `/opt/starword`；
       本服务器 1.87GB 内存不足，见「最近完成」2026-10-08）。需在 ≥4GB 内存机器上
       执行 `:app:testDebugUnitTest --rerun-tasks`，跑完把结果（项数 / 失败数）
-      回填本文件与 README。**口径**：全量 29 类 / 190 项；其中 8 个真图/回归类
-      （共 15 项，依赖 `testdata/` 素材）CI 跑不了。参考：轻量口径 21 类 / 175 项
-      已在 CI 对 `f71e759` 全绿（run `37802915036`）。
+      回填本文件与 README。**口径**：全量 30 类 / 200 项（含 §0.100 新增 10 项）；
+      其中 8 个真图/回归类（共 15 项，依赖 `testdata/` 素材）CI 跑不了。
+      参考：轻量口径 22 类 / 185 项已在 CI 对 §0.100 提交全绿（运行号见下）。
 - [x] ~~**`.github/workflows/ci.yml` 需手动添加到 GitHub**~~ —— **已解决**
       （2026-09-17）：用户在 GitHub 上给 token 补了 `workflow` scope，推送成功。
       顺带发现并解决了两件事：

@@ -1,9 +1,11 @@
 package com.starcam.astro.astro
 
 import androidx.exifinterface.media.ExifInterface
-import java.text.SimpleDateFormat
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Locale
-import java.util.TimeZone
 
 /**
  * 位置来源。§0.59
@@ -75,10 +77,21 @@ data class ExifPriors(
 /** EXIF 先验读取器 */
 object ExifPriorsReader {
 
-    private val utcFormat = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
-    }
-    private val localFormat = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
+    /**
+     * P0-2.1（外部审计 2026-10-06）：改用 `DateTimeFormatter` —— 不可变、线程安全。
+     *
+     * 原来是 `SimpleDateFormat`（object 级共享、**非线程安全**，内部 Calendar 是
+     * 可变状态）。本读取器在**批量识别的并发路径**上被两个 worker 同时调用
+     * （`BatchScreen` → `solarSystemForPhoto`；单张流程见 `StarSolver`），并发
+     * 解析会互相污染同一实例：轻则拍摄时刻错乱（太阳系标注位置随时刻偏移，
+     * 月亮每小时走 0.55°，错标比不标更糟），重则 `ArrayIndexOutOfBoundsException`
+     * 被上层 catch 吞掉。先例与写法见 `data/SolveLogStore.kt` §0.81。
+     *
+     * 时区语义保持不变：UTC 解析走 [ZoneOffset.UTC]（原 `timeZone=UTC`），
+     * 本地解析走 [ZoneId.systemDefault]（原默认时区）。
+     */
+    private val exifTimeFmt: DateTimeFormatter =
+        DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss", Locale.US)
 
     /** 读取照片 EXIF 先验；任意异常返回"全部未知"（调用方据此降级盲解） */
     fun read(imagePath: String): ExifPriors {
@@ -172,23 +185,24 @@ object ExifPriorsReader {
         val mm = m.toInt().coerceIn(0, 59)
         val ss = s.toInt().coerceIn(0, 59)
         val text = "$date $hh:$mm:$ss"
-        val ms = try {
-            utcFormat.parse(text)?.time
+        val epoch = try {
+            LocalDateTime.parse(text.trim(), exifTimeFmt).toEpochSecond(ZoneOffset.UTC)
         } catch (e: Exception) {
             null
         } ?: return null
-        return ms / 1000
+        return epoch
     }
 
     /** DateTimeOriginal("2024:08:12 22:30:15") → Unix 秒（本地时区） */
     private fun parseLocalEpoch(raw: String?): Long? {
         if (raw.isNullOrBlank()) return null
-        val ms = try {
-            localFormat.parse(raw.replace('-', ':'))?.time
+        val epoch = try {
+            LocalDateTime.parse(raw.replace('-', ':').trim(), exifTimeFmt)
+                .atZone(ZoneId.systemDefault()).toEpochSecond()
         } catch (e: Exception) {
             null
         } ?: return null
-        return ms / 1000
+        return epoch
     }
 
     /**

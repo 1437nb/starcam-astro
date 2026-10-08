@@ -42,8 +42,8 @@ import com.starcam.astro.astro.StarSolver
 import com.starcam.astro.util.ImageUtils
 import com.starcam.astro.util.LocationHelper
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -64,7 +64,12 @@ fun BatchScreen(
     var states by remember { mutableStateOf(paths.map { 0 to "" }) }
     var doneCount by remember { mutableStateOf(0) }
     var finished by remember { mutableStateOf(false) }
-    val fmt = remember { SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()) }
+    // P0-2.1（外部审计 2026-10-06）：原为 SimpleDateFormat —— **非线程安全**（内部
+    // Calendar 是可变状态），而下方两个 worker 并发调用 format()。出错后果：文件名
+    // 时间错乱，甚至 ArrayIndexOutOfBoundsException 被外层 catch 吞掉 → 静默丢条目。
+    // DateTimeFormatter 不可变、线程安全（先例 data/SolveLogStore.kt §0.81）。
+    // 文件名保持 `_$i`（任务序号，批内唯一，防同秒撞名）。
+    val fmt = remember { DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss", Locale.US) }
 
     LaunchedEffect(Unit) {
         // §0.96 批量识别改为**并行**（并发度按内存定，见下）。可行性已逐项核实：
@@ -108,7 +113,7 @@ fun BatchScreen(
                         val out = OverlayRenderer.render(bmp, solve, solarPositions = solar)
                             ?: return@withContext "渲染失败（结果缺坐标系）"
                         outRef = out
-                        val name = "StarCam_${fmt.format(Date())}_$i.jpg"
+                        val name = "StarCam_${LocalDateTime.now().format(fmt)}_$i.jpg"
                         val loc = ImageUtils.saveBitmapToGallery(context, out, name)
                         try {
                             HistoryStore.save(
