@@ -6,6 +6,7 @@ import com.starcam.astro.astro.LocalStarMatcher
 import com.starcam.astro.astro.SkyRegion
 import com.starcam.astro.astro.StarCatalogData
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -254,5 +255,40 @@ class LocalMatcherTest {
         val gray = FloatArray(W * H) { 10f }
         val detected = LocalStarMatcher.detectStarsGray(W, H, gray)
         assertTrue("纯背景图不应检测到星点", detected.isEmpty())
+    }
+
+    // ==================== §0.103（P0-2.5）深域准入与上界守卫 ====================
+
+    /**
+     * 可信视场 > 上界 ⇒ 跳过深域；≤ 上界 / 未知 ⇒ 允许。
+     * 边界取 45.0 本身：等于上界**允许**（判据是严格大于）。
+     */
+    @Test
+    fun `可信视场超过上界时跳过深域`() {
+        assertFalse("未知视场不得跳过", LocalStarMatcher.shouldSkipDeepRetry(null))
+        assertFalse("窄场 10° 不得跳过", LocalStarMatcher.shouldSkipDeepRetry(10.0))
+        assertFalse(
+            "正好 45° 不得跳过（判据是严格大于）",
+            LocalStarMatcher.shouldSkipDeepRetry(45.0),
+        )
+        assertTrue("45.1° 应跳过", LocalStarMatcher.shouldSkipDeepRetry(45.1))
+        assertTrue("真机 5057 的 74° 应跳过", LocalStarMatcher.shouldSkipDeepRetry(74.0))
+        assertTrue("宽场 90° 应跳过", LocalStarMatcher.shouldSkipDeepRetry(90.0))
+    }
+
+    /**
+     * 守卫：深域视场上界不得再放宽回 90°（docs/72 B2 与外部审计 P0-2.5 的结论是
+     * 收紧到 ~40°~45°），同时必须覆盖窄场/中场真值台的最大视场（0.5°~20°）。
+     */
+    @Test
+    fun `深域视场上界保持在窄场范围内`() {
+        assertTrue(
+            "上界不应超过 45°（实际 ${LocalStarMatcher.DEEP_PATH_MAX_FOV_DEG}）",
+            LocalStarMatcher.DEEP_PATH_MAX_FOV_DEG <= 45.0,
+        )
+        assertTrue(
+            "上界必须覆盖中场真值台的 20°（实际 ${LocalStarMatcher.DEEP_PATH_MAX_FOV_DEG}）",
+            LocalStarMatcher.DEEP_PATH_MAX_FOV_DEG > 20.0,
+        )
     }
 }

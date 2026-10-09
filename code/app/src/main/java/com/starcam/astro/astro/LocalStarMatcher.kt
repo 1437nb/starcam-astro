@@ -22,11 +22,20 @@ import java.util.concurrent.Future
 /** 照片中检测到的星点 */
 data class DetectedStar(val x: Float, val y: Float, val brightness: Float)
 
+/**
+ * §0.103（P0-2.5）：解来自哪个星表域。
+ * 浅域（mag≤4.0）是宽场主路径；深域（mag≤6.5）是窄场兜底 —— 调用方据此知道
+ * "这个解是高密度星表兜底得到的"，可做更谨慎的呈现/记录（审计 P0-2.5 (d)）。
+ */
+enum class CatalogDomain { SHALLOW, DEEP }
+
 /** 本地匹配结果 */
 data class LocalMatchResult(
     val solve: SolveResult,
     val matchedPairs: List<Pair<DetectedStar, StarEntry>>,
     val inlierCount: Int,
+    /** §0.103：解来源域（默认浅域 —— 既有构造点全部产出浅域解，无需逐个改）。 */
+    val catalogDomain: CatalogDomain = CatalogDomain.SHALLOW,
 )
 
 /**
@@ -98,13 +107,33 @@ object LocalStarMatcher {
     private const val DEEP_CATALOG_MAG = 6.5f
 
     /**
-     * §0.75 深域路径的视场上界（度）。
+     * §0.103（P0-2.5）深域路径的视场上界（度）与深域准入判据。
      *
-     * 取值依据：已知全部真解的最大视场是宽场回归里的 76.9°，而深域坍缩伪影
-     * 报出 104°~170°。取 90° 落在两者之间，既容纳真实宽场，又排除全部伪影。
-     * 只作用于深域兜底路径，浅域（宽场主路径）的 [plausibleFov] 门槛不变。
+     * 原值 90°：旧注释自己写着"已知全部真解的最大视场是宽场回归里的 76.9°"，取 90°
+     * 是为"容纳真实宽场" —— 但**深域是窄场兜底路径**（目标 ≤20°），真实宽场在浅域
+     * 就该解出（宽场回归 12/12）；浅域整条阶梯都无解的宽场照片拿到 45°~90° 的"解"，
+     * 基本是尺度坍缩伪影。docs/72（代码审查 B2）与外部审计（2026-10-06 P0-2.5）
+     * 都建议把深域上界收紧到 ~40°~45°。
+     *
+     * 取 **45°** 的理由：① 窄场/中场真值台覆盖 0.5°~20°，离该界很远，收紧不影响
+     * 既有能力；② 与"可信 EXIF 视场 > 45° 时跳过深域"的准入判据共用同一个界 ——
+     * 一个口子、一处定义。
+     *
+     * 可见性 internal：仅供测试做"不得再放宽"的守卫（与调试开关同一约定）。
      */
-    private const val DEEP_PATH_MAX_FOV_DEG = 90.0
+    internal const val DEEP_PATH_MAX_FOV_DEG = 45.0
+
+    /**
+     * §0.103（P0-2.5）深域准入判据：有**可信视场**（EXIF 焦距推算）且明显是宽场时，
+     * 深域不值得跑 —— §0.87 的密度换算表明视场 >66° 时深域过门在数学上不可达；
+     * 真机实测 5057（74°~75°）在深域空转、打满 60 秒硬上限（PROGRESS §0.97）。
+     *
+     * ⚠️ 判据只允许用**调用方传入的可信视场**。§0.98 曾按"浅域失败候选反推的视场"
+     * 做同类闸门并当场回滚 —— 那种候选在浅域失败时被尺度坍缩伪解主导，与真实视场
+     * 无关（窄场 12°/20° 合成用例当场 UNSOLVED）。这正是本方案改用 EXIF 视场的原因。
+     */
+    internal fun shouldSkipDeepRetry(fovHintDeg: Double?): Boolean =
+        fovHintDeg != null && fovHintDeg > DEEP_PATH_MAX_FOV_DEG
 
     /**
      * §0.77 运行时星表域：**对象级状态，受 [solveLock] 保护**。
@@ -366,6 +395,18 @@ object LocalStarMatcher {
     @Volatile var debugShallowScoredBest: Int? = null
         private set
     @Volatile var debugShallowScoredInFrame: Int? = null
+        private set
+
+    // ── §0.103（P0-2.5）深域准入留档 ────────────────────────────────
+    /**
+     * 最近一次求解**深域路径未产出可用解的原因**（`null` = 深域有可用解、或未走到深域）。
+     *
+     * 两种情形会写入：① 可信视场 > 上界，**跳过**深域；② 深域解视场超出窄场上界，
+     * **拒绝**为坍缩伪解。失败页/识别日志据此说明"为什么没有深域结果"——否则用户
+     * 只看到"没解出来"，分不清是"不值得跑"还是"跑了也没解出"（真机 5057 曾白跑 60 秒，
+     * 有了这个字段才能在诊断里一眼看出闸门生效）。
+     */
+    @Volatile var debugDeepRejectedReason: String? = null
         private set
 
     /** §0.62 调试：打分轮最佳候选的对齐对数与展开后对数（诊断用） */
@@ -1174,11 +1215,12 @@ object LocalStarMatcher {
         pointingHint: PointingHint? = null,
         allowDeepRetry: Boolean = true,
         fallbackDetected: List<DetectedStar>? = null,
+        fovHintDeg: Double? = null,
     ): LocalMatchResult? = synchronized(solveLock) {
         // §0.77：整个求解在 solveLock 内执行。域（runtimeCatalogMag）是对象级状态，
         // 必须保证它在整次求解期间不被另一个求解改写；投票轮的 worker 线程也因此
         // 与主线程看到同一个域（**不能**用 ThreadLocal，原因见 runtimeCatalogMag）。
-        matchLocked(detected, width, height, pointingHint, allowDeepRetry, fallbackDetected)
+        matchLocked(detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg)
     }
 
     /** [match] 的实现体。**必须在 [solveLock] 内调用**（见 [runtimeCatalogMag]）。 */
@@ -1189,6 +1231,7 @@ object LocalStarMatcher {
         pointingHint: PointingHint?,
         allowDeepRetry: Boolean,
         fallbackDetected: List<DetectedStar>? = null,
+        fovHintDeg: Double? = null,
     ): LocalMatchResult? {
         if (detected.size < 5) return null
         // §0.86：清掉上一张图的留档，避免失败页显示陈旧的浅域数字
@@ -1196,6 +1239,7 @@ object LocalStarMatcher {
         debugShallowScoredStats = null
         debugShallowScoredBest = null
         debugShallowScoredInFrame = null
+        debugDeepRejectedReason = null
         lastMatchUsedFallback = false
         if (pointingHint != null) {
             val hintResult = matchInternal(detected, width, height, pointingHint)
@@ -1239,6 +1283,21 @@ object LocalStarMatcher {
         // 浅域覆盖的宽场里，深域是给 ≤30° 窄场照片兜底的。
         if (!allowDeepRetry) return null
         if (debugDisableDeepCatalog) return null
+        // §0.103（P0-2.5）深域准入：有可信 EXIF 视场且 > [DEEP_PATH_MAX_FOV_DEG] 时
+        // **直接跳过深域**。两条依据：① 深域是窄场路径，宽场在浅域就该解出；浅域全败的
+        // 宽场照片拿到深域"解"基本是坍缩伪影；② 深域在这种视场下过门在数学上不可达
+        // （§0.87 密度换算：>66° 不可达），真机 5057 因此白跑 60 秒（PROGRESS §0.97）。
+        // 判据**只用手持的 EXIF 视场**，绝不用浅域失败候选反推的视场（§0.98 的回滚教训）。
+        if (shouldSkipDeepRetry(fovHintDeg)) {
+            debugDeepRejectedReason = buildString {
+                append("可信视场 ")
+                append("%.1f°".format(fovHintDeg))
+                append(" > ")
+                append("%.0f°".format(DEEP_PATH_MAX_FOV_DEG))
+                append("，深域不可达/只会出伪解，已跳过")
+            }
+            return null
+        }
         // §0.75 窄场兜底：浅星表域（mag<=4.0）整条阶梯都无解时，用深星表域
         // （mag<=6.5）重试一次。宽场照片在浅域就能解出，永远不会走到这里 ——
         // 这是分级而非全局加深的原因：实测全局加深会让 30° 宽场（mid30 的
@@ -1268,19 +1327,26 @@ object LocalStarMatcher {
         } finally {
             runtimeCatalogMag = savedMag
         }
-        // §0.75 深域是**窄场路径**，对它的解再设一道视场上界。
+        // §0.75 深域是**窄场路径**，对它的解再设一道视场上界（§0.103 起为 45°）。
         //
         // 为什么需要：深域候选密度是浅域的 16 倍，尺度坍缩型伪影随之增多 ——
         // 实测 6 个窄场从 UNSOLVED 变成 WRONG，报出视场 104°~170° 而真值只有
-        // 1°~5°。而一个解若声称视场 >90°，它本质是宽场；宽场在浅域就该解出
-        // （宽场回归 12/12），浅域整条阶梯都无解的宽场照片拿到 >90° 的解，
-        // 基本都是坍缩伪影。窄场目标（10°）远低于此界，不受影响。
+        // 1°~5°。而一个解若声称视场远超窄场上界，它本质是宽场；宽场在浅域就该解出
+        // （宽场回归 12/12），浅域整条阶梯都无解的宽场照片拿到这种"解"，基本都是
+        // 坍缩伪影。窄场目标（≤20°）远低于此界，不受影响。
         if (deep != null &&
             maxOf(deep.solve.fieldWidthDeg, deep.solve.fieldHeightDeg) > DEEP_PATH_MAX_FOV_DEG
         ) {
+            debugDeepRejectedReason = "深域解视场 %.1f° 超出窄场上界 %.0f°，按坍缩伪解拒绝"
+                .format(
+                    maxOf(deep.solve.fieldWidthDeg, deep.solve.fieldHeightDeg),
+                    DEEP_PATH_MAX_FOV_DEG,
+                )
             return null
         }
-        return deep
+        // §0.103（P0-2.5）：标记解来源域 —— 调用方（识别日志/结果页）据此知道
+        // "这是高密度星表兜底得到的解"，可做更谨慎的记录与呈现。
+        return deep?.copy(catalogDomain = CatalogDomain.DEEP)
     }
 
     private fun matchInternal(

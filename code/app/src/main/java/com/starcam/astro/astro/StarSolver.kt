@@ -713,14 +713,21 @@ object StarSolver {
                         try {
                             // §0.97：首选 box-blur 表，SEP 表作为**备用**交给匹配器。
                             // 匹配器内部顺序：首选表低成本试探 → 备用表 → 首选表完整 → 深域。
+                            // §0.103（P0-2.5）：把手持的 EXIF 视场作为**可信提示**传进去 ——
+                            // 视场 > 45° 时匹配器会跳过深域重试（深域是窄场兜底路径，宽场跑它
+                            // 白费且只会出伪解）。⚠️ 只用 EXIF 视场，绝不用浅域失败候选反推的
+                            // 视场（§0.98 的闸门就是这么被回滚的）。
                             LocalStarMatcher.match(
                                 stars, currentDisplay.width, currentDisplay.height, hint,
                                 fallbackDetected = sepListForFallback,
+                                fovHintDeg = fov,
                             )
                         } catch (e: Throwable) {
                             null
                         }
                     } else null
+                    // §0.103：在 match 返回后立即取走深域准入留档（避免被下一次求解覆盖）
+                    val deepRejectReason = LocalStarMatcher.debugDeepRejectedReason
                     if (matched != null && LocalStarMatcher.lastMatchUsedFallback) {
                         log.line(
                             context,
@@ -743,7 +750,15 @@ object StarSolver {
                         }
                     }
                     if (matched != null && acceptLocalSolve(context, currentDisplay, matched)) {
-                        val detail = "内置星表 · 内点 ${matched.inlierCount} 颗"
+                        // §0.103（P0-2.5）：深域兜底解在日志/报告里明确标出来源 ——
+                        // 它是"高密度星表兜底"得到的，与浅域主路径解的可信度不同，
+                        // 排查时应区别对待（审计 P0-2.5 (d)）。
+                        val domainTag = if (matched.catalogDomain == CatalogDomain.DEEP) {
+                            " · 深域兜底"
+                        } else {
+                            ""
+                        }
+                        val detail = "内置星表 · 内点 ${matched.inlierCount} 颗$domainTag"
                         log.line(
                             context,
                             "内置星表成功：$detail scale=%.2f\" 耗时=%dms"
@@ -751,7 +766,8 @@ object StarSolver {
                         )
                         com.starcam.astro.data.SolveLogStore.addStep(
                             report, "内置星表", "solved",
-                            "内点=${matched.inlierCount} scale=%.2f".format(matched.solve.pixScaleArcsec),
+                            ("内点=${matched.inlierCount} scale=%.2f$domainTag")
+                                .format(matched.solve.pixScaleArcsec),
                             System.currentTimeMillis() - logT0,
                         )
                         writeSuccessLog(context, report, imagePath, "内置星表", detail)
@@ -767,6 +783,9 @@ object StarSolver {
                             append("；打分轮=${LocalStarMatcher.debugScoredStats}")
                             append("（best=${LocalStarMatcher.debugScoredBest}")
                             append(" inFrame=${LocalStarMatcher.debugScoredInFrame}）")
+                            // §0.103（P0-2.5）：深域被跳过/被拒时写清原因，避免把
+                            // "闸门生效"误读成"深域也解不出"（真机 5057 曾白跑 60 秒）
+                            deepRejectReason?.let { append("；深域：").append(it) }
                         }
                         else -> "有解但内点仅 ${matched.inlierCount} 颗，被官方复核拒绝"
                     }
