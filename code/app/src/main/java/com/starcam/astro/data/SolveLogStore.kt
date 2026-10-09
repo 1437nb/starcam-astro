@@ -61,6 +61,61 @@ object SolveLogStore {
     private val reportTimeFmt: DateTimeFormatter =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.US)
 
+    /**
+     * 求解会话计数器（P0-2.4，外部审计 2026-10-06）。
+     * 进程内单调递增 —— 批量识别的两个 worker 并发开会话也不会重号。
+     */
+    private val solveCounter = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * 开一次求解的日志会话：把 [Session.solveId] 与照片名钉进该次求解的**每一行**日志
+     * （P0-2.4）。批量并发时两条求解的行互相穿插，只有带前缀才能按行归属。
+     *
+     * @param imagePath 照片路径或文件名；只取文件名入前缀（隐私：日志不写完整路径）
+     */
+    fun beginSolve(imagePath: String?): Session =
+        Session(
+            solveId = "S%03d".format(Locale.US, solveCounter.incrementAndGet()),
+            imageName = imagePath?.let { File(it).name },
+        )
+
+    /**
+     * 一次求解的日志会话（P0-2.4）。不可变，线程安全；所有写盘都委托给
+     * 线程安全的 [SolveLogStore.line] / [SolveLogStore.dumpFailure]。
+     */
+    class Session(val solveId: String, val imageName: String?) {
+
+        /** 每行日志的统一前缀，形如 `[S042][photo5031.jpg] `（照片名缺失时只有前半段）。 */
+        val prefix: String = buildString {
+            append('[').append(solveId).append(']')
+            if (!imageName.isNullOrBlank()) append('[').append(imageName).append(']')
+            append(' ')
+        }
+
+        /** 带会话前缀的一行日志 */
+        fun line(context: Context, msg: String) =
+            SolveLogStore.line(context, prefix + msg)
+
+        /** 写失败现场：目录名与报告都带上本会话的 solveId（同秒多张失败不再互相覆盖） */
+        fun dumpFailure(
+            context: Context,
+            report: JSONObject,
+            gray: FloatArray? = null,
+            grayW: Int = 0,
+            grayH: Int = 0,
+        ): File? = SolveLogStore.dumpFailure(context, report, solveId, gray, grayW, grayH)
+    }
+
+    /**
+     * 失败现场目录名（P0-2.4）：`fail-<yyyyMMdd-HHmmss>[-<solveId>]`。
+     *
+     * 原实现只有秒级时间戳 —— 两个 worker 同一秒失败会写进**同一个目录**，
+     * `report.json` 与 `input.gray.gz` 同名互相覆盖，产出"报告来自照片 A、
+     * 像素来自照片 B"的缝合怪。加上 solveId 后同秒也不可能撞名。
+     */
+    fun failDirName(ts: LocalDateTime, solveId: String?): String =
+        "fail-" + dirFmt.format(ts) + (if (solveId.isNullOrBlank()) "" else "-$solveId")
+
     /** 是否启用。默认开启（用户要求 release 也能记录）。 */
     fun isEnabled(context: Context): Boolean =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -102,6 +157,7 @@ object SolveLogStore {
      * 写失败现场：结构化报告 + 可选原始像素。
      *
      * @param report   结构化诊断（引擎轨迹、星点数、各轮结果…）
+     * @param solveId  求解会话号（P0-2.4）；非空时写进目录名与报告，用于归属本次求解
      * @param gray     匹配器实际吃到的灰度（int32 w + int32 h + float32 数组），
      *                 可直接喂给本机测试台重放；为 null 则不落盘
      * @return 落盘的目录（供 UI 展示路径），失败返回 null
@@ -109,14 +165,19 @@ object SolveLogStore {
     fun dumpFailure(
         context: Context,
         report: JSONObject,
+        solveId: String? = null,
         gray: FloatArray? = null,
         grayW: Int = 0,
         grayH: Int = 0,
     ): File? {
         if (!isEnabled(context)) return null
         return try {
-            val dir = File(logDir(context), "fail-${dirFmt.format(LocalDateTime.now())}")
+            // P0-2.4：目录名带 solveId —— 同一秒两张失败也不再写进同一目录
+            // （原实现 report.json / input.gray.gz 会互相覆盖，产出现场缝合怪）。
+            val dir = File(logDir(context), failDirName(LocalDateTime.now(), solveId))
             dir.mkdirs()
+            // 报告自身也带上会话号，便于与日志行、与界面上的同一次求解对上号
+            if (!solveId.isNullOrBlank()) report.put("solveId", solveId)
             File(dir, "report.json").writeText(report.toString(2))
 
             if (gray != null && grayW > 0 && grayH > 0 && gray.size == grayW * grayH) {

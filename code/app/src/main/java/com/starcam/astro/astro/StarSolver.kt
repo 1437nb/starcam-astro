@@ -336,6 +336,9 @@ object StarSolver {
         val report = com.starcam.astro.data.SolveLogStore.newReport(
             context, imagePath, display.width, display.height,
         )
+        // P0-2.4：本次求解的日志会话 —— solveId + 照片名钉进每一行日志，
+        // 批量两个 worker 并发时日志才可按行归属；失败现场目录也带 solveId。
+        val log = com.starcam.astro.data.SolveLogStore.beginSolve(imagePath)
         // §0.70：失败现场要落一份「匹配器实际吃到的像素」，才可能在开发机精确重放。
         // 在本地引擎分支检测星点时顺手抓取（该分支本来就要算灰度）。
         var lastGraySnapshot: FloatArray? = null
@@ -345,7 +348,7 @@ object StarSolver {
         val appVer = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "?"
-        com.starcam.astro.data.SolveLogStore.line(
+        log.line(
             context,
             "=== 开始识别 ${java.io.File(imagePath).name} ${display.width}x${display.height} " +
                 "计划=${steps.joinToString(",")} " +
@@ -544,7 +547,7 @@ object StarSolver {
                             nativeSolve.indexId?.let { append(" · index-$it") }
                             nativeSolve.nMatch?.let { append(" · 匹配 $it 星") }
                         }
-                        com.starcam.astro.data.SolveLogStore.line(
+                        log.line(
                             context,
                             "官方引擎成功：$detail logodds=${nativeSolve.logodds} " +
                                 "耗时=${System.currentTimeMillis() - logT0}ms",
@@ -563,7 +566,7 @@ object StarSolver {
                         val diag = "nstars=${StellarSolverNative.lastFailNStars} " +
                             "rc=${StellarSolverNative.lastFailRc} " +
                             "gmean=${StellarSolverNative.lastFailGMean}"
-                        com.starcam.astro.data.SolveLogStore.line(
+                        log.line(
                             context, "官方引擎失败（所有轮次）：$diag",
                         )
                         com.starcam.astro.data.SolveLogStore.addStep(
@@ -678,7 +681,7 @@ object StarSolver {
                                 extractDiag.append("【内部告警：备用表与主表相同，备用机制将失效】")
                             }
                         }
-                        com.starcam.astro.data.SolveLogStore.line(
+                        log.line(
                             context, "提星：$extractDiag",
                         )
                         // §0.97b：try 的返回值在这里显式给出 —— 就是喂给匹配器的那张表
@@ -719,7 +722,7 @@ object StarSolver {
                         }
                     } else null
                     if (matched != null && LocalStarMatcher.lastMatchUsedFallback) {
-                        com.starcam.astro.data.SolveLogStore.line(
+                        log.line(
                             context,
                             "内置星表：box-blur 表(${stars?.size ?: 0}颗)浅域未匹配，" +
                                 "改用 SEP 备用星表(${sepListForFallback?.size ?: 0}颗)命中",
@@ -741,7 +744,7 @@ object StarSolver {
                     }
                     if (matched != null && acceptLocalSolve(context, currentDisplay, matched)) {
                         val detail = "内置星表 · 内点 ${matched.inlierCount} 颗"
-                        com.starcam.astro.data.SolveLogStore.line(
+                        log.line(
                             context,
                             "内置星表成功：$detail scale=%.2f\" 耗时=%dms"
                                 .format(matched.solve.pixScaleArcsec, System.currentTimeMillis() - logT0),
@@ -767,7 +770,7 @@ object StarSolver {
                         }
                         else -> "有解但内点仅 ${matched.inlierCount} 颗，被官方复核拒绝"
                     }
-                    com.starcam.astro.data.SolveLogStore.line(context, "内置星表失败：$why")
+                    log.line(context, "内置星表失败：$why")
                     com.starcam.astro.data.SolveLogStore.addStep(
                         report, "内置星表", "unsolved", why,
                         System.currentTimeMillis() - logT0,
@@ -816,7 +819,7 @@ object StarSolver {
                             solve.subId?.let { "任务 #$it" },
                             "在线定标",
                         ).joinToString(" · ")
-                        com.starcam.astro.data.SolveLogStore.line(
+                        log.line(
                             context, "在线识别成功：$detail 耗时=${System.currentTimeMillis() - logT0}ms",
                         )
                         com.starcam.astro.data.SolveLogStore.addStep(
@@ -863,10 +866,10 @@ object StarSolver {
             try {
                 report.put("verdict", failVerdict)
                 report.put("totalMs", System.currentTimeMillis() - logT0)
-                val dir = com.starcam.astro.data.SolveLogStore.dumpFailure(
+                val dir = log.dumpFailure(
                     context, report, lastGraySnapshot, lastGrayW, lastGrayH,
                 )
-                com.starcam.astro.data.SolveLogStore.line(
+                log.line(
                     context,
                     "=== 识别失败（$failVerdict）总耗时=${System.currentTimeMillis() - logT0}ms" +
                         (dir?.let { " 现场=${it.name}" } ?: ""),

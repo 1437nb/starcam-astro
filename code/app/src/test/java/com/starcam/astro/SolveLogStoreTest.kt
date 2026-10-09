@@ -4,8 +4,10 @@ import com.starcam.astro.data.SolveLogStore
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDateTime
 
 /**
  * §0.70 识别日志：报告构造与摘要渲染。
@@ -173,5 +175,66 @@ class SolveLogStoreTest {
         } finally {
             tmp.delete()
         }
+    }
+
+    // ==================== P0-2.4：求解会话号与失败现场防撞 ====================
+
+    @Test
+    fun `求解会话号唯一且前缀含照片名`() {
+        val a = SolveLogStore.beginSolve("/sdcard/DCIM/photo5031.jpg")
+        val b = SolveLogStore.beginSolve("photo5032.jpg")
+        assertTrue("solveId 应形如 S001：${a.solveId}", Regex("^S\\d{3,}$").matches(a.solveId))
+        assertNotEquals("两次求解不得重号", a.solveId, b.solveId)
+        // 隐私：前缀只带文件名，不带目录
+        assertEquals("photo5031.jpg", a.imageName)
+        assertEquals("[${a.solveId}][photo5031.jpg] ", a.prefix)
+    }
+
+    @Test
+    fun `照片名缺失时前缀只含会话号`() {
+        val s = SolveLogStore.beginSolve(null)
+        assertEquals("[${s.solveId}] ", s.prefix)
+        val blank = SolveLogStore.beginSolve("   ")
+        assertEquals("空白照片名不应进前缀", "[${blank.solveId}] ", blank.prefix)
+    }
+
+    /**
+     * 批量两个 worker 并发开会话（与生产一致）：ID 必须全部唯一，否则日志归属失效。
+     */
+    @Test
+    fun `并发开会话不重号`() {
+        val ids = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(8)
+        val start = java.util.concurrent.CountDownLatch(1)
+        repeat(8) {
+            pool.execute {
+                start.await()
+                repeat(100) { ids.add(SolveLogStore.beginSolve("p$it.jpg").solveId) }
+            }
+        }
+        start.countDown()
+        pool.shutdown()
+        assertTrue(
+            "并发开会话未在 30 秒内完成",
+            pool.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS),
+        )
+        assertEquals("800 次会话应全部唯一", 800, ids.size)
+    }
+
+    /**
+     * P0-2.4 核心回归：**同一秒**的两张照片失败，现场目录不得同名。
+     * 旧实现目录名只有秒级时间戳，两者会写进同一目录、report.json 与
+     * input.gray.gz 互相覆盖（产出"报告来自 A、像素来自 B"的缝合怪）。
+     */
+    @Test
+    fun `失败现场目录名带会话号且同秒不撞`() {
+        val t = LocalDateTime.of(2026, 10, 9, 1, 2, 3)
+        val a = SolveLogStore.failDirName(t, "S001")
+        val b = SolveLogStore.failDirName(t, "S002")
+        assertTrue("目录名应含时间戳：$a", a.startsWith("fail-20261009-010203"))
+        assertTrue("目录名应带会话号：$a", a.endsWith("-S001"))
+        assertNotEquals("同一秒的不同会话不得同名", a, b)
+        // 无会话号时退化为旧格式（向后兼容，供未接会话的调用方使用）
+        assertEquals("fail-20261009-010203", SolveLogStore.failDirName(t, null))
     }
 }
