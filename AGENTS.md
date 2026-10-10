@@ -91,6 +91,19 @@ AGENTS.md  本文件
 > native `.so` 重编的 Linux 路径：服务器脚本 `/opt/build_so_server.sh` + 交叉静态库
 > `/opt/starcam-migration-assets/astrometry-local/`（依赖 astrometry 源码树
 > `/tmp/astrometry.net-0.97`，重启后需按 `docs/03` 恢复；未完整验证）。
+>
+> ✅ **2026-10-10 更新：全量单测已在验证机跑通**（31 类 / 215 项全绿，含 8 个真值
+> 回归类；详见 `docs/88`）。验证机为 AWS EC2（2 核 / 3.8GB，SSH 别名 **`ec2-hk`**，
+> 别名与密钥在本机 `~/.ssh/config`，不入库），工作区 `~/starword`、素材
+> `~/starword/testdata`。该机 `gradle.properties` 的 8GB 调参需覆盖：
+> ```bash
+> cd ~/starword/code
+> GRADLE_OPTS='-Dorg.gradle.jvmargs=-Xmx1024m -XX:MaxMetaspaceSize=512m' \
+>   ./gradlew --no-daemon --console=plain --max-workers=1 --no-configuration-cache \
+>   -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --rerun-tasks
+> ```
+> （`--max-workers=1` 会把测试 fork 限成 1 个：内存最稳、全量约 40 分钟；内存有余量
+> 时去掉它可恢复 `maxParallelForks=2` 提速。）
 
 **以下为原 Windows 机约定，保留备查：**
 

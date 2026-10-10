@@ -274,7 +274,7 @@ cd code
 # 编译 Debug APK
 ./gradlew :app:assembleDebug
 
-# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；190 项全绿）
+# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；215 项全绿）
 ./gradlew :app:testDebugUnitTest
 
 # 产物位置
@@ -285,11 +285,12 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI（GitHub Actions）跑的是 175 项 —— 它带 `-PskipPhotoTests=true`，跳过 8 个依赖本机
+> CI（GitHub Actions）跑的是 200 项 —— 它带 `-PskipPhotoTests=true`，跳过 8 个依赖本机
 > 素材的测试类（`RealPhotoMatchTest` / `Photo12RegressionTest` / `NarrowFieldRegressionTest` /
 > `PhaseTimingBench` / `TieredCatalogTest` / `SyntheticMidFieldTest` / `ScoredRoundBudgetTest` /
 > `FallbackStarListTest`，共 15 项）；
-> 本地素材齐备时为 **190 项**。
+> 本地素材齐备时为 **215 项**（31 个测试类；2026-10-10 在验证机上全绿，见
+> [docs/88](docs/88-验证机与全量单测验收-20261010.md)）。
 
 ### 真实照片回归（可选）
 
@@ -330,7 +331,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties    # 该文件不入库
 完整说明见 **[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
 （依赖清单、跨平台重建 `.so` 的命令、可贡献方向、提交红线）。
 
-> **测试覆盖的已知折扣**：CI 跑 **175 项**，比本地少 15 项 —— 真值回归台依赖
+> **测试覆盖的已知折扣**：CI 跑 **200 项**，比本地少 15 项 —— 真值回归台依赖
 > **不入库**的实拍素材（含私拍原图，属隐私与体积上的必要取舍），在 CI 中按
 > `-PskipPhotoTests=true` 跳过。CI 侧另有一层**纯合成素材的替代回归**
 > （`SyntheticRegressionTest`）作为降级保护 —— 它验证「匹配管线在已知真值下
