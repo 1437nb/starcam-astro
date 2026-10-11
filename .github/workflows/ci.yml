@@ -1,11 +1,18 @@
 name: CI
 
-# 回归自动化：任何 push / PR 都跑一遍纯 JVM 单测 + 凭据扫描。
-# 本机历史上全靠手工执行「150 项 0 失败」，这个 workflow 把它变成硬保证。
+# 回归自动化：任何 push / PR 都跑一遍
+#   ① 纯 JVM 单测（真值回归台依赖不入库素材，CI 跳过，见 -PskipPhotoTests）
+#   ② 凭据扫描（gitleaks + 仓库自己的规则）
+#   ③ 能发版的硬保证（2026-10-11 加，审计 P1）：debug/release 装配 + lint +
+#      二进制审计（.so 在不在 / 16 KB 页对齐 / 未压缩 / 数值可执行 / release
+#      不含调试入口）。
+# ③ 的由来（两类真实事故，都该由 CI 拦住而不是靠人记得）：
+#   - v1.5.56/57「debug 过、release 被 R8 打爆」；
+#   - 2026-10-11 重编 .so 时人肉发现「链接缺 -z,max-page-size=16384 → 产物 4 KB
+#     对齐」，直接替换会破坏 Play 的 16 KB 页要求。
 #
-# 注意：真值回归台（RealPhotoMatchTest / Photo12RegressionTest）依赖不入库的
-# 真实照片素材（testdata/，含私拍原图），在 CI 里用 -PskipPhotoTests=true 跳过。
-# 该 flag 只影响 CI；本机照常执行（那是宽场/暗星等修复的唯一真值保护）。
+# 真值回归台（RealPhotoMatchTest / Photo12RegressionTest 等 8 类）依赖不入库的
+# 真实照片素材（testdata/），CI 用 -PskipPhotoTests=true 跳过；本地/验证机照常执行。
 
 on:
   push:
@@ -76,3 +83,150 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: ${{ github.workspace }}/.gitleaks.toml
+
+  android-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Point Gradle at the preinstalled Android SDK
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "sdk.dir=$SDK" > code/local.properties
+
+      # CI 没有签名密钥 → release 产物是**未签名** APK；这恰是要守的形态之一：
+      # 构建要能过、R8 不能炸（v1.5.56/57 的事故）。签名与发版仍在维护者机器上
+      # 用 tools/release.py 完成。
+      # lintVitalRelease 随 assembleRelease 一起跑（有网络，不受 §0.68 的离线限制）。
+      - name: Assemble debug + release
+        working-directory: code
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --console=plain :app:assembleDebug
+          ./gradlew --no-daemon --console=plain :app:assembleRelease
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: apks
+          path: |
+            code/app/build/outputs/apk/debug/*.apk
+            code/app/build/outputs/apk/release/*.apk
+          retention-days: 14
+
+  android-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Point Gradle at the preinstalled Android SDK
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "sdk.dir=$SDK" > code/local.properties
+
+      - name: Lint (debug)
+        working-directory: code
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --console=plain :app:lintDebug
+
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-reports
+          path: code/app/build/reports/lint-results-debug.*
+          retention-days: 14
+
+  binary-audit:
+    needs: android-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: apks
+          path: apks
+
+      # 审计「发出去会不会出问题」的硬指标。每条都对应一次真实事故或平台硬要求：
+      #   ① .so 必须在（缺了等于没有求解引擎）
+      #   ② .so 的 PT_LOAD 必须 16 KB 对齐（Play 的 16 KB 页要求）+
+      #      导出符号必须在（防止提交一个"能链接但没入口"的库）
+      #   ③ .so 在 APK 内必须未压缩，且**数据偏移对 16384 整除**
+      #      （与 2026-10 外部审计的验收口径一致；不用 zipalign —— 它的 -P 旗标
+      #      在 build-tools 34 上不存在、各 runner 版本不一，直查字节更可靠）
+      #   ④ release 包不含 AutoTestActivity（调试入口不得进公开包）
+      #   ⑤ debug 已签名 / release 未签名（CI 无密钥）—— 与预期不符即失败
+      - name: Audit APKs
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          APKSIGNER=$(ls "$SDK"/build-tools/*/apksigner | sort -V | tail -1)
+          DEBUG_APK=$(ls apks/debug/*.apk | head -1)
+          REL_APK=$(ls apks/release/*.apk | head -1)
+          echo "debug   = $DEBUG_APK"
+          echo "release = $REL_APK"
+          fail() { echo "::error::$1"; exit 1; }
+
+          for apk in "$DEBUG_APK" "$REL_APK"; do
+            echo "===== $apk ====="
+            unzip -l "$apk" | grep -q 'lib/arm64-v8a/libstellar_solver.so' \
+              || fail "$apk 缺 lib/arm64-v8a/libstellar_solver.so"
+
+            rm -rf /tmp/so && mkdir -p /tmp/so
+            unzip -o -q "$apk" 'lib/arm64-v8a/libstellar_solver.so' -d /tmp/so
+            SO=/tmp/so/lib/arm64-v8a/libstellar_solver.so
+
+            bad=$(readelf -lW "$SO" | awk '/LOAD/{print $NF}' | grep -vc '^0x4000$' || true)
+            [ "$bad" -eq 0 ] || fail "$apk 的 .so 存在非 0x4000 对齐的 PT_LOAD（16 KB 页要求）"
+            readelf -sW "$SO" | grep -q 'StellarSolverNative_solve$' \
+              || fail "$apk 的 .so 缺 JNI 入口符号"
+
+            python3 - "$apk" <<'PY'
+          import struct, sys, zipfile
+          apk = sys.argv[1]
+          name = 'lib/arm64-v8a/libstellar_solver.so'
+          z = zipfile.ZipFile(apk)
+          info = z.getinfo(name)
+          if info.compress_type != 0:
+              print(f"::error::{apk} 的 .so 被压缩了（16 KB 页要求必须未压缩存储）")
+              sys.exit(1)
+          with open(apk, 'rb') as f:
+              f.seek(info.header_offset)
+              hdr = f.read(30)
+              nlen, elen = struct.unpack('<HH', hdr[26:30])
+          data_off = info.header_offset + 30 + nlen + elen
+          if data_off % 16384 != 0:
+              print(f"::error::{apk} 的 .so 数据偏移 {data_off} 未按 16 KB 对齐")
+              sys.exit(1)
+          print(f"  .so 未压缩且数据偏移 {data_off} % 16384 == 0 ✓")
+          PY
+          done
+
+          if unzip -p "$REL_APK" AndroidManifest.xml | strings | grep -q 'AutoTestActivity'; then
+            fail "release APK 含 AutoTestActivity（调试入口不得进公开包）"
+          fi
+
+          "$APKSIGNER" verify --print-certs "$DEBUG_APK" > /dev/null \
+            || fail "debug APK 应已签名（debug keystore）"
+          if "$APKSIGNER" verify "$REL_APK" > /dev/null 2>&1; then
+            fail "CI 的 release APK 不应已签名（CI 无密钥；若流程变更请同步更新本检查）"
+          fi
+
+          echo "二进制审计全部通过 ✓"

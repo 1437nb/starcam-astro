@@ -107,6 +107,21 @@
 
 ## 二、最近完成
 
+- **2026-10-11（审计 P1-1：CI 升级为"真的验证能发版"）** — 把两次人肉发现的坑交给护栏：
+  - 新增三个 job：**`android-build`**（assembleDebug + assembleRelease，R8/lintVital
+    全链路）、**`android-lint`**（lintDebug）、**`binary-audit`**（.so 必须在 / PT_LOAD
+    16 KB 对齐 / JNI 符号在 / .so 未压缩且数据偏移整除 16384 / release 无
+    AutoTestActivity / debug 已签名·release 未签名符合预期）。
+  - **接线前先在验证机实跑**：首次在开发者机器之外完成 **release 构建**（debug 27.0 MB、
+    release 16.5 MB，R8 通过）；二进制判据在官方 v1.5.74 包与本地产物上逐条验过
+    （数据偏移同为 `2228224`，`% 16384 == 0`，与审计数字一致）。不用 `zipalign -P 16`
+    —— 该旗标 build-tools 34 没有、各 runner 版本不一，改直查字节。
+  - **lint 接入清掉 24 个 error**：19 个是**真的写错了**（`CameraScreen` 用的是 Kotlin
+    内建 `@OptIn`，对 androidx 的 Java 标记无效 → 改为 `androidx.annotation.OptIn`）；
+    5 个 `ProduceStateDoesNotAssignValue` 为规则误报，**定点豁免**并写明判据
+    （value 确实在 producer 顶层赋值、界面真机正常显示）。
+  - 详见 `docs/90-CI升级-验证能发版-20261011.md`。
+
 - **2026-10-11（§0.104 P0-2.6：native 超时 detach 所有权接盘）** — 审计 P0 收官：
   - **问题**：超时 detach 后 worker 只置 `done`，不释放 job/solver、不减泄漏计数 ——
     注释承诺的 `leaked_thread_fn` 在仓库里并不存在；于是"超时一次，进程余生永久

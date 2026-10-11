@@ -65,6 +65,10 @@ import kotlinx.coroutines.withContext
  * 识别历史页（§0.40 网格化）：按日期分组缩略图网格、单条删除（确认）、
  * CSV 导出、顶部识别统计。点击格子重新打开对应照片。
  */
+// lint 的 ProduceStateDoesNotAssignValue 对本文件的写法误报：`value = …` 确实在
+// producer lambda 顶层（这些界面在真机上一直正常显示，即运行时证据）。定点豁免，
+// 保留该规则对新增代码的约束（2026-10-11 lintDebug 进入 CI 门禁）。
+@Suppress("ProduceStateDoesNotAssignValue")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
@@ -259,6 +263,8 @@ fun HistoryScreen(
     }
 }
 
+// 同上：ProduceStateDoesNotAssignValue 误报，定点豁免
+@Suppress("ProduceStateDoesNotAssignValue")
 @Composable
 private fun HistoryCell(
     entry: HistoryStore.Entry,

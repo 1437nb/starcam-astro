@@ -137,6 +137,8 @@ fun OfflineDemoScreen(
     }
 }
 
+// 同上：ProduceStateDoesNotAssignValue 误报，定点豁免（value 确实在 producer 顶层赋值）
+@Suppress("ProduceStateDoesNotAssignValue")
 @Composable
 private fun OfflinePhotoCell(file: File, onClick: () -> Unit) {
     val thumb by produceState<Bitmap?>(initialValue = null, file.path) {

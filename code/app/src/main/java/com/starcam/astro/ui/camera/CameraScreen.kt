@@ -123,7 +123,10 @@ private suspend fun <T> ListenableFuture<T>.await(context: Context): T =
  * - 曝光引导：EV 补偿滑块（±档）+ Pro 手动 ISO/快门 + 夜景快捷按钮；
  * - AR 星图：传感器驱动实时星座叠加 + FOV 自动标定 + 电子水平仪。
  */
-@OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+// 注意：这里必须用 **androidx 的** @OptIn（Kotlin 内建的 `@OptIn` 只认
+// kotlin.RequiresOptIn 标记，对 androidx 的 Java 标记无效 —— 本文件曾用 kotlin 版
+// 而 lint 仍报 19 处 UnsafeOptInUsageError，2026-10-11 接入 lintDebug 门禁时改正）。
+@androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
 @Composable
 fun CameraScreen(
     onBack: () -> Unit,
