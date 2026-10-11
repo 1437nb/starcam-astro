@@ -12,14 +12,29 @@ A pure offline Android application for astrophotography plate-solving and night 
 
 ## Download
 
-Latest release: **[v1.5.63](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.63)**
+Latest release: **[v1.5.75](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.75)**
 
 | Package | Size | Notes |
 |---|---|---|
-| [StarCam-v1.5.63-narrow-field-10deg-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.63/StarCam-v1.5.63-narrow-field-10deg-release.apk) | 16.5 MB | **Recommended** — R8-minified signed build |
-| [StarCam-v1.5.63-narrow-field-10deg-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.63/StarCam-v1.5.63-narrow-field-10deg-debug.apk) | 26.9 MB | Includes debug logging |
+| [StarCam-v1.5.75-stability-ci-hardening-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.75/StarCam-v1.5.75-stability-ci-hardening-release.apk) | 16.5 MB | **Recommended** — R8-minified signed build |
+| [StarCam-v1.5.75-stability-ci-hardening-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.75/StarCam-v1.5.75-stability-ci-hardening-debug.apk) | 26.9 MB | Includes debug logging |
 
 All versions: [Releases](https://github.com/1437nb/starcam-astro/releases).
+(The per-version history below is not fully translated; see the
+[Chinese README](README.md) for every release's notes.)
+
+> **v1.5.75 — stability & verifiability hardening.** Five P0 fixes: thread-safety in batch
+> recognition (a shared `SimpleDateFormat` → `DateTimeFormatter`), batch statistics rebuilt
+> as strongly-typed per-photo outcomes (the three counters now match each photo's actual
+> result), per-solve log attribution (`solveId` + file name on every line; failure snapshots
+> no longer overwrite each other), a deep-catalog gate that keeps wide fields above 45° out
+> of the deep retry (they used to burn 60 s and emit scale-collapse false solves), and
+> ownership hand-off for the native engine's timeout so a timed-out worker no longer leaks
+> its thread and the 11 MB index cache. Same release: CI upgraded from "run unit tests" to
+> "really verify a releasable build" (debug+release assembly, zero lint errors, six
+> binary-audit criteria) plus a **public demo-photo truth regression** (12 demo photos
+> decoded on the fly, driven through the production select-then-match path: 12/12 solve,
+> zero false positives).
 
 > **v1.5.63 extends narrow-field support down to a 10° field of view**:
 > fields of 10°–20° (telescope, long lens, cropped wide-angle) previously failed to

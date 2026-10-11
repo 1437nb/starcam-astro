@@ -12,14 +12,22 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.74](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.74)** —
+最新版本 **[v1.5.75](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.75)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.74-recognition-speed-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.74/StarCam-v1.5.74-recognition-speed-fix-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.74-recognition-speed-fix-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.74/StarCam-v1.5.74-recognition-speed-fix-debug.apk) | 26.9 MB | 含调试日志 |
+| [StarCam-v1.5.75-stability-ci-hardening-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.75/StarCam-v1.5.75-stability-ci-hardening-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.75-stability-ci-hardening-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.75/StarCam-v1.5.75-stability-ci-hardening-debug.apk) | 26.9 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
+
+> **v1.5.75 稳定性与可验证性加固**：五条 P0 修复 —— 批量识别的两处线程安全隐患（共用时间戳
+> 格式化器）、批量统计改为**强类型逐项记账**（计数与每张照片的结局严格一致）、识别日志每行带
+> `solveId`+照片名且失败现场目录不再互相覆盖、**深域兜底收口**（>45° 广角不再白跑 60 秒/出
+> 尺度坍缩伪解）、官方引擎**超时后线程与 11MB 索引不再泄漏**。同版把 CI 升级为
+> **真的验证能发版**（debug+release 全链路装配 / lint 清零 / 二进制审计六条判据：
+> .so 在位、16 KB 页对齐、未压缩、JNI 入口在、release 无调试入口、签名形态），并新增
+> **公开演示照片真值回归**（12 张演示照走生产「选表→匹配」路径，12/12 真解、假阳性硬线为零）。
 
 > **v1.5.74 识别提速：74 秒 → 约 5 秒**：真机日志显示，慢在"主星表（172 颗）那条路要把
 > 投票轮五轮阶梯跑完、66 秒仍解不出"，而**另一张更小的星表（28 颗）2.1 秒就解出来了** ——
@@ -200,6 +208,14 @@
   "Missing classes" 检查把它当**致命错误**。已补 `-dontwarn` 规则修复，
   并修正了构建服务器上签名密钥缺失导致产物**静默未签名**的问题。
 
+- **稳定性与可验证性加固**（v1.5.75）：五条 P0 修复 —— 批量识别的两处线程安全
+  （共用 `SimpleDateFormat` → `DateTimeFormatter`）、批量统计强类型逐项记账、
+  识别日志带 `solveId`+照片名（批量两个 worker 并发也可按行归属）且失败现场不互相覆盖、
+  深域兜底只对窄场开放（>45° 广角不再白跑 60 秒、不再出坍缩伪解）、官方引擎超时后
+  线程与索引资源原地归还（原为"超时一次、余生不可回收"）。同版：CI 从"跑单测"升级为
+  **真的验证能发版**（构建 debug+release、lint 清零、二进制审计），并新增**公开演示照片
+  真值回归**（12 张演示照现场解码、走生产「选表→匹配」路径，12/12 真解、假阳性硬线为零）；
+  全量单测 215 → 229 项。
 - **识别提速：74 秒 → 约 5 秒**（v1.5.74）：本地引擎改为「便宜的先试」——box-blur 星表
   首选（星少、阶梯短），SEP 星表降为备用（仍需通过重合率核验）。依据是真机日志：主星表
   172 颗要把投票轮五轮跑完、66 秒仍解不出，而 28 颗的 box-blur 表 2.1 秒就解出。同版把
@@ -274,7 +290,7 @@ cd code
 # 编译 Debug APK
 ./gradlew :app:assembleDebug
 
-# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；215 项全绿）
+# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；229 项全绿）
 ./gradlew :app:testDebugUnitTest
 
 # 产物位置
