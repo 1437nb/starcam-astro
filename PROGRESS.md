@@ -108,6 +108,19 @@
 
 ## 二、最近完成
 
+- **2026-10-11（发版 v1.5.75：稳定性与可验证性加固）** — versionCode 95，
+  APK `StarCam-v1.5.75-stability-ci-hardening-{debug,release}.apk`：
+  - 内容：§0.100~§0.104 P0 五连修 + CI「真的验证能发版」三 job + 公开照片真值回归
+    （详见 `docs/release-notes-v1.5.75.md`）。
+  - **构建位置变更**：老构建机（本机，1.8GB）编不了 app → 签名密钥**临时**上架验证机
+    ec2-hk 构建，构建+审计完成后**当场删除**（本地有记录，见 incident-notes）。
+    R8 通过；release 16.5 MB / debug 26.9 MB。
+  - **发版前审计全过**：证书 SHA-256 与官方 v1.5.74 同源（`b04a854f…`，可覆盖升级）、
+    versionCode/Name=95/1.5.75、release 无 AutoTestActivity、`.so` 在且未压缩、
+    数据偏移 2228224 整除 16384、PT_LOAD 全 0x4000（与 CI binary-audit 同判据）。
+  - 发版通道：`gh release create --target <commit>` + 两个 APK 附件；
+    发完已回验（下载后 SHA-256 与本地一致）。
+
 - **2026-10-11（审计 P1-2.2：公开演示照片真值回归上 CI，走生产编排路径）** —
   把「CI 里没有真实照片保护」这个缺口补上，并把审计点名的技术难点（测试够不着
   生产编排）一并解决：
