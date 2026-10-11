@@ -58,20 +58,46 @@
 
 typedef struct {
     solver_t* sp;
-    volatile int done;   /* worker 置 1 表示 solver_run 已返回 */
+    /* 所有权状态机（P0-2.6）：用一个原子字同时承担「完成通知 + 所有权移交」。
+     *
+     *   JOB_RUNNING  —— worker 在跑，**调用方**持有清理权（正常路径）
+     *   JOB_DONE     —— worker 已返回且清理权仍在调用方（调用方 join + free）
+     *   JOB_DETACHED —— 调用方超时让渡，**worker** 负责 solver_free + free(job) +
+     *                   g_leaked_threads--（见 solve_thread_fn 收尾分支）
+     *
+     * 为什么必须是一个字：分设 done / handed_off 两个标志时，worker 的「置完成」
+     * 与调用方的「取让渡」之间存在窗口，双方可能都认为自己该释放（双 free）或
+     * 都认为对方会释放（泄漏）。单字 CAS 使这两个动作互斥。 */
+    volatile int state;
 } solve_job_t;
 
-/* 已 detach 但仍在运行的求解线程数（原子增减）。
+#define JOB_RUNNING 0
+#define JOB_DONE 1
+#define JOB_DETACHED 2
+
+/* 「已 detach、可能仍在使用索引」的求解线程数（原子增减）。
  *
- * 局限：线程真正结束我们无从感知（detach 后无法 join），所以这个计数是
- * 「曾经泄漏过的次数」——只会增不会减。索引释放接口据此保守放弃回收：
- * 宁可多占 ~11MB 也不冒 use-after-free 的段错误风险。 */
+ * P0-2.6 起语义修正：由「曾经泄漏过的次数（只增不减）」改为
+ * 「当前仍在跑的 detach 线程数」—— worker 退出时自行递减，索引回收闸门
+ * 因此在泄漏线程结束后可以重新放行（旧实现永久拒绝回收 11MB 索引）。 */
 static volatile int g_leaked_threads = 0;
 
 static void* solve_thread_fn(void* arg) {
     solve_job_t* job = (solve_job_t*)arg;
     solver_run(job->sp);
-    job->done = 1;
+    /* 一次性 CAS 决定由谁收尾（P0-2.6）：
+     *  - 换出 RUNNING  → 调用方仍在等：置 DONE，由调用方 join 后 free；
+     *  - 换出 DETACHED → 调用方已超时让渡：**这里**必须接管，否则 job、solver
+     *    与泄漏计数全部永久流失（旧实现的缺陷：注释承诺的 leaked_thread_fn
+     *    包装在代码里并不存在）。solver_free 在此线程调用是安全的 —— 它就是
+     *    刚刚跑完 solver_run 的那个线程；此刻之后再无人读索引，随后递减计数
+     *    即向 release_indexes 放行。 */
+    int prev = __sync_val_compare_and_swap(&job->state, JOB_RUNNING, JOB_DONE);
+    if (prev == JOB_DETACHED) {
+        solver_free(job->sp);
+        free(job);
+        __sync_sub_and_fetch(&g_leaked_threads, 1);
+    }
     return NULL;
 }
 
@@ -88,12 +114,16 @@ static double mono_seconds(void) {
  * 若 quit_now 不被 solver 采纳，超时保护形同虚设。现在 join 有上限，超上限
  * 则分离线程不再等（线程仍在跑，但不再阻塞调用方返回）。
  *
- * [out_leaked] 非空时写入「线程是否已被 detach 泄漏」，调用方据此决定能否
- * solver_free（泄漏时不能，会 use-after-free）。 */
+ * [out_leaked] 非空时写入「线程是否已被 detach 让渡（所有权已转给 worker）」。
+ * 调用方据此决定能否 solver_free：**让渡后不能**（会 use-after-free），
+ * 且此后不得再读该 solver 的任何字段（solver_free 连带释放 field）。 */
 #define RUN_OK 0
 #define RUN_TIMEOUT 1
 #define RUN_SPAWN_FAILED (-1)
-#define QUIT_JOIN_GRACE_SEC 5.0
+
+/* quit_now 置位后的 join 宽限期（秒）。非 const：主机测试要把它调小以
+ * **强制**进入 detach 路径（见 cpp/bridge_host_test.c），生产路径不改。 */
+static double g_quit_join_grace_sec = 5.0;
 
 static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked) {
     pthread_t th;
@@ -102,13 +132,14 @@ static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked) {
     if (!job)
         return RUN_SPAWN_FAILED;
     job->sp = sp;
+    job->state = JOB_RUNNING;
     if (pthread_create(&th, NULL, solve_thread_fn, job) != 0) {
         free(job);
         return RUN_SPAWN_FAILED;
     }
     double deadline = mono_seconds() + seconds;
     int timedout = 0;
-    while (!job->done) {
+    while (job->state == JOB_RUNNING) {
         if (mono_seconds() >= deadline) {
             timedout = 1;
             break;
@@ -117,19 +148,23 @@ static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked) {
     }
     if (timedout) {
         sp->quit_now = TRUE; /* solver 在 quad 循环里轮询此标志 */
-        double grace = mono_seconds() + QUIT_JOIN_GRACE_SEC;
-        while (!job->done && mono_seconds() < grace)
+        double grace = mono_seconds() + g_quit_join_grace_sec;
+        while (job->state == JOB_RUNNING && mono_seconds() < grace)
             usleep(20000);
-        if (job->done) {
-            pthread_join(th, NULL);
-            free(job);
-        } else {
-            /* quit_now 未被采纳（solver 卡在不可中断段）：不能 join（会永久阻塞），
-             * 也不能让调用方 solver_free —— 线程还在读那块内存。
-             * job 留给 worker 自己释放（见 leaked_thread_fn 包装）。 */
+        /* 宽限期后仍未完成 ⇒ 把所有权**原子地**让渡给 worker（P0-2.6）。
+         * 这个 CAS 与 worker 收尾用的 CAS 是唯一的移交/收尾点，二者互斥：
+         *  - 换出 RUNNING  → 让渡成功：worker 退出时负责 solver_free / free(job) /
+         *                    g_leaked_threads-- ；调用方立即返回且**不得再碰 sp**；
+         *  - 换出 DONE     → worker 恰在此刻完成，清理权仍在调用方：正常 join +
+         *                    free（不算泄漏，也不置 out_leaked）。 */
+        int prev = __sync_val_compare_and_swap(&job->state, JOB_RUNNING, JOB_DETACHED);
+        if (prev == JOB_RUNNING) {
             __sync_add_and_fetch(&g_leaked_threads, 1);
             if (out_leaked) *out_leaked = 1;
             pthread_detach(th);
+        } else {
+            pthread_join(th, NULL);
+            free(job);
         }
         return RUN_TIMEOUT;
     }
@@ -403,10 +438,25 @@ static void run_solver(
         return;
     }
 
+    /* P0-2.6：先把星点数留住 —— solver_set_field 把 field 所有权转给 solver，
+     * 而超时让渡后 worker 可能随时释放它（solver_free 连带 field），
+     * 因此后续 JSON 组装不得再回读 field。 */
+    const int nstars = field->N;
     solver_set_field(sp, field); /* 所有权转移 */
 
     int leaked = 0;
     int timedout = run_with_timeout(sp, time_limit_sec, &leaked);
+
+    /* P0-2.6：所有权已让渡给被 detach 的 worker —— 它负责 solver_free(sp)
+     * （连带释放 field，其所有权已在 solver_set_field 时转移）。此后本函数
+     * **绝不能再读 sp / field**，否则与 worker 的释放并发就是 use-after-free。
+     * 旧实现只是"泄漏（谁都不释放）"，读写尚属安全竞态；接盘之后必须切断。
+     * 星点数在提星结束时已存入 nstars，这里不再回读 field。 */
+    if (leaked) {
+        snprintf(out, outsz,
+            "{\"ok\":false,\"error\":\"timeout\",\"nstars\":%d}", nstars);
+        return;
+    }
 
     if (solver_did_solve(sp)) {
         MatchObj* mo = solver_get_best_match(sp);
@@ -422,27 +472,20 @@ static void run_solver(
             "\"fieldw_arcmin\":%.4f,\"fieldh_arcmin\":%.4f}",
             wcs->crval[0], wcs->crval[1],
             orient, pixscale, mo->parity ? 1 : 0,
-            mo->nmatch, field->N, mo->indexid, mo->logodds,
+            mo->nmatch, nstars, mo->indexid, mo->logodds,
             wcs->cd[0][0], wcs->cd[0][1], wcs->cd[1][0], wcs->cd[1][1],
             w * pixscale / 60.0, h * pixscale / 60.0);
     } else if (timedout == RUN_TIMEOUT) {
         snprintf(out, outsz,
-            "{\"ok\":false,\"error\":\"timeout\",\"nstars\":%d}", field->N);
+            "{\"ok\":false,\"error\":\"timeout\",\"nstars\":%d}", nstars);
     } else if (timedout == RUN_SPAWN_FAILED) {
         snprintf(out, outsz,
-            "{\"ok\":false,\"error\":\"spawn-failed\",\"nstars\":%d}", field->N);
+            "{\"ok\":false,\"error\":\"spawn-failed\",\"nstars\":%d}", nstars);
     } else {
         snprintf(out, outsz,
-            "{\"ok\":false,\"error\":\"no-solution\",\"nstars\":%d}", field->N);
+            "{\"ok\":false,\"error\":\"no-solution\",\"nstars\":%d}", nstars);
     }
 
-    /* 线程已 detach 说明 solver_run 仍在跑（quit_now 未被采纳），此时
-     * solver_free 会释放它正在读的索引/星表内存 → 段错误。宁可泄漏
-     * 一次 solver（约百 KB + 共享索引），也不能崩在用户手机上。
-     * 注意判据来自本次调用的 out 参数，不再是全局标志——并发/连续求解时
-     * 全局标志会被下一次调用清零，导致这里错误地 free（§0.65 遗留）。 */
-    if (leaked)
-        return;
     solver_free(sp);
 }
 
