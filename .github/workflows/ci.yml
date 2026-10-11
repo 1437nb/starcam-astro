@@ -13,6 +13,9 @@ name: CI
 #
 # 真值回归台（RealPhotoMatchTest / Photo12RegressionTest 等 8 类）依赖不入库的
 # 真实照片素材（testdata/），CI 用 -PskipPhotoTests=true 跳过；本地/验证机照常执行。
+# 但这不等于 CI 没有真实照片保护：OfflinePhotosTruthTest（审计 P1-2.2）用仓库自带的
+# 12 张公开演示图现场解码灰度，走生产的「选表 → 匹配」路径，硬线是 12/12 真解、
+# 假阳性为零（docs/91）。它不读 testdata/，因此**不在**下面的排除清单里。
 
 on:
   push:

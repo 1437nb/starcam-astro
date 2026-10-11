@@ -285,12 +285,15 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI（GitHub Actions）跑的是 200 项 —— 它带 `-PskipPhotoTests=true`，跳过 8 个依赖本机
+> CI（GitHub Actions）跑的是 214 项 —— 它带 `-PskipPhotoTests=true`，跳过 8 个依赖本机
 > 素材的测试类（`RealPhotoMatchTest` / `Photo12RegressionTest` / `NarrowFieldRegressionTest` /
 > `PhaseTimingBench` / `TieredCatalogTest` / `SyntheticMidFieldTest` / `ScoredRoundBudgetTest` /
 > `FallbackStarListTest`，共 15 项）；
-> 本地素材齐备时为 **215 项**（31 个测试类；2026-10-10 在验证机上全绿，见
-> [docs/88](docs/88-验证机与全量单测验收-20261010.md)）。
+> 本地素材齐备时为 **229 项**（33 个测试类；2026-10-11 在验证机上全绿，见
+> [docs/91](docs/91-公开照片真值回归上CI-20261011.md)）。
+> **CI 侧另有一条不依赖私拍素材的真实照片真值回归**：`OfflinePhotosTruthTest`
+> 用仓库自带的 12 张公开演示图现场解码灰度，走生产的「选表 → 匹配」编排路径，
+> 硬线是 12/12 真解且假阳性为零。
 
 ### 真实照片回归（可选）
 
@@ -331,11 +334,14 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties    # 该文件不入库
 完整说明见 **[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
 （依赖清单、跨平台重建 `.so` 的命令、可贡献方向、提交红线）。
 
-> **测试覆盖的已知折扣**：CI 跑 **200 项**，比本地少 15 项 —— 真值回归台依赖
+> **测试覆盖的已知折扣**：CI 跑 **214 项**，比本地少 15 项 —— 真值回归台里有 8 个类依赖
 > **不入库**的实拍素材（含私拍原图，属隐私与体积上的必要取舍），在 CI 中按
-> `-PskipPhotoTests=true` 跳过。CI 侧另有一层**纯合成素材的替代回归**
-> （`SyntheticRegressionTest`）作为降级保护 —— 它验证「匹配管线在已知真值下
-> 能否解出」，但不等价于真实照片上的假阳性守卫。
+> `-PskipPhotoTests=true` 跳过。这块缺口有**两层补强**，都不等价于私拍素材上的守卫：
+> ① `OfflinePhotosTruthTest`（2026-10-11 加）用**仓库自带的 12 张公开演示照片**做真值
+> 回归，现场解码灰度并走生产的选表/匹配路径，硬线是 12/12 真解、假阳性为零；
+> ② `SyntheticRegressionTest` 用已知 WCS 渲染的**纯合成素材**兜底，验证「匹配管线在
+> 已知真值下能否解出」。窄场、暗星、传感器缺陷这三类真实素材才有的形态，仍只在
+> 本机/验证机上守。
 
 ---
 

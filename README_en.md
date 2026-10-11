@@ -225,7 +225,7 @@ cd code
 ./gradlew :app:assembleDebug
 
 # Run full unit tests (astronomical math, catalog integrity, solar-system
-# ephemerides, cross-engine checks — 190/190 passing)
+# ephemerides, cross-engine checks — 229/229 passing)
 ./gradlew :app:testDebugUnitTest
 
 # Output path
@@ -236,12 +236,16 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI (GitHub Actions) runs 175 of these — it passes `-PskipPhotoTests=true` to skip
+> CI (GitHub Actions) runs 214 of these — it passes `-PskipPhotoTests=true` to skip
 > 8 test classes that need locally-built material (`RealPhotoMatchTest` /
 > `Photo12RegressionTest` / `NarrowFieldRegressionTest` / `PhaseTimingBench` /
 > `TieredCatalogTest` / `SyntheticMidFieldTest` / `ScoredRoundBudgetTest` /
 > `FallbackStarListTest` — 15 tests in total). With the
-> material present locally the count is **190**.
+> material present locally the count is **229**.
+> CI additionally runs a real-photo truth regression that needs no private material:
+> `OfflinePhotosTruthTest` decodes the 12 public demo photos shipped in the repo
+> through the production selection/matching path — 12/12 must solve, zero false
+> positives (see [docs/91](docs/91-公开照片真值回归上CI-20261011.md), Chinese).
 
 ### Real-Photo Regression (optional)
 
@@ -285,12 +289,14 @@ ideas, and submission rules — are in
 **[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
 (Chinese).
 
-> **Known gap in test coverage**: CI runs **175** of the 190 tests. The truth-regression
-> suites depend on real-photo fixtures that are **not** in the repo (privacy and size) and
-> are skipped via `-PskipPhotoTests=true`. As a degraded fallback, CI also runs a purely
-> synthetic regression (`SyntheticRegressionTest`) that renders the star catalog through a
-> known WCS — it verifies the matching pipeline against known ground truth, but it is
-> **not** a substitute for the false-positive guards on real photos.
+> **Known gap in test coverage**: CI runs **214** of the 229 tests. Eight truth-regression
+> classes depend on real-photo fixtures that are **not** in the repo (privacy and size) and
+> are skipped via `-PskipPhotoTests=true`. Two layers narrow that gap, neither a substitute
+> for the private-fixture guards: ① `OfflinePhotosTruthTest` (2026-10-11) runs a truth
+> regression on the **12 public demo photos shipped in the repo**, decoded on the fly and
+> driven through the production selection/matching path (12/12 solves, zero false
+> positives); ② `SyntheticRegressionTest` renders the star catalog through a known WCS.
+> Narrow fields, faint stars and sensor artefacts still live in the local fixtures only.
 
 ## License & Acknowledgements
 

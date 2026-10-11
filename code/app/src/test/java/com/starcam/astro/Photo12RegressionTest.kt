@@ -5,8 +5,6 @@ import org.junit.Test
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.abs
-import kotlin.math.min
 
 /**
  * 12 张真实手机照片回归台（§0.12 真值表，testdata/photos12 + testdata/gray12）。
@@ -33,26 +31,8 @@ class Photo12RegressionTest {
                 "testdata/gray12",
             ).firstOrNull { File(it).isDirectory } ?: "testdata/gray12"
 
-    /** 照片号 → 真值（中心 RA/Dec、长边视场度） */
-    private data class Truth(val ra: Double, val dec: Double, val fovDeg: Double)
-
-    private val truth: Map<String, Truth> = mapOf(
-        "4963" to Truth(78.70, 20.85, 77.2), // §0.43 修订：旧真值(73.4,19.1)来自物理不可能的官方 0.2° 解；
-                                             // 交叉验证（DiagCrossCheckTest）证明 4963 与 4974 同天区
-                                             // （中心距 11.6°，星点天球重合 23/64），自研解即真值
-        "4974" to Truth(82.0, 32.1, 77.0),  // 御夫座+冬季亮星群
-        "4984" to Truth(60.0, 25.3, 76.0),  // 与 4998 同天区同时段连拍（blob 尺寸/密度=广角；旧 17×22° 官方解是错尺度产物）
-        "4998" to Truth(60.03, 25.26, 75.6),// 冬季六边形全景（官方 WCS 锚定：68.08″/px @4000px）
-        "5031" to Truth(13.4, 71.0, 76.0),  // 仙后座 W + 北极星
-        "5040" to Truth(68.7, -14.3, 77.0), // 猎户座+大犬座
-        "5049" to Truth(70.5, -20.9, 71.0), // 天兔座+大犬座
-        "5057" to Truth(61.9, 15.0, 75.0),  // 用户口径=广角；blob 形态（星少而大）曾有变焦疑义，真值窗口按广角
-        "5068" to Truth(57.3, 26.7, 72.0),  // 英仙座+金牛座
-        "5076" to Truth(55.3, 26.0, 72.0),  // 英仙座+金牛座
-        "5087" to Truth(351.2, 24.3, 76.0), // §0.43b：左上角灯光/月亮伪影，亮源掩蔽后
-                                             // 飞马座真解浮现（ra≈349.8/dec≈24.2 inliers=16）
-        "5092" to Truth(351.3, 24.3, 76.0), // 同上二连拍（掩蔽后 inliers=13）
-    )
+    /** 照片号 → 真值（中心 RA/Dec、长边视场度）—— 与 CI 侧 [OfflinePhotosTruthTest] 共用同一份表 */
+    private val truth: Map<String, DemoPhotoTruth.Truth> = DemoPhotoTruth.byId
 
     private fun loadGray(file: File): Triple<Int, Int, FloatArray> {
         val bytes = file.readBytes()
@@ -64,16 +44,10 @@ class Photo12RegressionTest {
         return Triple(w, h, gray)
     }
 
-    private fun classify(id: String, solved: LocalSolve?): String {
+    private fun classify(id: String, solved: DemoPhotoTruth.Solved?): String {
         val t = truth.getValue(id)
-        if (solved == null) return "MISS"
-        val dra = abs(solved.ra - t.ra).let { min(it, 360.0 - it) }
-        val ddec = abs(solved.dec - t.dec)
-        val fovRatio = solved.fov / t.fovDeg
-        return if (dra < 3.0 && ddec < 3.0 && fovRatio in 0.65..1.55) "TRUE-SOLVE" else "FALSE-POSITIVE"
+        return DemoPhotoTruth.classify(t, solved).label
     }
-
-    private class LocalSolve(val ra: Double, val dec: Double, val fov: Double)
 
     /** 观察台 + 汇总：PHOTO 行 + SUMMARY true=X false=Y miss=Z */
     @Test
@@ -101,7 +75,7 @@ class Photo12RegressionTest {
             }
             val solve = res?.solve
             val solved = if (solve != null) {
-                LocalSolve(solve.raDeg, solve.decDeg, maxOf(solve.fieldWidthDeg, solve.fieldHeightDeg))
+                DemoPhotoTruth.Solved(solve.raDeg, solve.decDeg, maxOf(solve.fieldWidthDeg, solve.fieldHeightDeg))
             } else null
             val verdict = if (t != null) classify(id, solved) else "NO-TRUTH"
             when (verdict) {
@@ -114,7 +88,7 @@ class Photo12RegressionTest {
                     id, w, h, stars.size, ms,
                     solved?.let {
                         "SOLVED ra=%.2f dec=%.2f fov=%.1f inliers=%d".format(
-                            it.ra, it.dec, it.fov, res!!.inlierCount,
+                            it.ra, it.dec, it.fovDeg, res!!.inlierCount,
                         )
                     } ?: "UNSOLVED",
                     verdict,

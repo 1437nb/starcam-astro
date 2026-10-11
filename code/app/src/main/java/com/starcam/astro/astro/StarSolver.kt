@@ -581,7 +581,8 @@ object StarSolver {
                     onProgress("本地星表识别中（内置 ${StarCatalogData.stars.size} 颗亮星）…")
                     // §0.88/§0.97：两张星表都算出来，交给匹配器按「便宜的先试」使用。
                     // 首选 = box-blur 表（星少、阶梯便宜），备用 = SEP 表（检出能力更强）。
-                    var boxBlurStars: List<DetectedStar>? = null
+                    // 选表决策不在本函数里，在 [DetectorSelection.plan]（纯函数，生产与
+                    // CI 测试同一入口 —— §0.97b 的事故就是选表错了而测试够不着，审计 P1-2.2）。
                     var sepListForFallback: List<DetectedStar>? = null
                     var previewStars: List<DetectedStar>? = null
                     val stars = try {
@@ -606,10 +607,10 @@ object StarSolver {
                         }
                         // 列表受 200 上限约束（喂匹配器的安全上限），总数不受约束
                         val sepList: List<DetectedStar>? = sr?.stars
-                        var detectedTotal = sr?.totalPeaks ?: 0
+                        val detectedTotal0 = sr?.totalPeaks ?: 0
                         // §0.72 提星质量核验（保留）：SEP 结果若与 box-blur 的重合率过低，
                         // 说明 SEP 这一轮不可信（典型：阈值失配导致全是边界伪影）。
-                        var sepTrustworthy = sepList != null && sepList.size >= 5
+                        val sepTrustworthy = sepList != null && sepList.size >= 5
                         val bb = if (sepTrustworthy) {
                             try {
                                 LocalStarMatcher.detectStars(currentDisplay)
@@ -619,72 +620,31 @@ object StarSolver {
                         } else {
                             null
                         }
-                        boxBlurStars = bb
-                        if (sepTrustworthy && bb != null && bb.size >= 5) {
-                            val bbTop = bb.take(30)
-                            val hits = bbTop.count { b ->
-                                sepList!!.any { p ->
-                                    kotlin.math.abs(p.x - b.x) < 8f && kotlin.math.abs(p.y - b.y) < 8f
+                        // §0.97/§0.97b：选表（主表/备用/预览/诊断行）在纯函数里 ——
+                        // 事故教训是「测试直接调匹配器，选表错了发现不了」，抽出来后
+                        // 生产与 CI 测试（OfflinePhotosTruthTest / DetectorSelectionTest）
+                        // 走的是同一个函数。
+                        val plan = DetectorSelection.plan(
+                            boxBlur = bb,
+                            sep = sepList,
+                            sepTrustworthy = sepTrustworthy,
+                            detectedTotal = detectedTotal0,
+                            boxBlurRetry = {
+                                try {
+                                    LocalStarMatcher.detectStars(currentDisplay)
+                                } catch (e: Throwable) {
+                                    null
                                 }
-                            }
-                            val rate = hits.toFloat() / bbTop.size
-                            extractDiag.append(
-                                "与box-blur重合=${hits}/${bbTop.size}(${"%.0f".format(rate * 100)}%)；",
-                            )
-                            // 重合率 <30%：SEP 没检出 box-blur 看到的亮星 → 不可信，不参与
-                            sepTrustworthy = rate >= 0.30f
-                            if (!sepTrustworthy) extractDiag.append("→SEP不可信，只留box-blur；")
-                        }
-                        // §0.97 首选顺序：**便宜的表先试**。真机日志（5031）实测：SEP 表 172 颗
-                        // 要把投票轮 5 轮全跑完、66 秒仍解不出；同一张照片的 box-blur 表 28 颗
-                        // **2.1 秒**就解出。而本地真值回归台（12 张演示照、假阳性对照、窄场台）
-                        // 本身就是用 box-blur 表跑的 —— 换过来等于让生产首选与回归保护口径一致；
-                        // SEP 表仍作备用，弱星场景不失能力。
-                        val primaryByBox = (bb ?: emptyList()).takeIf { it.size >= 5 }
-                        val primarySep = sepList?.takeIf { it.size >= 5 }
-                        // §0.97b：**必须显式记录喂给匹配器的那张表**。
-                        // 原先这里依赖 try 块的「末表达式」，而我后来把末表达式改成了给界面预览的
-                        // 列表（更全的 SEP 表）→ 匹配输入被顶掉、且备用表与主表成了同一个对象
-                        //（匹配器据此判定「无备用」，box-blur 表从未被使用）→ 真机 5031
-                        // 从「2 秒解出」退化成「230 秒失败」。日志里「星点 172 颗」是它的指纹。
-                        var chosen: List<DetectedStar>? = null
-                        val primary = primaryByBox ?: primarySep
-                        if (primary == null) {
-                            val retry = try {
-                                LocalStarMatcher.detectStars(currentDisplay)
-                            } catch (e: Throwable) {
-                                null
-                            }
-                            boxBlurStars = retry
-                            extractDiag.append("回退box-blur=${retry?.size ?: 0}颗；")
-                            detectedTotal = retry?.size ?: 0
-                            previewStars = retry
-                            chosen = retry
-                        } else {
-                            if (primaryByBox != null) {
-                                sepListForFallback = primarySep?.takeIf { sepTrustworthy }
-                                extractDiag.append(
-                                    "首选box-blur(${primary.size}颗)" +
-                                        (sepListForFallback?.let { "，备用SEP(${it.size}颗)" } ?: "") + "；",
-                                )
-                            } else {
-                                extractDiag.append("box-blur 表不可用，直接用 SEP 表(${primary.size}颗)；")
-                            }
-                            if (detectedTotal <= 0) detectedTotal = primary.size
-                            // 预览给「看得更全」的那张表；匹配输入始终是 chosen（= primary）
-                            previewStars = primarySep ?: primary
-                            chosen = primary
-                            // §0.97b 自查：备用表若与主表是**同一个对象**，匹配器会判定
-                            // 「没有备用」，备用机制静默失效 —— 真机 5031 曾因此从
-                            // 「2 秒解出」退化成「230 秒失败」（日志指纹：星点 172 颗）。
-                            if (sepListForFallback != null && sepListForFallback === chosen) {
-                                extractDiag.append("【内部告警：备用表与主表相同，备用机制将失效】")
-                            }
-                        }
+                            },
+                        )
+                        extractDiag.append(plan.note)
+                        val detectedTotal = plan.detectedTotal
+                        previewStars = plan.preview
+                        sepListForFallback = plan.fallback
                         log.line(
                             context, "提星：$extractDiag",
                         )
-                        // §0.97b：try 的返回值在这里显式给出 —— 就是喂给匹配器的那张表
+                        // §0.97b：喂给匹配器的表由 plan.primary 显式给出，与预览表分离
                         previewStars?.takeIf { it.isNotEmpty() }?.let { det ->
                             lastLocalStars = det
                             lastLocalStarTotal = detectedTotal
@@ -702,7 +662,7 @@ object StarSolver {
                                 detectedTotal,
                             )
                         }
-                        chosen
+                        plan.primary
                     } catch (e: Throwable) {
                         null
                     }
