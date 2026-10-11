@@ -61,6 +61,37 @@ jobs:
             --rerun-tasks \
             -PskipPhotoTests=true
 
+      - name: Test summary (counts + real-photo truth bed)
+        if: always()
+        working-directory: code
+        run: |
+          # 把「跑了多少项」与真实照片真值台的判定行直接打进 CI 日志：
+          # 否则这些证据只躺在没人下载的 TEST-*.xml 里，看日志的人无从确认
+          # 「公开演示照片那 12 项到底跑没跑、结论是什么」。
+          python3 - <<'PY'
+          import glob, re, sys, html
+          files = sorted(glob.glob("app/build/test-results/testDebugUnitTest/TEST-*.xml"))
+          if not files:
+              print("TEST-SUMMARY 未找到测试报告（测试可能没跑起来）")
+              sys.exit(0)
+          tests = skipped = failures = 0
+          for p in files:
+              x = open(p, encoding="utf-8").read()
+              m = re.search(r'tests="(\d+)"\s+skipped="(\d+)"\s+failures="(\d+)"\s+errors="(\d+)"', x)
+              if m:
+                  tests += int(m.group(1)); skipped += int(m.group(2))
+                  failures += int(m.group(3)) + int(m.group(4))
+          print(f"TEST-SUMMARY classes={len(files)} tests={tests} skipped={skipped} failures={failures}")
+          # 真实照片真值台的判定行（CI-PHOTO/CI-SUMMARY/CI-FALLBACK/CI-MUST）
+          for p in files:
+              x = open(p, encoding="utf-8").read()
+              m = re.search(r"<system-out><!\[CDATA\[(.*?)\]\]></system-out>", x, re.S)
+              if m:
+                  for line in html.unescape(m.group(1)).splitlines():
+                      if line.startswith("CI-"):
+                          print(line)
+          PY
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
