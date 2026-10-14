@@ -5,7 +5,7 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-14（二期审计整改 §0.105~§0.107 —— EXIF 单数位时间 / native 在飞 UAF / 诊断串台）
+**最后更新**：2026-10-15（安全审查：§0.108 之后 —— 工作区/全史/二进制/红线全过，见下）
 **当前基线**：v1.5.75（versionCode 95，**已发版** 2026-10-11，tag `v1.5.75`）；工作区含
 §0.105~§0.107（二期审计整改，未发版）
 **工作区**：`/opt/starword`（Linux 服务器；2026-10-08 由迁移包解出；原 Windows `C:\starword`
@@ -108,6 +108,21 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-10-15（安全审查：§0.108 之后）** — 五项全过，无需整改；结论记录如下（供下次审查比对）：
+  - `tools/check_secrets.py` 全树扫描 **312 个文件零命中**；`gitleaks`（仓库 `.gitleaks.toml`）
+    **全史 170 个提交 / 4.58MB 无泄漏**；
+  - 红线文件体检：`testdata/`、`local.properties`、签名密钥、`apk/`、`build/`、`*.log`、
+    `.env`、`ssh-tunnel.env` **均未入库**；工作区干净；
+  - 隐私字样检索：命中项全部是**合法引用**（`build.gradle.kts` 从仓库外的 properties 读
+    `storePassword/keyPassword`；`tools/gh_socks_tunnel.py` 从环境变量读；文档记录发版流程）；
+  - 新重编的 `libstellar_solver.so` 无可疑字符串（唯一 `token` 命中是 astrometry 符号名表）；
+  - **两台机器 IP 从未进入任何提交**（新旧构建机 `/home/ec2-user`、`/root/.ssh` 路径同样零命中，
+    `git log --all -S` 全域核实）。
+  - **仍待开发者拍板的既有项（2026-10-09 起，未变化）**：docs/71 事故的**叙事**仍在 8 条旧提交
+    信息里可按 SHA 读取（本次复核 `5508f988` 仍 HTTP 200）；其中**不含任何凭据/口令**，
+    口令与 IP 从未出现在正文。选项 A=接受并本地留档（推荐，已在 `incident-notes/73`），
+    B=重写历史（代价与风险见 `incident-notes/72` §4）。**未擅自重写。**
 
 - **2026-10-14（§0.108：支持 FITS 与相机 RAW）** — 开发者要求「增加对 fit 和 raw 文件的支持」：
   - **FITS**：自研纯 Kotlin 解码器 `util/FitsImage.kt`（无依赖、可 JVM 单测）。口径与
