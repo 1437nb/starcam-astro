@@ -86,6 +86,24 @@ fun HomeScreen(
         }
     }
 
+    // FITS / 相机 RAW（§0.108）：系统照片选择器只认图片（选不到 .fits/.cr2），
+    // 因此单独走**系统文档选择器（SAF）**；拷到缓存时保留原扩展名 —— 解码分派按扩展名走。
+    val docPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            val stamp = System.currentTimeMillis()
+            val files = uris.mapNotNull { uri ->
+                ImageUtils.copyUriToCacheKeepingName(context, uri, "picked_$stamp")
+            }
+            if (files.size == 1) {
+                onPickImage(files[0].absolutePath)
+            } else if (files.isNotEmpty()) {
+                onPickImages(files.map { it.absolutePath })
+            }
+        }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
@@ -159,6 +177,18 @@ fun HomeScreen(
                     .height(StarCamDimens.buttonHeight),
             ) {
                 Text(I18n.Home.chooseGalleryCompat, style = MaterialTheme.typography.labelLarge)
+            }
+
+            Spacer(Modifier.height(StarCamDimens.sm))
+
+            // FITS / 相机 RAW（§0.108）：望远镜与相机的原始素材，走 SAF 文档选择器
+            OutlinedButton(
+                onClick = { docPicker.launch(arrayOf("*/*")) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(StarCamDimens.buttonHeight),
+            ) {
+                Text(I18n.Home.chooseFitsRaw, style = MaterialTheme.typography.labelLarge)
             }
 
             Spacer(Modifier.height(StarCamDimens.sectionGap))

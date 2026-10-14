@@ -109,6 +109,25 @@
 
 ## 二、最近完成
 
+- **2026-10-14（§0.108：支持 FITS 与相机 RAW）** — 开发者要求「增加对 fit 和 raw 文件的支持」：
+  - **FITS**：自研纯 Kotlin 解码器 `util/FitsImage.kt`（无依赖、可 JVM 单测）。口径与
+    仓库把 FITS 转真值台素材的参考实现 `tools/convert_narrowfield.py` **逐条对齐**
+    （大端、行序翻转、NaN→0、1.0%/99.5% 分位拉伸）；支持 BITPIX 8/16/32/-32/-64、
+    BSCALE/BZERO、多 HDU（主 HDU 无数据时取第一个图像扩展）、引号/D 指数等头部怪癖。
+    WCS 元数据接到既有先验：`CDELT×NAXIS` → 可信视场（§0.103 闸门）、`DATE-OBS` →
+    拍摄时刻、`SITELAT/SITELONG` → 观测站坐标；**FITS 不做手机定位兜底**（拍摄者在观测站）。
+  - **RAW**：`util/RawPreview.kt` 只取**内嵌预览 JPEG**（不引 libraw）：TIFF IFD 走查
+    （JPEGInterchangeFormat / SubIFD / Compression=7 条带）+ 非 TIFF 容器的单遍 SOI…EOI
+    栈配对扫描兜底，取最大者。
+  - **接入**：`ImageUtils.decodeSampledBitmap` 按扩展名分派 → 批量/结果页/缩略图/
+    上传压缩/原生取样**九处调用点全部自动获得支持**；首页新增「FITS / 相机 RAW 文件」
+    入口（SAF 文档选择器，照片选择器选不到这两类），拷入缓存时保留原扩展名 + 文件名净化。
+  - **验证**：31 张真实 FITS 与 Python 参考实现**逐点一致（最大差 ≤ 0.00005）**；
+    合成星空 → 写 FITS → 解码逐点等于独立算出的期望 → 生产编排求解复现渲染 WCS
+    （sep 0.02°、视场误差 0.0%、107 内点）；FITS 链与 .gray 链逐场同结论。
+  - 口径：全量单测 **255 项 / 38 类**，CI **238 项**（跳过 9 类 / 17 项）。
+    详见 `docs/93-支持FITS与RAW-20261014.md`。
+
 - **2026-10-14（二期审计整改 §0.105~§0.107）** — 二期审计在刚落地的修复里抓到 3 个新缺陷，
   逐条核实**全部为真**（无误报），并各配回归测试；native 主机测试同时接进 CI：
   - **§0.105 EXIF GPS 时间 59.5% 失效**：`§0.100` 换 `DateTimeFormatter` 时漏掉

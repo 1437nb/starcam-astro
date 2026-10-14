@@ -105,6 +105,8 @@ android {
                 // §0.87/§0.88 新增的两台也读 testdata/gray12（不入库），CI 必须一并排除
                 excludeTestsMatching("com.starcam.astro.ScoredRoundBudgetTest")
                 excludeTestsMatching("com.starcam.astro.FallbackStarListTest")
+                // §0.108 FITS 真值台读 testdata/narrowfield/*.fits（不入库，单张 5.8MB），同样排除
+                excludeTestsMatching("com.starcam.astro.FitsNarrowFieldTest")
             }
         }
     }

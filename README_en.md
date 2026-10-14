@@ -240,7 +240,7 @@ cd code
 ./gradlew :app:assembleDebug
 
 # Run full unit tests (astronomical math, catalog integrity, solar-system
-# ephemerides, cross-engine checks — 234/234 passing)
+# ephemerides, cross-engine checks — 255/255 passing)
 ./gradlew :app:testDebugUnitTest
 
 # Output path
@@ -251,12 +251,12 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI (GitHub Actions) runs 219 of these — it passes `-PskipPhotoTests=true` to skip
+> CI (GitHub Actions) runs 238 of these — it passes `-PskipPhotoTests=true` to skip
 > 8 test classes that need locally-built material (`RealPhotoMatchTest` /
 > `Photo12RegressionTest` / `NarrowFieldRegressionTest` / `PhaseTimingBench` /
 > `TieredCatalogTest` / `SyntheticMidFieldTest` / `ScoredRoundBudgetTest` /
 > `FallbackStarListTest` — 15 tests in total). With the
-> material present locally the count is **234**.
+> material present locally the count is **255**.
 > CI additionally runs a real-photo truth regression that needs no private material:
 > `OfflinePhotosTruthTest` decodes the 12 public demo photos shipped in the repo
 > through the production selection/matching path — 12/12 must solve, zero false
@@ -304,7 +304,7 @@ ideas, and submission rules — are in
 **[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
 (Chinese).
 
-> **Known gap in test coverage**: CI runs **219** of the 234 tests. Eight truth-regression
+> **Known gap in test coverage**: CI runs **238** of the 255 tests. Nine truth-regression
 > classes depend on real-photo fixtures that are **not** in the repo (privacy and size) and
 > are skipped via `-PskipPhotoTests=true`. Two layers narrow that gap, neither a substitute
 > for the private-fixture guards: ① `OfflinePhotosTruthTest` (2026-10-11) runs a truth

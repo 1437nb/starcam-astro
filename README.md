@@ -21,6 +21,12 @@
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
 
+> **v1.5.76 FITS 与相机 RAW 支持 + 二期审计整改**：新增两类专业素材的直接导入 ——
+> 望远镜 FITS（自研解码器，口径与回归台参考实现逐点一致；WCS 视场/拍摄时刻/观测站坐标
+> 自动成为求解先验）与相机 RAW（提取内嵌预览，无需第三方库）；修掉二期审计查出的
+> 三条新缺陷（EXIF GPS 时间在时/分/秒 <10 时失效、native 索引回收对在飞求解的
+> use-after-free、批量诊断日志跨锁串台），并把 native 主机的 C 层状态机测试接进 CI。
+
 > **v1.5.75 稳定性与可验证性加固**：五条 P0 修复 —— 批量识别的两处线程安全隐患（共用时间戳
 > 格式化器）、批量统计改为**强类型逐项记账**（计数与每张照片的结局严格一致）、识别日志每行带
 > `solveId`+照片名且失败现场目录不再互相覆盖、**深域兜底收口**（>45° 广角不再白跑 60 秒/出
@@ -245,6 +251,11 @@
   （浅域/深域分别列出投票轮与打分轮统计），此前只看得到最后一遍的数字、会误导排查方向。
 
 - **专业天文工具**：
+  - **FITS 与相机 RAW 支持**（v1.5.76）：望远镜的 `.fit/.fits/.fts` 用自研纯 Kotlin 解码器
+    读取（BITPIX 8/16/32/±32/±64、BSCALE/BZERO、多 HDU；口径与仓库里把 FITS 转成回归台
+    素材的参考实现逐点一致），WCS 的视场/拍摄时刻/观测站坐标直接当求解先验；
+    相机 RAW（CR2/NEF/ARW/DNG/ORF/RW2/RAF…）取**内嵌预览**解码 —— 无需 libraw 等本地库，
+    离线可用。入口在首页「FITS / 相机 RAW 文件」（系统文档选择器）；
   - 原图相册直接读取（绕过系统安全中心降采样，保留真实星点）；
   - 双图层全屏缩放查看器（原图 vs 标注图对比）；
   - 失败可视化诊断（星点提取热点图 + 拍摄建议；v1.5.49 起标注图与原图同分辨率，放大不糊）；
@@ -290,7 +301,7 @@ cd code
 # 编译 Debug APK
 ./gradlew :app:assembleDebug
 
-# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；234 项全绿）
+# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；255 项全绿）
 ./gradlew :app:testDebugUnitTest
 
 # 产物位置
@@ -301,12 +312,11 @@ cd code
 # app/build/outputs/apk/release/StarCam-v*-release.apk
 ```
 
-> CI（GitHub Actions）跑的是 219 项 —— 它带 `-PskipPhotoTests=true`，跳过 8 个依赖本机
+> CI（GitHub Actions）跑的是 238 项 —— 它带 `-PskipPhotoTests=true`，跳过 9 个依赖本机
 > 素材的测试类（`RealPhotoMatchTest` / `Photo12RegressionTest` / `NarrowFieldRegressionTest` /
 > `PhaseTimingBench` / `TieredCatalogTest` / `SyntheticMidFieldTest` / `ScoredRoundBudgetTest` /
-> `FallbackStarListTest`，共 15 项）；
-> 本地素材齐备时为 **234 项**（34 个测试类；2026-10-14 在验证机上全绿，见
-> [docs/91](docs/91-公开照片真值回归上CI-20261011.md)）。
+> `FallbackStarListTest` / `FitsNarrowFieldTest`，共 17 项）；
+> 本地素材齐备时为 **255 项**（38 个测试类；2026-10-14 在验证机上全绿）。
 > **CI 侧另有一条不依赖私拍素材的真实照片真值回归**：`OfflinePhotosTruthTest`
 > 用仓库自带的 12 张公开演示图现场解码灰度，走生产的「选表 → 匹配」编排路径，
 > 硬线是 12/12 真解且假阳性为零。
@@ -350,7 +360,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties    # 该文件不入库
 完整说明见 **[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
 （依赖清单、跨平台重建 `.so` 的命令、可贡献方向、提交红线）。
 
-> **测试覆盖的已知折扣**：CI 跑 **219 项**，比本地少 15 项 —— 真值回归台里有 8 个类依赖
+> **测试覆盖的已知折扣**：CI 跑 **238 项**，比本地少 17 项 —— 真值回归台里有 9 个类依赖
 > **不入库**的实拍素材（含私拍原图，属隐私与体积上的必要取舍），在 CI 中按
 > `-PskipPhotoTests=true` 跳过。这块缺口有**两层补强**，都不等价于私拍素材上的守卫：
 > ① `OfflinePhotosTruthTest`（2026-10-11 加）用**仓库自带的 12 张公开演示照片**做真值

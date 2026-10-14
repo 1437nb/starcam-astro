@@ -282,8 +282,19 @@ object StarSolver {
     }
 
     /**
-     * 从图片文件读取 EXIF 视场估计（度）；无焦距信息返回 null */
+     * 从图片文件读取 EXIF 视场估计（度）；无焦距信息返回 null。
+     *
+     * §0.108：FITS 走 WCS（`CDELT × NAXIS`）—— 与 EXIF 焦距先验**同一条**「可信视场」
+     * 闸门（§0.103：>45° 宽场跳过深域重试）。天文素材的 WCS 比 EXIF 焦距更可信。
+     */
     fun readFovDeg(imagePath: String): Double? {
+        if (com.starcam.astro.util.FitsImage.isFitsPath(imagePath)) {
+            return try {
+                com.starcam.astro.util.FitsImage.readMeta(imagePath)?.fovDeg
+            } catch (e: Throwable) {
+                null
+            }
+        }
         return try {
             val exif = ExifInterface(imagePath)
             val focal35 = exif.getAttributeDouble(

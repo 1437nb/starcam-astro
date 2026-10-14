@@ -29,6 +29,7 @@ object I18n {
         val takePhoto: String get() = if (isEn) "📷  Take Photo" else "📷  拍照认星"
         val chooseGalleryOriginal: String get() = if (isEn) "Choose from Gallery (Original Photo)" else "从相册选择（原图·保留拍摄参数）"
         val chooseGalleryCompat: String get() = if (isEn) "System Gallery (Compatible Mode)" else "系统相册（兼容模式·位置可能被隐藏）"
+        val chooseFitsRaw: String get() = if (isEn) "📁  FITS / Camera RAW File" else "📁  FITS / 相机 RAW 文件"
         val offlineDemo: String get() = if (isEn) "✨  Offline Demo (Built-in Photos)" else "✨  离线演示（内置真实星空照片）"
         val history: String get() = if (isEn) "🕘  Recognition History" else "🕘  识别历史"
         val settings: String get() = if (isEn) "⚙️  Settings (API Key)" else "⚙️  设置（API Key）"

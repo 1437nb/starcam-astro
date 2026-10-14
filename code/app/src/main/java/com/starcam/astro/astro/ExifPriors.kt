@@ -109,6 +109,8 @@ object ExifPriorsReader {
 
     /** 读取照片 EXIF 先验；任意异常返回"全部未知"（调用方据此降级盲解） */
     fun read(imagePath: String): ExifPriors {
+        // §0.108：FITS 没有 EXIF —— 先验改从 FITS 头来（WCS 视场 / DATE-OBS / 观测站坐标）
+        if (com.starcam.astro.util.FitsImage.isFitsPath(imagePath)) return readFits(imagePath)
         val exif = try {
             ExifInterface(imagePath)
         } catch (e: Exception) {
@@ -255,12 +257,57 @@ object ExifPriorsReader {
     }
 
     /**
+     * FITS 先验（§0.108）：**没有 EXIF，但 FITS 头往往比 EXIF 更专业**。
+     *
+     *  - 视场：`CDELT1/2 × NAXIS`（WCS 每像素尺度）→ 与 EXIF 焦距先验同一条「可信视场」闸门；
+     *  - 时刻：`DATE-OBS`（FITS 约定即 UTC）—— 太阳系天体标注因此对望远镜素材同样可用；
+     *  - 位置：`SITELAT/SITELONG`（部分产品写 `LATITUDE/LONGITUD`）——观测站坐标。
+     *
+     * 缺项一律 null（不猜）：拿不到就退回盲解，与"照片没有 EXIF"同一降级口径。
+     */
+    private fun readFits(imagePath: String): ExifPriors {
+        val meta = try {
+            com.starcam.astro.util.FitsImage.readMeta(imagePath)
+        } catch (e: Throwable) {
+            null
+        } ?: return ExifPriors(null, null, null, null, false)
+        val hasSite = meta.siteLat != null && meta.siteLon != null
+        return ExifPriors(
+            fovDeg = meta.fovDeg,
+            latDeg = meta.siteLat,
+            lonDeg = meta.siteLon,
+            epochSec = parseFitsDateObs(meta.dateObs),
+            timeIsUtc = true,
+            locationSource = if (hasSite) LocationSource.EXIF else LocationSource.NONE,
+        )
+    }
+
+    /**
+     * DATE-OBS（FITS 标准写法 `2024-01-01T12:00:00`，UTC）→ Unix 秒。
+     * 容忍：空格分隔、尾随 `Z`、小数秒、时区后缀（只取到秒的部分）。
+     */
+    private fun parseFitsDateObs(raw: String?): Long? {
+        if (raw.isNullOrBlank()) return null
+        val core = raw.trim().replace(' ', 'T').take(19)
+        return try {
+            LocalDateTime.parse(core).toEpochSecond(ZoneOffset.UTC)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
      * §0.59：这张照片是否「值得用当前定位兜底」——缺 GPS（或只有半套）但有拍摄时间。
      *
      * 供调用方在求解前判断要不要去取一次定位，避免无谓的定位开销；
      * 也是「有拍摄时间」这一前提的唯一判据（无时刻则补位置毫无意义）。
+     *
+     * §0.108：**FITS 一律不兜底** —— 望远镜素材的拍摄者在观测站，手机当前位置
+     * 与拍摄地无关（拿手机定位去标注天文台拍的照片，比不标更糟）。缺 SITELAT/SITELONG
+     * 就当没有位置。
      */
     fun needsLocationFallback(imagePath: String): Boolean {
+        if (com.starcam.astro.util.FitsImage.isFitsPath(imagePath)) return false
         val priors = try {
             read(imagePath)
         } catch (e: Throwable) {
