@@ -95,7 +95,18 @@ AGENTS.md  本文件
 > ✅ **2026-10-10 更新：全量单测已在验证机跑通**（31 类 / 215 项全绿，含 8 个真值
 > 回归类；详见 `docs/88`）。验证机为 AWS EC2（2 核 / 3.8GB，SSH 别名 **`ec2-hk`**，
 > 别名与密钥在本机 `~/.ssh/config`，不入库），工作区 `~/starword`、素材
-> `~/starword/testdata`。该机 `gradle.properties` 的 8GB 调参需覆盖：
+> `~/starword/testdata`。
+>
+> **2026-10-14：验证机上的长任务用「丢出去就跑 + 自适应等待」**（跑一次 5~40 分钟，
+> 且**必须 detach** —— 挂在前台 ssh 上会话一断就把 gradle 杀在半路，两个半截实例并存
+> 还会 OOM，2026-10-11 实测）。启动与等待分离：
+> ```bash
+> ssh ec2-hk 'cd ~/starword/code && setsid nohup ./gradlew --no-daemon --console=plain \
+>   :app:testDebugUnitTest --rerun-tasks < /dev/null > /tmp/full.log 2>&1 &'
+> tools/wait_remote_run.sh ec2-hk /tmp/full.log      # until 日志出现 BUILD SUCCESSFUL|FAILED; do sleep 10
+> ```
+> `tools/wait_remote_run.sh` 自适应轮询（出现收尾标志即返回，超时也返回、退出码 2），
+> 结束时打印日志尾部 —— 不要写固定 `sleep N` 死等。该机 `gradle.properties` 的 8GB 调参需覆盖：
 > ```bash
 > cd ~/starword/code
 > GRADLE_OPTS='-Dorg.gradle.jvmargs=-Xmx1024m -XX:MaxMetaspaceSize=512m' \
