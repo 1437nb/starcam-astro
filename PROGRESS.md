@@ -5,9 +5,8 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-15（安全审查：§0.108 之后 —— 工作区/全史/二进制/红线全过，见下）
-**当前基线**：v1.5.75（versionCode 95，**已发版** 2026-10-11，tag `v1.5.75`）；工作区含
-§0.105~§0.107（二期审计整改，未发版）
+**最后更新**：2026-10-15（发版 v1.5.76：FITS/RAW 支持 + 二期审计三条修复）
+**当前基线**：v1.5.76（versionCode 96，**已发版** 2026-10-15，tag `v1.5.76`）
 **工作区**：`/opt/starword`（Linux 服务器；2026-10-08 由迁移包解出；原 Windows `C:\starword`
 已归档为 `starword-migration-20261005.7z`）
 **构建环境**：本服务器 1.87GB 内存**无法完成 app 模块的 Kotlin 编译**（2026-10-08
@@ -108,6 +107,15 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-10-15（发版 v1.5.76：FITS / 相机 RAW 支持 + 二期审计三条修复）** — versionCode 96，
+  APK `StarCam-v1.5.76-fits-raw-and-audit-fixes-{debug,release}.apk`：
+  - 内容：§0.108 FITS/RAW 支持（docs/93）+ §0.105~§0.107 三条审计修复（docs/92）；
+  - 构建与发版：验证机带签名构建（5m56s），签名密钥**临时上架、当日删除**（本地记录见
+    incident-notes/75）；发版前审计全过（证书与历史同源 `b04a854f…`、versionCode/Name=96/1.5.76、
+    release 无 AutoTestActivity、`.so` 4×`0x4000` 未压缩且 data_off 整除 16384）；
+  - 发完回验：GitHub 附件与构建产物**逐字节一致**（sha256 `b8e2c56d…` / `c358cb1a…`）。
+  - 等待全程用 `tools/wait_remote_run.sh` 自适应（BUILD 出现即返回，未写固定 sleep）。
 
 - **2026-10-15（安全审查：§0.108 之后）** — 五项全过，无需整改；结论记录如下（供下次审查比对）：
   - `tools/check_secrets.py` 全树扫描 **312 个文件零命中**；`gitleaks`（仓库 `.gitleaks.toml`）
