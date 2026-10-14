@@ -1,6 +1,7 @@
 package com.starcam.astro.astro
 
 import androidx.exifinterface.media.ExifInterface
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -93,6 +94,19 @@ object ExifPriorsReader {
     private val exifTimeFmt: DateTimeFormatter =
         DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss", Locale.US)
 
+    /**
+     * §0.105（二期审计 2026-10-14）：GPS 日期**单独**解析用。
+     *
+     * 缘由：`GPSTimeStamp` 的三个分量是 Int，拼字符串若不补前导零，
+     * `"HH:mm:ss"` 在 java.time 里要求固定两位宽（旧 `SimpleDateFormat` 宽容，
+     * 这是换 `DateTimeFormatter` 时漏掉的语义差异），时/分/秒任一 <10 就会抛
+     * `DateTimeParseException` 被吞成 null —— 一天 86400 秒里有 59.5% 中招。
+     * 这里改成「日期走格式器 + 时分秒走 `atTime(Int,Int,Int)`」，从根上不依赖
+     * 前导零；`parseLocalEpoch` 仍用 [exifTimeFmt]（那边输入本来就是完整字符串）。
+     */
+    private val exifDateFmt: DateTimeFormatter =
+        DateTimeFormatter.ofPattern("yyyy:MM:dd", Locale.US)
+
     /** 读取照片 EXIF 先验；任意异常返回"全部未知"（调用方据此降级盲解） */
     fun read(imagePath: String): ExifPriors {
         val exif = try {
@@ -184,9 +198,11 @@ object ExifPriorsReader {
         val hh = h.toInt().coerceIn(0, 23)
         val mm = m.toInt().coerceIn(0, 59)
         val ss = s.toInt().coerceIn(0, 59)
-        val text = "$date $hh:$mm:$ss"
+        // §0.105：日期与时分秒分开组装（时分秒走 Int，天然不需要前导零）。
         val epoch = try {
-            LocalDateTime.parse(text.trim(), exifTimeFmt).toEpochSecond(ZoneOffset.UTC)
+            LocalDate.parse(date.trim(), exifDateFmt)
+                .atTime(hh, mm, ss)
+                .toEpochSecond(ZoneOffset.UTC)
         } catch (e: Exception) {
             null
         } ?: return null

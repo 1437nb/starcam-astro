@@ -22,6 +22,20 @@ import java.security.MessageDigest
  */
 internal object JpegLuma {
 
+    /**
+     * 公开演示照片目录（仓库自带 `assets/offline_photos/`，随 APK 发布）——
+     * 各测试台共用同一处解析逻辑，避免"两台测试对素材位置各写一份"。
+     */
+    fun demoPhotosDir(): File {
+        val candidates = listOf(
+            File("src/main/assets/offline_photos"),           // 单测工作目录 = code/app
+            File("code/app/src/main/assets/offline_photos"),  // 仓库根工作目录
+            File("../../code/app/src/main/assets/offline_photos"),
+        )
+        return candidates.firstOrNull { it.isDirectory }
+            ?: error("找不到公开演示照片目录（找过：${candidates.joinToString { it.path }}）")
+    }
+
     class Gray(val w: Int, val h: Int, val px: FloatArray, private val luma8: ByteArray) {
         /**
          * 8 位灰度前 8 字节的 sha256（打印用）：换 JDK、换解码器导致像素漂移时，

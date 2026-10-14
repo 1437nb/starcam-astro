@@ -39,6 +39,40 @@ data class LocalMatchResult(
 )
 
 /**
+ * 一次求解的**留档快照**（§0.107，二期审计 2026-10-14）。
+ *
+ * 这些数字原先作为进程级 `@Volatile` 字段暴露，调用方（[StarSolver]）在 `match()`
+ * **返回之后**才去读 —— 那时锁已经放开，批量识别的另一个 worker 可能已进入下一次
+ * 求解并在入口把它们清零/覆写（`matchLocked` 开头就是一轮清零），于是日志里出现
+ * "读到 null" 或"读到别人的数字"的串台。现在改为**在 solveLock 内快照、随结果返回**：
+ * 拿到它的人一定读到的是自己那一次求解的数字。
+ *
+ * 字段语义：
+ *  - [voteStats]/[scoredStats]/…：**最后一次尝试的域**（有深域重试时是深域的数字）；
+ *  - [shallow*]：**主路径（浅域）**那一轮的数字（切深域前的留档；未切域时与上面相同）；
+ *  - [usedFallback]：本次解是否由备用星表命中；
+ *  - [deepRejectedReason]：深域被跳过/被拒时的原因（未涉深域为 null）。
+ */
+data class MatchDiagnostics(
+    val usedFallback: Boolean,
+    val deepRejectedReason: String?,
+    val voteStats: String?,
+    val scoredStats: String?,
+    val scoredBest: Int?,
+    val scoredInFrame: Int?,
+    val shallowVoteStats: String?,
+    val shallowScoredStats: String?,
+    val shallowScoredBest: Int?,
+    val shallowScoredInFrame: Int?,
+)
+
+/** [LocalStarMatcher.matchWithDiagnostics] 的返回：结果 + 与它同源的留档。 */
+data class MatchAttempt(
+    val result: LocalMatchResult?,
+    val diagnostics: MatchDiagnostics,
+)
+
+/**
  * 本地星场识别：星点三角形匹配法（完全离线，不依赖网络/API Key）。
  *
  * 流程：
@@ -1216,12 +1250,51 @@ object LocalStarMatcher {
         allowDeepRetry: Boolean = true,
         fallbackDetected: List<DetectedStar>? = null,
         fovHintDeg: Double? = null,
-    ): LocalMatchResult? = synchronized(solveLock) {
+    ): LocalMatchResult? = matchWithDiagnostics(
+        detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg,
+    ).result
+
+    /**
+     * 与 [match] 同一入口，但同时返回**与本次求解同源的留档**（§0.107）。
+     *
+     * 为什么需要独立入口：留档字段是进程级共享的单槽（`debugVoteStats` 等），
+     * 出了 `solveLock` 再读就可能被下一个求解覆写（批量两 worker 并发时必现）；
+     * 这里在锁内一次性快照，调用方拿到的是"自己那次"的数字。
+     * 既有的进程级字段保留（失败页 `ResultScreen` 仍读它们 —— 单张流程一次只有一个
+     * 求解，不存在串台）。
+     */
+    fun matchWithDiagnostics(
+        detected: List<DetectedStar>,
+        width: Int,
+        height: Int,
+        pointingHint: PointingHint? = null,
+        allowDeepRetry: Boolean = true,
+        fallbackDetected: List<DetectedStar>? = null,
+        fovHintDeg: Double? = null,
+    ): MatchAttempt = synchronized(solveLock) {
         // §0.77：整个求解在 solveLock 内执行。域（runtimeCatalogMag）是对象级状态，
         // 必须保证它在整次求解期间不被另一个求解改写；投票轮的 worker 线程也因此
         // 与主线程看到同一个域（**不能**用 ThreadLocal，原因见 runtimeCatalogMag）。
-        matchLocked(detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg)
+        val result = matchLocked(
+            detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg,
+        )
+        // 快照必须留在锁内 —— 出了这个块，另一个 worker 就能覆写这些单槽字段
+        MatchAttempt(result, snapshotDiagnostics())
     }
+
+    /** 锁内快照（§0.107）。**必须在 [solveLock] 内调用**。 */
+    private fun snapshotDiagnostics(): MatchDiagnostics = MatchDiagnostics(
+        usedFallback = lastMatchUsedFallback,
+        deepRejectedReason = debugDeepRejectedReason,
+        voteStats = debugVoteStats,
+        scoredStats = debugScoredStats,
+        scoredBest = debugScoredBest,
+        scoredInFrame = debugScoredInFrame,
+        shallowVoteStats = debugShallowVoteStats,
+        shallowScoredStats = debugShallowScoredStats,
+        shallowScoredBest = debugShallowScoredBest,
+        shallowScoredInFrame = debugShallowScoredInFrame,
+    )
 
     /** [match] 的实现体。**必须在 [solveLock] 内调用**（见 [runtimeCatalogMag]）。 */
     private fun matchLocked(

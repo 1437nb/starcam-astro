@@ -63,12 +63,17 @@ typedef struct {
      *   JOB_RUNNING  —— worker 在跑，**调用方**持有清理权（正常路径）
      *   JOB_DONE     —— worker 已返回且清理权仍在调用方（调用方 join + free）
      *   JOB_DETACHED —— 调用方超时让渡，**worker** 负责 solver_free + free(job) +
-     *                   g_leaked_threads--（见 solve_thread_fn 收尾分支）
+     *                   两个计数--（见 solve_thread_fn 收尾分支）
      *
      * 为什么必须是一个字：分设 done / handed_off 两个标志时，worker 的「置完成」
      * 与调用方的「取让渡」之间存在窗口，双方可能都认为自己该释放（双 free）或
      * 都认为对方会释放（泄漏）。单字 CAS 使这两个动作互斥。 */
     volatile int state;
+    /* §0.106：调用方是否已把本次求解计入 g_active_solvers（run_solver 在挂索引
+     * 的临界区内 +1 后传 1）。让渡时这笔账随所有权转给 worker —— 只有"已计数"
+     * 的 job 才递减，否则直调 run_with_timeout 的调用方（主机测试）会把计数递减
+     * 成负数。 */
+    int counted;
 } solve_job_t;
 
 #define JOB_RUNNING 0
@@ -82,6 +87,24 @@ typedef struct {
  * 因此在泄漏线程结束后可以重新放行（旧实现永久拒绝回收 11MB 索引）。 */
 static volatile int g_leaked_threads = 0;
 
+/* 「当前持有索引引用的活跃 solver 总数」（原子增减）——含**正常在飞**与
+ * **超时 detach** 两种。
+ *
+ * §0.106（二期审计 2026-10-14）修复的 use-after-free：
+ * 索引回收闸门原先只看 g_leaked_threads，而**正常求解期间它是 0**
+ * （只有超时让渡后的线程才算泄漏），于是 `StarCamApplication.onTrimMemory`
+ * 在前台低内存时调 `trimIndexCache()` → `release_indexes()` 会把 worker
+ * 正在高频读取的 index_t* 当场 index_free() → 段错误。
+ * 主机测试（bridge_host_test.c 场景 5）在修复前可稳定复现该 UAF。
+ *
+ * 记账规则（必须与索引引用同生命周期）：
+ *   - 挂索引的临界区内 +1（与 g_index_mutex 同一临界区，确保 release_indexes
+ *     看不到「索引已挂、计数还没记」的窗口）；
+ *   - 正常路径：run_solver 末尾 solver_free(sp) 之后 -1；
+ *   - 让渡路径：所有权连同这 1 个计数一起交给 worker，由 worker 在
+ *     solver_free(job->sp) 之后 -1（调用方让渡后不得再碰）。 */
+static volatile int g_active_solvers = 0;
+
 static void* solve_thread_fn(void* arg) {
     solve_job_t* job = (solve_job_t*)arg;
     solver_run(job->sp);
@@ -90,12 +113,15 @@ static void* solve_thread_fn(void* arg) {
      *  - 换出 DETACHED → 调用方已超时让渡：**这里**必须接管，否则 job、solver
      *    与泄漏计数全部永久流失（旧实现的缺陷：注释承诺的 leaked_thread_fn
      *    包装在代码里并不存在）。solver_free 在此线程调用是安全的 —— 它就是
-     *    刚刚跑完 solver_run 的那个线程；此刻之后再无人读索引，随后递减计数
-     *    即向 release_indexes 放行。 */
+     *    刚刚跑完 solver_run 的那个线程；此刻之后再无人读索引，随后递减两个
+     *    计数即向 release_indexes 放行（§0.106：活跃计数随所有权一并承接）。 */
     int prev = __sync_val_compare_and_swap(&job->state, JOB_RUNNING, JOB_DONE);
     if (prev == JOB_DETACHED) {
+        int counted = job->counted; /* 取走后再 free(job)，此后不得再解引用 */
         solver_free(job->sp);
         free(job);
+        if (counted)
+            __sync_sub_and_fetch(&g_active_solvers, 1);
         __sync_sub_and_fetch(&g_leaked_threads, 1);
     }
     return NULL;
@@ -125,7 +151,7 @@ static double mono_seconds(void) {
  * **强制**进入 detach 路径（见 cpp/bridge_host_test.c），生产路径不改。 */
 static double g_quit_join_grace_sec = 5.0;
 
-static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked) {
+static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked, int counted) {
     pthread_t th;
     if (out_leaked) *out_leaked = 0;
     solve_job_t* job = (solve_job_t*)calloc(1, sizeof(solve_job_t));
@@ -133,6 +159,7 @@ static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked) {
         return RUN_SPAWN_FAILED;
     job->sp = sp;
     job->state = JOB_RUNNING;
+    job->counted = counted;
     if (pthread_create(&th, NULL, solve_thread_fn, job) != 0) {
         free(job);
         return RUN_SPAWN_FAILED;
@@ -154,15 +181,20 @@ static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked) {
         /* 宽限期后仍未完成 ⇒ 把所有权**原子地**让渡给 worker（P0-2.6）。
          * 这个 CAS 与 worker 收尾用的 CAS 是唯一的移交/收尾点，二者互斥：
          *  - 换出 RUNNING  → 让渡成功：worker 退出时负责 solver_free / free(job) /
-         *                    g_leaked_threads-- ；调用方立即返回且**不得再碰 sp**；
+         *                    两个计数--；调用方立即返回且**不得再碰 sp**；
          *  - 换出 DONE     → worker 恰在此刻完成，清理权仍在调用方：正常 join +
-         *                    free（不算泄漏，也不置 out_leaked）。 */
+         *                    free（不算泄漏，也不置 out_leaked）。
+         * §0.106：先记泄漏账、再移交；CAS 失败（交接未发生）就把账撤回。
+         * 旧顺序（移交成功后才记账）在「CAS 成功但记账前被抢占」的窗口里会让
+         * worker 的递减先于调用方的递增执行，计数短暂变负 —— 撤回式记账
+         * 从根上消掉这个窗口。 */
+        __sync_add_and_fetch(&g_leaked_threads, 1);
         int prev = __sync_val_compare_and_swap(&job->state, JOB_RUNNING, JOB_DETACHED);
         if (prev == JOB_RUNNING) {
-            __sync_add_and_fetch(&g_leaked_threads, 1);
             if (out_leaked) *out_leaked = 1;
             pthread_detach(th);
         } else {
+            __sync_sub_and_fetch(&g_leaked_threads, 1);
             pthread_join(th, NULL);
             free(job);
         }
@@ -289,13 +321,17 @@ static index_t* get_or_load_index(const char* path) {
 
 /* 归还全部索引内存。返回实际释放的档数；0 表示未释放（不满足安全条件）。
  *
- * 安全性：持锁检查 g_leaked_threads —— 有 detach 线程在跑就不动
- * （那些线程可能正访问索引）。线程数无从观测何时归零，故泄漏过就永久拒绝，
- * 保守但绝不 use-after-free。 */
+ * 安全性（§0.106 修正）：持锁检查**两个**计数 ——
+ *   - g_active_solvers > 0：还有 solver（正常在飞或已让渡）持有索引引用；
+ *   - g_leaked_threads > 0：还有 detach 线程在跑（理论上包含于上一项，
+ *     保留为第二道闸，任一非零即拒绝）。
+ * 旧实现只看 g_leaked_threads，正常求解期间它是 0 → 会把在用的索引当场释放
+ * （前台 onTrimMemory 触发即崩）。两个计数都由「最后一个不再使用索引的人」
+ * 递减，递减完成后回收才放行。 */
 static int release_indexes(void) {
     int freed = 0;
     pthread_mutex_lock(&g_index_mutex);
-    if (g_leaked_threads == 0) {
+    if (g_active_solvers == 0 && g_leaked_threads == 0) {
         for (int i = 0; i < g_index_cache_n; i++) {
             if (g_index_cache[i]) {
                 index_free(g_index_cache[i]); /* 官方提供的释放接口 */
@@ -429,6 +465,11 @@ static void run_solver(
             nidx++;
         }
     }
+    /* §0.106：与挂索引**同一临界区**记账（见 g_active_solvers 注释）——
+     * 此后直到 solver_free（或让渡给 worker）为止，release_indexes 都不得
+     * 回收这些索引，否则 worker 会读到已释放内存。 */
+    if (nidx > 0)
+        __sync_add_and_fetch(&g_active_solvers, 1);
     pthread_mutex_unlock(&g_index_mutex);
     if (nidx == 0) {
         snprintf(out, outsz,
@@ -445,7 +486,8 @@ static void run_solver(
     solver_set_field(sp, field); /* 所有权转移 */
 
     int leaked = 0;
-    int timedout = run_with_timeout(sp, time_limit_sec, &leaked);
+    /* counted=1：索引记账已在挂索引的临界区内完成（见 g_active_solvers） */
+    int timedout = run_with_timeout(sp, time_limit_sec, &leaked, 1);
 
     /* P0-2.6：所有权已让渡给被 detach 的 worker —— 它负责 solver_free(sp)
      * （连带释放 field，其所有权已在 solver_set_field 时转移）。此后本函数
@@ -486,7 +528,11 @@ static void run_solver(
             "{\"ok\":false,\"error\":\"no-solution\",\"nstars\":%d}", nstars);
     }
 
+    /* §0.106：索引引用的最后一次使用到此为止（solver_free 之后无人在读索引），
+     * 归还活跃计数 → release_indexes 可以放行。让渡路径**不在此处递减**
+     * （所有权已转给 worker，由它负责；调用方让渡后连 sp 都不能再碰）。 */
     solver_free(sp);
+    __sync_sub_and_fetch(&g_active_solvers, 1);
 }
 
 /* ---------------- JNI 工具 ---------------- */
@@ -743,7 +789,7 @@ Java_com_starcam_astro_astro_StellarSolverNative_indexCacheStats(JNIEnv* env, jc
     int n = g_index_cache_n, loads = g_index_load_count;
     pthread_mutex_unlock(&g_index_mutex);
     snprintf(buf, sizeof(buf),
-             "{\"cached\":%d,\"loads\":%d,\"leakedThreads\":%d}", n, loads,
-             (int)g_leaked_threads);
+             "{\"cached\":%d,\"loads\":%d,\"leakedThreads\":%d,\"activeSolvers\":%d}", n, loads,
+             (int)g_leaked_threads, (int)g_active_solvers);
     return (*env)->NewStringUTF(env, buf);
 }

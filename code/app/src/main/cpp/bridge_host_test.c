@@ -31,6 +31,14 @@ static int g_index_free_calls = 0;    /* index_free 被调次数 */
 static double g_fake_run_sec = 0.0;   /* >0：solver_run 睡这么久（模拟不可中断段） */
 static int g_fake_did_solve = 0;
 
+/* §0.106：场景 5 的「在飞 UAF」检测装置。
+ *   g_fake_index_alive —— 假索引是否仍然存在（index_free 清零）；
+ *   g_uaf_watch_index  —— 让 solver_run 在睡眠期间轮询上面这个标记；
+ *   g_uaf_observed     —— 睡眠期间观察到索引已被释放（= 发生了 use-after-free）。 */
+static volatile int g_fake_index_alive = 0;
+static volatile int g_uaf_watch_index = 0;
+static volatile int g_uaf_observed = 0;
+
 /* 说明：桩的**声明**来自 astro_bridge.c 里包含的官方头文件（先声明后定义，
  * 定义写在下方 #include 之后）。 */
 
@@ -52,9 +60,19 @@ void solver_run(solver_t* sp) {
     (void)sp;
     double t = g_fake_run_sec;
     if (t > 0) {
-        /* 模拟"卡在不可中断段"：**故意不轮询 quit_now**，让宽限期耗尽、
-         * 强制走进让渡分支（这正是审计要求覆盖的路径）。 */
-        usleep((useconds_t)(t * 1e6));
+        if (g_uaf_watch_index) {
+            /* 场景 5：正常在飞求解。睡眠期间轮询「索引还在不在」——
+             * 若期间有人把它释放了，这里就能观测到（真机上表现为段错误）。 */
+            double end = mono_seconds() + t;
+            while (mono_seconds() < end) {
+                if (!g_fake_index_alive) g_uaf_observed = 1;
+                usleep(5000);
+            }
+        } else {
+            /* 模拟"卡在不可中断段"：**故意不轮询 quit_now**，让宽限期耗尽、
+             * 强制走进让渡分支（这正是审计要求覆盖的路径）。 */
+            usleep((useconds_t)(t * 1e6));
+        }
     }
 }
 
@@ -82,13 +100,18 @@ index_t* index_load(const char* name, int flags, index_t* dest) {
 
 void index_free(index_t* idx) {
     g_index_free_calls++;
+    g_fake_index_alive = 0; /* §0.106：在飞检测器据此观测「索引已没了」 */
     free(idx);
 }
 
 starxy_t* starxy_new(int n, anbool flux, anbool back) {
     (void)flux; (void)back;
     if (n < 0) return NULL;
-    return (starxy_t*)calloc(1, sizeof(starxy_t) + (size_t)n);
+    starxy_t* f = (starxy_t*)calloc(1, sizeof(starxy_t) + (size_t)n);
+    /* 真实现会填 N（行数）—— 桩必须照做，否则 run_solver 会把外部星点表
+     * 当 0 颗（"too-few-stars"），场景 5 根本走不到挂索引那一步。 */
+    if (f) f->N = n;
+    return f;
 }
 
 void starxy_free(starxy_t* f) { free(f); }
@@ -141,7 +164,7 @@ static void scenario_normal(void) {
 
     solver_t* sp = solver_new();
     int leaked = -1;
-    int rc = run_with_timeout(sp, 1.0, &leaked);
+    int rc = run_with_timeout(sp, 1.0, &leaked, 0);
 
     CHECK(rc == RUN_OK, "返回码应为 RUN_OK（实际 %d）", rc);
     CHECK(leaked == 0, "不得标记泄漏（实际 %d）", leaked);
@@ -161,7 +184,7 @@ static void scenario_forced_detach(void) {
 
     solver_t* sp = solver_new();
     int leaked = -1;
-    int rc = run_with_timeout(sp, 0.2, &leaked);
+    int rc = run_with_timeout(sp, 0.2, &leaked, 0);
 
     CHECK(rc == RUN_TIMEOUT, "返回码应为 RUN_TIMEOUT（实际 %d）", rc);
     CHECK(leaked == 1, "应标记已让渡（实际 %d）", leaked);
@@ -193,7 +216,7 @@ static void scenario_release_gate(void) {
     g_quit_join_grace_sec = 0.1;
     solver_t* sp = solver_new();
     int leaked = 0;
-    run_with_timeout(sp, 0.1, &leaked);
+    run_with_timeout(sp, 0.1, &leaked, 0);
     CHECK(leaked == 1, "前置条件：应产生一个泄漏线程");
 
     int freed = release_indexes();
@@ -219,18 +242,111 @@ static void scenario_after_detach_regression(void) {
 
     solver_t* sp = solver_new();
     int leaked = -1;
-    int rc = run_with_timeout(sp, 1.0, &leaked);
+    int rc = run_with_timeout(sp, 1.0, &leaked, 0);
     CHECK(rc == RUN_OK && leaked == 0, "让渡后正常路径仍应 RUN_OK/不泄漏");
     solver_free(sp);
     CHECK(g_solver_free_calls == 1, "solver_free 应恰好一次");
 }
 
+/* ⑤ §0.106：**正常在飞**求解期间调用 release_indexes() 必须被拒绝
+ *    （旧实现只看 g_leaked_threads，正常求解时它是 0 → 当场释放在用索引 → UAF）。
+ *    这里走完整的生产路径 run_solver（挂索引 → run_with_timeout），
+ *    而不是直接调 run_with_timeout —— 「谁该记账」这件事只有整条路径能测出来。 */
+typedef struct {
+    const float* gray;
+    int w, h;
+    const char* paths[1];
+    float ext[1 + 3 * 6]; /* 6 颗假外部星：首元素 = 颗数 */
+    char out[512];
+} run_solver_arg_t;
+
+static void* run_solver_thread(void* p) {
+    run_solver_arg_t* a = (run_solver_arg_t*)p;
+    run_solver(a->gray, a->w, a->h, a->paths, 1,
+               0.0, 0.0, 0.0, 0.0, 0.0, 0, /* 无视场/天区先验 */
+               0.0, 5.0,                  /* 默认提星阈值、5s 上限（远大于 0.6s 求解） */
+               (int)(1 + 3 * 6), a->ext,
+               a->out, sizeof(a->out));
+    return NULL;
+}
+
+static void wait_active_solvers_back_to(int target) {
+    for (int i = 0; i < 500; i++) {
+        if (g_active_solvers == target) return;
+        usleep(10000);
+    }
+}
+
+static void scenario_inflight_solve_blocks_release(void) {
+    printf("\n[场景 5] 正常在飞求解 vs 索引回收（§0.106：在飞 UAF）\n");
+    g_quit_join_grace_sec = 5.0;
+    g_fake_run_sec = 0.6;      /* 正常求解，耗时 0.6s（5s 上限内，不超时） */
+    g_uaf_watch_index = 1;
+    g_uaf_observed = 0;
+    g_solver_free_calls = 0;
+    g_index_free_calls = 0;
+
+    /* 预置一个"已加载"的假索引，并标记存活 */
+    pthread_mutex_lock(&g_index_mutex);
+    g_index_cache[0] = (index_t*)calloc(1, sizeof(index_t));
+    strcpy(g_index_paths[0], "fake-index-inflight");
+    g_index_cache_n = 1;
+    pthread_mutex_unlock(&g_index_mutex);
+    g_fake_index_alive = 1;
+
+    run_solver_arg_t arg;
+    memset(&arg, 0, sizeof(arg));
+    arg.w = 64;
+    arg.h = 64;
+    arg.gray = (const float*)calloc((size_t)arg.w * arg.h, sizeof(float));
+    arg.paths[0] = "fake-index-inflight";
+    arg.ext[0] = 6.0f; /* 6 颗外部星 → simplexy 桩给 0 颗时走外部星点兜底 */
+    for (int i = 0; i < 6; i++) {
+        arg.ext[1 + i * 3] = 10.0f + i;
+        arg.ext[2 + i * 3] = 12.0f + i;
+        arg.ext[3 + i * 3] = 100.0f;
+    }
+
+    pthread_t th;
+    pthread_create(&th, NULL, run_solver_thread, &arg);
+    /* 等它真的进入「索引已挂、正在求解」状态 */
+    int waited = 0;
+    while (g_active_solvers < 1 && waited < 500) { usleep(5000); waited++; }
+    CHECK(g_active_solvers == 1,
+          "前置条件：求解在飞时活跃计数应为 1（实际 %d；run_solver 输出：%s）",
+          (int)g_active_solvers, arg.out);
+
+    int freed = release_indexes();
+    CHECK(freed == 0 && g_index_free_calls == 0,
+          "正常在飞求解期间**必须拒绝**回收（旧实现会当场释放在用索引 → UAF；"
+          "freed=%d, index_free=%d）", freed, g_index_free_calls);
+
+    pthread_join(th, NULL);
+    wait_active_solvers_back_to(0);
+    CHECK(g_active_solvers == 0,
+          "求解结束后活跃计数应归零（实际 %d）", (int)g_active_solvers);
+    /* 在飞检测器放在 join 之后判定：worker 的轮询周期是 5ms，释放后立刻断言会
+     * 早于它下一次轮询（实测 uaf=0 的假阴性）；此刻它已跑完整段睡眠，
+     * 期间只要索引被释放过就必然被观测到（A/B 实测：旧闸门下 uaf=1）。 */
+    CHECK(g_uaf_observed == 0,
+          "在飞检测器：整个求解期间索引从未被释放（观测到释放 = use-after-free）");
+
+    freed = release_indexes();
+    CHECK(freed == 1 && g_index_free_calls == 1,
+          "求解结束后**应能回收**索引（freed=%d, index_free=%d）", freed, g_index_free_calls);
+
+    free((void*)arg.gray);
+    g_uaf_watch_index = 0;
+    g_fake_run_sec = 0.0;
+}
+
 int main(void) {
-    printf("=== astro_bridge 主机测试（P0-2.6：超时 detach 所有权接盘）===\n");
+    printf("=== astro_bridge 主机测试（P0-2.6 超时接盘 + §0.106 在飞回收闸门）===\n");
     scenario_normal();
     scenario_forced_detach();
     scenario_release_gate();
     scenario_after_detach_regression();
+    scenario_inflight_solve_blocks_release();
     printf("\n==================================================\n");
     if (g_failures) {
         printf("FAILED：%d 项断言未通过\n", g_failures);

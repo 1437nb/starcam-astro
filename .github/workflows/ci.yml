@@ -37,6 +37,14 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      # C 层状态机的主机测试（P0-2.6 超时让渡所有权 / §0.106 索引回收闸门）：
+      # <1 秒、不需要 NDK，也不需要 astrometry.net 源码树 —— 头文件走仓库内
+      # code/app/src/main/cpp/test_stubs/ 的桩（脚本自动回退），只需 JDK 的 jni.h。
+      # 场景 5 会在「正常在飞求解期间调 release_indexes」时用桩里的在飞检测器
+      # 抓 use-after-free（修复前实测 3 项断言红）。
+      - name: Native bridge host test
+        run: bash tools/run_bridge_host_test.sh
+
       # 不用 android-actions/setup-android：
       # 该 action 的 v3 会检测 runner 预装的 cmdline-tools 版本并跑
       # `sdkmanager tools`，在 ubuntu-latest 上以 exit code 1 失败

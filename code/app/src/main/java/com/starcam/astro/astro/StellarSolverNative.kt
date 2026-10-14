@@ -371,6 +371,15 @@ object StellarSolverNative {
         radiusDeg: Double,
         plimOverride: Double = 0.0,
     ): SolveResult? {
+        // §0.107（二期审计 2026-10-14）：**先清空上一次的失败诊断**。
+        // 桥只在 star-extraction-failed 时输出 rc/gmean/gmax；提星成功但未解出
+        // （no-solution / timeout）的 JSON 里没有这几个键，而下面解析用的是
+        // `if (o.has(...))` —— 不清空的话，上一张照片（甚至上一轮）留下的
+        // rc/gmean 会被当成本次的诊断一直打下去，把排查引向错误方向。
+        lastFailNStars = null
+        lastFailRc = null
+        lastFailGMean = null
+        lastFailGMax = null
         val w = bitmap.width
         val h = bitmap.height
         val gray = FloatArray(w * h)

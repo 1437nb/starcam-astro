@@ -669,7 +669,7 @@ object StarSolver {
                     val hint = if (settings.sensorAssistedPointing) {
                         PointingHintStore.get(imagePath)
                     } else null
-                    val matched = if (stars != null && stars.size >= 5) {
+                    val attempt = if (stars != null && stars.size >= 5) {
                         try {
                             // §0.97：首选 box-blur 表，SEP 表作为**备用**交给匹配器。
                             // 匹配器内部顺序：首选表低成本试探 → 备用表 → 首选表完整 → 深域。
@@ -677,7 +677,10 @@ object StarSolver {
                             // 视场 > 45° 时匹配器会跳过深域重试（深域是窄场兜底路径，宽场跑它
                             // 白费且只会出伪解）。⚠️ 只用 EXIF 视场，绝不用浅域失败候选反推的
                             // 视场（§0.98 的闸门就是这么被回滚的）。
-                            LocalStarMatcher.match(
+                            // §0.107（二期审计）：走 matchWithDiagnostics —— 留档在锁内快照、
+                            // 随结果返回。旧写法在这里（已出锁）读 LocalStarMatcher 的全局
+                            // 诊断字段，批量两 worker 并发时会被下一个求解清零/覆写。
+                            LocalStarMatcher.matchWithDiagnostics(
                                 stars, currentDisplay.width, currentDisplay.height, hint,
                                 fallbackDetected = sepListForFallback,
                                 fovHintDeg = fov,
@@ -686,9 +689,11 @@ object StarSolver {
                             null
                         }
                     } else null
-                    // §0.103：在 match 返回后立即取走深域准入留档（避免被下一次求解覆盖）
-                    val deepRejectReason = LocalStarMatcher.debugDeepRejectedReason
-                    if (matched != null && LocalStarMatcher.lastMatchUsedFallback) {
+                    val matched = attempt?.result
+                    val diag = attempt?.diagnostics
+                    // §0.103：深域准入留档改从本次快照取（同上，不再跨锁读全局字段）
+                    val deepRejectReason = diag?.deepRejectedReason
+                    if (matched != null && diag?.usedFallback == true) {
                         log.line(
                             context,
                             "内置星表：box-blur 表(${stars?.size ?: 0}颗)浅域未匹配，" +
@@ -739,10 +744,15 @@ object StarSolver {
                         stars.size < 5 -> "星点太少（${stars.size} 颗，匹配需 ≥5）"
                         matched == null -> buildString {
                             append("星点 ${stars.size} 颗但未匹配")
-                            append("；投票候选=${LocalStarMatcher.debugVoteStats}")
-                            append("；打分轮=${LocalStarMatcher.debugScoredStats}")
-                            append("（best=${LocalStarMatcher.debugScoredBest}")
-                            append(" inFrame=${LocalStarMatcher.debugScoredInFrame}）")
+                            // §0.107（二期审计 2026-10-14）：这里改用**主路径（浅域）**的
+                            // 数字 —— 原先是单槽字段，跑过深域重试后它已是深域的数字，
+                            // 摘要却按浅域读（失败页里浅域/深域是分开列的，摘要只报一组，
+                            // 口径必须与「浅域」一致）。快照里 shallow* 未涉深域时与
+                            // 当前域同值，因此非深域场景一字不变。
+                            append("；投票候选=${diag?.shallowVoteStats ?: diag?.voteStats}")
+                            append("；打分轮=${diag?.shallowScoredStats ?: diag?.scoredStats}")
+                            append("（best=${diag?.shallowScoredBest ?: diag?.scoredBest}")
+                            append(" inFrame=${diag?.shallowScoredInFrame ?: diag?.scoredInFrame}）")
                             // §0.103（P0-2.5）：深域被跳过/被拒时写清原因，避免把
                             // "闸门生效"误读成"深域也解不出"（真机 5057 曾白跑 60 秒）
                             deepRejectReason?.let { append("；深域：").append(it) }

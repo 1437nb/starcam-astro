@@ -63,6 +63,33 @@ class ExifPriorsTimeParseTest {
     }
 
     /**
+     * §0.105（二期审计 2026-10-14）：**单数位**时分秒必须能解析。
+     *
+     * 时间分量是 Int（`h.toInt()`），拼进 "yyyy:MM:dd HH:mm:ss" 时若不补前导零，
+     * `java.time` 的 `HH/mm/ss` 要求固定两位宽 → 时/分/秒任一 <10 就抛
+     * `DateTimeParseException` 被吞成 null。一天 86400 秒里三值全 ≥10 的只有
+     * 14×50×50 = 35000 秒（40.5%），即 **59.5% 的 GPS 时间曾整段失效**，
+     * 天顶先验与太阳系标注静默降级为本地时间（时区不符时还会拿错时刻）。
+     *
+     * 这里故意用三个**互不相同**的单数位（8:5:9）与一位/两位混合（9:10:3），
+     * 保证每个分量都单独被考到。
+     */
+    @Test
+    fun utcEpochParsesSingleDigitTimeComponents() {
+        // 2024-08-12T08:05:09Z = 1723449909（独立手算常量）
+        assertEquals(1723449909L, utcParse.invoke(ExifPriorsReader, "2024:08:12", "8/1,5/1,9/1"))
+        // 混合：9 时 10 分 3 秒 → 2024-08-12T09:10:03Z = 1723453803
+        assertEquals(1723453803L, utcParse.invoke(ExifPriorsReader, "2024:08:12", "9,10,3"))
+        // 整数写法与分式写法必须同值
+        assertEquals(
+            utcParse.invoke(ExifPriorsReader, "2024:08:12", "8,5,9"),
+            utcParse.invoke(ExifPriorsReader, "2024:08:12", "8/1,5/1,9/1"),
+        )
+        // 同一分钟的 22:30:05（单数位秒）也必须解出
+        assertEquals(1723501805L, utcParse.invoke(ExifPriorsReader, "2024:08:12", "22/1,30/1,5/1"))
+    }
+
+    /**
      * 本地解析必须按**系统默认时区**解释墙上时间：与 UTC 解析的差值应恰好等于
      * 该时刻的时区偏移（测试在 UTC 与 Asia/Shanghai 下都应通过）。
      */

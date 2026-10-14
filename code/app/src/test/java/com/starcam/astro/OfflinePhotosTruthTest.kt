@@ -68,15 +68,8 @@ class OfflinePhotosTruthTest {
 
     // ------------------------------------------------------------------ 素材
 
-    private fun assetsDir(): File {
-        val candidates = listOf(
-            File("src/main/assets/offline_photos"),           // 单测工作目录 = code/app
-            File("code/app/src/main/assets/offline_photos"),  // 仓库根工作目录
-            File("../../code/app/src/main/assets/offline_photos"),
-        )
-        return candidates.firstOrNull { it.isDirectory }
-            ?: error("找不到公开演示照片目录（找过：${candidates.joinToString { it.path }}）")
-    }
+    /** 公开演示照片目录（与 [MatchDiagnosticsTest] 共用同一处解析：见 [JpegLuma.demoPhotosDir]）。 */
+    private fun assetsDir(): File = JpegLuma.demoPhotosDir()
 
     // ------------------------------------------------- 生产编排路径（JVM 可达形态）
 
