@@ -12,12 +12,12 @@
 
 ## 下载安装
 
-最新版本 **[v1.5.75](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.75)** —
+最新版本 **[v1.5.76](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.76)** —
 
 | 包 | 大小 | 说明 |
 |---|---|---|
-| [StarCam-v1.5.75-stability-ci-hardening-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.75/StarCam-v1.5.75-stability-ci-hardening-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
-| [StarCam-v1.5.75-stability-ci-hardening-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.75/StarCam-v1.5.75-stability-ci-hardening-debug.apk) | 26.9 MB | 含调试日志 |
+| [StarCam-v1.5.76-fits-raw-and-audit-fixes-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.76/StarCam-v1.5.76-fits-raw-and-audit-fixes-release.apk) | 16.5 MB | **推荐**，R8 压缩签名包 |
+| [StarCam-v1.5.76-fits-raw-and-audit-fixes-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.76/StarCam-v1.5.76-fits-raw-and-audit-fixes-debug.apk) | 27.0 MB | 含调试日志 |
 
 全部版本见 [Releases](https://github.com/1437nb/starcam-astro/releases)。
 
