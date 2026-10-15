@@ -78,6 +78,13 @@ android {
     }
 
     testOptions {
+        // §0.109：单测默认对 android.jar 的桩方法抛 "not mocked"。但
+        // `androidx.exifinterface`（App 真实用的 EXIF 库）在**类初始化**里就会调
+        // `android.util.Log.isLoggable` —— 不放开这一项，任何走真实 EXIF 读取链的
+        // 单测（ExifPriorsGpsTimeRealFileTest）都会 ExceptionInInitializerError。
+        // 放开后桩方法返回默认值（false/0/null），只影响"确有必要触碰 android.*"的测试；
+        // 本仓库其余单测都是纯逻辑，不依赖 "not mocked" 的严格性。
+        unitTests.isReturnDefaultValues = true
         // 构建机仅 1.8GB 内存：gradle 守护进程(512m) + 测试 worker 默认(512m)
         // 并存时会触发内核 OOM-killer（2026-08-28 实测）。测试实际峰值远低于默认值，
         // 限到 384m 后守护进程与 worker 可共存。
