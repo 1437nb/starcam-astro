@@ -46,13 +46,10 @@ object RawPreview {
     }
 
     internal fun extractJpegBytes(bytes: ByteArray): ByteArray? {
-        val fromTiff = findJpegByTiff(bytes)
-        val fromScan = findJpegByScan(bytes)
-        return when {
-            fromTiff == null -> fromScan
-            fromScan == null -> fromTiff
-            else -> if (fromTiff.size >= fromScan.size) fromTiff else fromScan
-        }
+        // §0.110：**TIFF 元数据优先**。扫描兜底只能在容器解析不出预览时使用 ——
+        // 否则"取最大"会输给原始数据（Canon CR2 的 12.8MB lossless JPEG 就藏在
+        // StripOffsets 里，扫描/贪婪策略都会选中它，而真正的预览是 IFD0 那 362KB）。
+        return findJpegByTiff(bytes) ?: findJpegByScan(bytes)
     }
 
     // ------------------------------------------------------------------ TIFF 走查
@@ -170,22 +167,108 @@ object RawPreview {
         return out
     }
 
-    /** 按 [off]/[len] 切一段并校验是 JPEG（SOI 开头、内部能找到 EOI）。 */
+    /**
+     * 按 [off]/[len] 切一段并**结构化校验**是 JPEG（§0.110）。
+     *
+     * 为什么不能只查"SOI 开头 + 末尾有 EOI"：真机 CR2 实测（Canon 450D）里，
+     * 原始传感器数据中会**偶然出现** `FFD8 … FFD9` 字节串；贪婪地"取最大候选"
+     * 会选中一段 12.8MB 的伪跨度（PIL 直接判定不是图像）。所以必须按 JPEG 语法
+     * 逐个标记走查到 EOI：段长非法、标记不认识、越过边界 —— 一律不算预览。
+     */
     private fun jpegSlice(bytes: ByteArray, off: Int, len: Int): ByteArray? {
         if (off <= 0 || len <= 4 || off + len > bytes.size) return null
         if ((bytes[off].toInt() and 0xFF) != 0xFF || (bytes[off + 1].toInt() and 0xFF) != 0xD8) return null
-        // 长度字段可能含填充：截到最后一个 EOI
-        var eoi = -1
-        var i = off + len - 2
-        while (i > off) {
-            if ((bytes[i].toInt() and 0xFF) == 0xFF && (bytes[i + 1].toInt() and 0xFF) == 0xD9) {
-                eoi = i
-                break
+        val end = walkJpegEnd(bytes, off, off + len)
+        if (end < 0) return null
+        return bytes.copyOfRange(off, end)
+    }
+
+    /**
+     * 从 [off]（必须是 SOI）按 JPEG 标记语法走查，返回 EOI 之后的下标；不合法返回 -1。
+     *
+     * 只做**结构**校验（段长、标记序列、SOS 之后的熵编码数据用 stuffing/restart 规则跳过），
+     * 不解码像素 —— 因此纯 JVM 可测，也不依赖 Android 的 BitmapFactory。
+     */
+    internal fun walkJpegEnd(bytes: ByteArray, off: Int, limit: Int): Int {
+        if (off + 2 > limit) return -1
+        if ((bytes[off].toInt() and 0xFF) != 0xFF || (bytes[off + 1].toInt() and 0xFF) != 0xD8) return -1
+        var i = off + 2
+        var sofType = -1
+        var sawSos = false
+        var guard = 0
+        while (i + 1 < limit && guard++ < 1 shl 20) {
+            if ((bytes[i].toInt() and 0xFF) != 0xFF) return -1      // 标记区必须 FF 开头
+            var j = i + 1
+            var m = bytes[j].toInt() and 0xFF
+            while (m == 0xFF && j + 1 < limit) {                    // 允许 FF 填充
+                j++
+                m = bytes[j].toInt() and 0xFF
             }
-            i--
+            when {
+                m == 0xD9 -> {
+                    // §0.110：必须是**可显示的** JPEG —— SOF0/1/2（基线/扩展顺序/渐进）。
+                    // SOF3/5~7/9~11/13~15 是无损/算术/差分编码：相机把**原始传感器数据**
+                    // 也存成 JPEG（Canon CR2 实测：12.8MB 的 lossless JPEG），
+                    // 它不是给人看的预览，解出来也是花屏。
+                    val viewable = sofType == 0xC0 || sofType == 0xC1 || sofType == 0xC2
+                    return if (viewable && sawSos) j + 1 else -1
+                }
+                m == 0xD8 || m == 0x01 || (m in 0xD0..0xD7) -> i = j + 1
+                m in 0xC0..0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC -> {  // SOFn
+                    sofType = m
+                    val n = readSegLen(bytes, j, limit) ?: return -1
+                    i = j + 1 + n
+                }
+                m == 0xDA -> {                                           // SOS
+                    val n = readSegLen(bytes, j, limit) ?: return -1
+                    if (n < 6) return -1                                 // SOS 至少 6 字节载荷
+                    sawSos = true
+                    var k = j + 1 + n
+                    // 熵编码段：只允许 FF00（填充）与 RSTn；DNL 允许一次；其余 FFxx 出现即非法
+                    var done = false
+                    while (k + 1 < limit) {
+                        if ((bytes[k].toInt() and 0xFF) != 0xFF) { k++; continue }
+                        val nx = bytes[k + 1].toInt() and 0xFF
+                        when {
+                            nx == 0x00 || nx in 0xD0..0xD7 -> k += 2
+                            nx == 0xDC -> {                              // DNL：跳过后继续
+                                val d = readSegLen(bytes, k + 1, limit) ?: return -1
+                                k += 1 + 1 + d
+                            }
+                            nx == 0xDA -> {                              // 渐进式：又一段 SOS，跳过其段头继续
+                                val n2 = readSegLen(bytes, k + 1, limit) ?: return -1
+                                k += 2 + n2
+                            }
+                            nx == 0xD9 -> {                              // EOI
+                                // §0.110：这里也要过 SOF 类型检查 —— 正常 JPEG 的 EOI
+                                // 就是在熵编码扫描里遇到的；只在"标记区"检查等于没检查
+                                // （Canon CR2 的 12.8MB lossless 原始数据因此曾被放行）
+                                if (!(sofType == 0xC0 || sofType == 0xC1 || sofType == 0xC2)) return -1
+                                k += 2; done = true
+                            }
+                            else -> return -1
+                        }
+                        if (done) break
+                    }
+                    if (!done) return -1
+                    return k
+                }
+                m == 0x00 -> return -1                                    // 段外 FF00：非法
+                else -> {
+                    val n = readSegLen(bytes, j, limit) ?: return -1
+                    i = j + 1 + n
+                }
+            }
         }
-        if (eoi < 0) return null
-        return bytes.copyOfRange(off, eoi + 2)
+        return -1
+    }
+
+    /** 读 [j] 处标记的长度字段（2 字节，含自身）；非法返回 null。 */
+    private fun readSegLen(bytes: ByteArray, j: Int, limit: Int): Int? {
+        if (j + 2 >= limit) return null
+        val n = ((bytes[j + 1].toInt() and 0xFF) shl 8) or (bytes[j + 2].toInt() and 0xFF)
+        if (n < 2 || j + 1 + n > limit) return null
+        return n
     }
 
     // ------------------------------------------------------------------ 兜底扫描
@@ -196,8 +279,7 @@ object RawPreview {
      */
     internal fun findJpegByScan(bytes: ByteArray): ByteArray? {
         val stack = ArrayDeque<Int>()
-        var bestStart = -1
-        var bestEnd = -1
+        var best: ByteArray? = null
         var i = 0
         val n = bytes.size
         while (i < n - 1) {
@@ -207,9 +289,12 @@ object RawPreview {
                     0xD9 -> if (stack.isNotEmpty()) {
                         val s = stack.removeLast()
                         if (stack.isEmpty()) {
-                            val e = i + 2
-                            if (bestStart < 0 || e - s > bestEnd - bestStart) {
-                                bestStart = s; bestEnd = e
+                            // §0.110：只收**结构化合法**的跨度（真机 CR2 的原始数据里
+                            // 偶然出现 FFD8…FFD9，贪婪取最大会选中 12.8MB 的伪跨度）
+                            val end = walkJpegEnd(bytes, s, i + 2)
+                            if (end > 0) {
+                                val cut = bytes.copyOfRange(s, end)
+                                if (best == null || cut.size > best.size) best = cut
                             }
                         }
                     }
@@ -217,7 +302,6 @@ object RawPreview {
             }
             i++
         }
-        if (bestStart < 0) return null
-        return bytes.copyOfRange(bestStart, bestEnd)
+        return best
     }
 }
