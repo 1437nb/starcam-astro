@@ -122,7 +122,8 @@
     在 v1.5.76 上会红）+ 纯函数层补冒号形态与"不得变零点"断言（11 → 13 项）。
   - **顺带**：修掉一条只在非 UTC 机器上会红的既有断言（`localEpochUsesSystemZone` 的
     偏移符号写反，UTC 机器上恒成立）—— 本次在 +8 的构建服务器本地跑测才现形。
-  - 验证：本机（+8、真 androidx 库）16 项全绿；CI 见对应 run。
+  - 验证：本机（+8、真 androidx 库）16 项全绿；CI `classes=30 tests=243 failures=0`（新测试在
+    mockable android.jar 下需 `unitTests.isReturnDefaultValues = true`，首红修好后转绿）。
   - **待发 v1.5.77**（v1.5.76 的 GPS 时刻是回退，建议尽快修发）。详见
     `docs/94-修正-GPS时刻被丢弃-§0.109-20261015.md`。
 
