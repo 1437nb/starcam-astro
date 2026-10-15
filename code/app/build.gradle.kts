@@ -114,6 +114,8 @@ android {
                 excludeTestsMatching("com.starcam.astro.FallbackStarListTest")
                 // §0.108 FITS 真值台读 testdata/narrowfield/*.fits（不入库，单张 5.8MB），同样排除
                 excludeTestsMatching("com.starcam.astro.FitsNarrowFieldTest")
+                // §0.103 闸门真值台读 testdata/gate-sweep（SkyView 实拍 + 合成渲染，均不入库）
+                excludeTestsMatching("com.starcam.astro.GateFovSweepTest")
             }
         }
     }

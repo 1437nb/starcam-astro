@@ -301,7 +301,7 @@ cd code
 # 编译 Debug APK
 ./gradlew :app:assembleDebug
 
-# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；255 项全绿）
+# 运行全量单元测试（星表完整性、天文数学、太阳系历表、跨引擎验证；269 项全绿）
 ./gradlew :app:testDebugUnitTest
 
 # 产物位置
@@ -316,7 +316,7 @@ cd code
 > 素材的测试类（`RealPhotoMatchTest` / `Photo12RegressionTest` / `NarrowFieldRegressionTest` /
 > `PhaseTimingBench` / `TieredCatalogTest` / `SyntheticMidFieldTest` / `ScoredRoundBudgetTest` /
 > `FallbackStarListTest` / `FitsNarrowFieldTest`，共 17 项）；
-> 本地素材齐备时为 **255 项**（38 个测试类；2026-10-14 在验证机上全绿）。
+> 本地素材齐备时为 **269 项**（40 个测试类；含 §0.103 闸门真值台）。
 > **CI 侧另有一条不依赖私拍素材的真实照片真值回归**：`OfflinePhotosTruthTest`
 > 用仓库自带的 12 张公开演示图现场解码灰度，走生产的「选表 → 匹配」编排路径，
 > 硬线是 12/12 真解且假阳性为零。
@@ -360,7 +360,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties    # 该文件不入库
 完整说明见 **[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
 （依赖清单、跨平台重建 `.so` 的命令、可贡献方向、提交红线）。
 
-> **测试覆盖的已知折扣**：CI 跑 **238 项**，比本地少 17 项 —— 真值回归台里有 9 个类依赖
+> **测试覆盖的已知折扣**：CI 跑 **248 项**，比本地少 21 项 —— 真值回归台里有 10 个类依赖
 > **不入库**的实拍素材（含私拍原图，属隐私与体积上的必要取舍），在 CI 中按
 > `-PskipPhotoTests=true` 跳过。这块缺口有**两层补强**，都不等价于私拍素材上的守卫：
 > ① `OfflinePhotosTruthTest`（2026-10-11 加）用**仓库自带的 12 张公开演示照片**做真值
