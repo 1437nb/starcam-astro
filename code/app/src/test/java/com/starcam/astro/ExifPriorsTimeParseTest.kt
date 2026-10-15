@@ -90,8 +90,49 @@ class ExifPriorsTimeParseTest {
     }
 
     /**
-     * 本地解析必须按**系统默认时区**解释墙上时间：与 UTC 解析的差值应恰好等于
-     * 该时刻的时区偏移（测试在 UTC 与 Asia/Shanghai 下都应通过）。
+     * §0.109（验证中发现）：**androidx ExifInterface 返回的是冒号形态** `"HH:MM:SS"`
+     * （对标准 RATIONAL 三连的格式化结果，真实照片实测），解析器必须同时认这一形态，
+     * 否则时分秒被静默当 0 → epoch 变当天零点。
+     */
+    @Test
+    fun utcEpochParsesColonFormattedGpsTime() {
+        // "22:30:15" 与分式形态 "22/1,30/1,15/1" 必须同值
+        assertEquals(expectedUtc2024, utcParse.invoke(ExifPriorsReader, "2024:08:12", "22:30:15"))
+        // 单数位（androidx 也可能给 "8:5:9" 形态）
+        assertEquals(1723449909L, utcParse.invoke(ExifPriorsReader, "2024:08:12", "8:5:9"))
+        // 带前导零
+        assertEquals(1723449909L, utcParse.invoke(ExifPriorsReader, "2024:08:12", "08:05:09"))
+        // 缺秒按 0
+        assertEquals(
+            utcParse.invoke(ExifPriorsReader, "2024:08:12", "22:30"),
+            utcParse.invoke(ExifPriorsReader, "2024:08:12", "22:30:00"),
+        )
+    }
+
+    /**
+     * §0.109：**认不出的时间必须返回 null**（由调用方回落 DateTimeOriginal），
+     * 绝不允许退化成 `0:0:0` —— 那等于把拍摄时刻静默换成当天零点。
+     */
+    @Test
+    fun utcEpochRejectsUnparsableTimeInsteadOfMidnight() {
+        assertNull(utcParse.invoke(ExifPriorsReader, "2024:08:12", "不是时间"))
+        assertNull(utcParse.invoke(ExifPriorsReader, "2024:08:12", ""))
+        assertNull(utcParse.invoke(ExifPriorsReader, "2024:08:12", null))
+        assertNull(utcParse.invoke(ExifPriorsReader, "2024:08:12", "12:xx:09"))
+        // 反例对照：零点本身是合法时刻（"0:0:0" 与 "00:00:00" 都要能解出）
+        assertEquals(
+            utcParse.invoke(ExifPriorsReader, "2024:08:12", "0:0:0"),
+            utcParse.invoke(ExifPriorsReader, "2024:08:12", "00:00:00"),
+        )
+    }
+
+    /**
+     * 本地解析必须按**系统默认时区**解释墙上时间。
+     *
+     * 关系式：同一串墙上时间，在 UTC+8 下的**时刻**比在 UTC 下**早** 8 小时 ——
+     * 即 `local = utc − 偏移`（2026-10-15 修正：原断言写成 `utc + 偏移`，符号反了；
+     * 它在 UTC 机器上偏移为 0 恰好恒成立，所以只在非 UTC 机器上才现形 ——
+     * 服务器时区 +8 时本地跑测才发现。这正是"测试要跨时区跑一遍"的价值。）
      */
     @Test
     fun localEpochUsesSystemZone() {
@@ -99,7 +140,11 @@ class ExifPriorsTimeParseTest {
         val local = localParse.invoke(ExifPriorsReader, "2024:08:12 22:30:15") as Long?
         val offsetSeconds = ZoneId.systemDefault().rules
             .getOffset(Instant.ofEpochSecond(expectedUtc2024)).totalSeconds.toLong()
-        assertEquals(expectedUtc2024 + offsetSeconds, local)
+        assertEquals(
+            "本地解析应等于 UTC 解析减去该时刻的时区偏移（UTC+8 时本地时刻更早）",
+            expectedUtc2024 - offsetSeconds,
+            local,
+        )
         // 同值再走一遍 UTC 入口，确认两入口对同一墙上时间的解释只差时区
         assertEquals(expectedUtc2024, utc)
     }

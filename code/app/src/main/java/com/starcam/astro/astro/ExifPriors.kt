@@ -180,35 +180,61 @@ object ExifPriorsReader {
         return dms
     }
 
-    /** GPSDateStamp("2024:08:12") + GPSTimeStamp("22/1,30/1,15/1") → Unix 秒（UTC） */
+    /** GPSDateStamp("2024:08:12") + GPSTimeStamp → Unix 秒（UTC）。
+     *
+     * §0.109（验证中发现）：**必须同时认两种 GPSTimeStamp 形态** ——
+     *  ① `"HH:MM:SS"`：这是 androidx `ExifInterface`（1.3.7 实测，与仓库依赖版本一致）
+     *     对标准 RATIONAL 三连（17/1,25/1,46/1）**格式化后**的返回形态，也就是真机上的
+     *     常态。旧解析只按 ② 拆，导致时分秒全被当 0 → epoch 静默变成"当天 UTC 零点"，
+     *     月亮标注因此可能偏出 7°（17:25:46 与 00:00:00 相差 ~7° 月亮位移）。
+     *  ② `"num/den,num/den,num/den"`：少数机型写成纯文本的原始形态（解析器最初的假设）。
+     * 两种都认不出时返回 null（调用方回落 DateTimeOriginal），**绝不退化成 0:0:0**。 */
     private fun parseUtcEpoch(dateStamp: String?, timeStamp: String?): Long? {
         if (dateStamp.isNullOrBlank()) return null
         val date = dateStamp.replace('-', ':')
-        val time = timeStamp ?: ""
-        val parts = time.split(",")
-        fun frac(v: String): Double {
-            if (!v.contains("/")) return v.toDoubleOrNull() ?: 0.0
-            val sp = v.split("/")
-            if (sp.size != 2) return 0.0
-            val num = sp[0].toDoubleOrNull() ?: return 0.0
-            val den = sp[1].toDoubleOrNull() ?: return 0.0
-            return if (den == 0.0) 0.0 else num / den
-        }
-        val h = if (parts.size > 0) frac(parts[0]) else 0.0
-        val m = if (parts.size > 1) frac(parts[1]) else 0.0
-        val s = if (parts.size > 2) frac(parts[2]) else 0.0
-        val hh = h.toInt().coerceIn(0, 23)
-        val mm = m.toInt().coerceIn(0, 59)
-        val ss = s.toInt().coerceIn(0, 59)
-        // §0.105：日期与时分秒分开组装（时分秒走 Int，天然不需要前导零）。
+        val hms = parseGpsTimeOfDay(timeStamp) ?: return null
         val epoch = try {
             LocalDate.parse(date.trim(), exifDateFmt)
-                .atTime(hh, mm, ss)
+                .atTime(hms.first, hms.second, hms.third)
                 .toEpochSecond(ZoneOffset.UTC)
         } catch (e: Exception) {
             null
         } ?: return null
         return epoch
+    }
+
+    /** GPSTimeStamp → (时, 分, 秒)；两种形态都认不出返回 null（见 [parseUtcEpoch]）。 */
+    private fun parseGpsTimeOfDay(raw: String?): Triple<Int, Int, Int>? {
+        val t = raw?.trim().orEmpty()
+        if (t.isEmpty()) return null
+        if (t.contains(':')) {
+            // androidx 返回的格式化形态，如 "17:25:46"（也可能是 "8:05:09"）
+            val p = t.split(':')
+            if (p.size < 2) return null
+            val h = p[0].trim().toDoubleOrNull()?.toInt() ?: return null
+            val m = p[1].trim().toDoubleOrNull()?.toInt() ?: return null
+            // 秒可能带小数（部分机型），取整数部分；缺秒按 0
+            val s = p.getOrNull(2)?.trim()?.substringBefore('.')?.toDoubleOrNull()?.toInt() ?: 0
+            return Triple(h.coerceIn(0, 23), m.coerceIn(0, 59), s.coerceIn(0, 59))
+        }
+        // 原始分式形态，如 "17/1,25/1,46/1"；时解析失败即整体弃用（不回落到 0 点）
+        val p = t.split(',')
+        val h = fracOrNull(p.getOrNull(0))?.toInt() ?: return null
+        val m = fracOrNull(p.getOrNull(1))?.toInt() ?: 0
+        val s = fracOrNull(p.getOrNull(2))?.toInt() ?: 0
+        return Triple(h.coerceIn(0, 23), m.coerceIn(0, 59), s.coerceIn(0, 59))
+    }
+
+    /** "num/den" 或纯数字 → Double；空/坏值返回 null（区别于"0"）。 */
+    private fun fracOrNull(v: String?): Double? {
+        val s = v?.trim().orEmpty()
+        if (s.isEmpty()) return null
+        if (!s.contains("/")) return s.toDoubleOrNull()
+        val sp = s.split("/")
+        if (sp.size != 2) return null
+        val num = sp[0].trim().toDoubleOrNull() ?: return null
+        val den = sp[1].trim().toDoubleOrNull() ?: return null
+        return if (den == 0.0) null else num / den
     }
 
     /** DateTimeOriginal("2024:08:12 22:30:15") → Unix 秒（本地时区） */
