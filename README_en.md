@@ -12,16 +12,29 @@ A pure offline Android application for astrophotography plate-solving and night 
 
 ## Download
 
-Latest release: **[v1.5.75](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.75)**
+Latest release: **[v1.5.86](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.86)**
 
 | Package | Size | Notes |
 |---|---|---|
-| [StarCam-v1.5.75-stability-ci-hardening-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.75/StarCam-v1.5.75-stability-ci-hardening-release.apk) | 16.5 MB | **Recommended** — R8-minified signed build |
-| [StarCam-v1.5.75-stability-ci-hardening-debug.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.75/StarCam-v1.5.75-stability-ci-hardening-debug.apk) | 26.9 MB | Includes debug logging |
+| [StarCam-v1.5.86-fix-viewer-layer-sync-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.86/StarCam-v1.5.86-fix-viewer-layer-sync-release.apk) | 15.8 MB | **Recommended** — R8-minified official signed build |
 
 All versions: [Releases](https://github.com/1437nb/starcam-astro/releases).
 (The per-version history below is not fully translated; see the
 [Chinese README](README.md) for every release's notes.)
+
+> **v1.5.86 — Layer Quick Toggles, Lines-Only Clean Export, Viewer Sync & De-overlap (§0.120)**:
+> 1. **Interactive Layer FilterChips**: Toggle Star Names, Constellation Lines, Constellation Names, Deep-Sky Messier, and Planets/Moon instantly directly below the photo in Result view;
+> 2. **Clean Constellation Lines Export**: Dedicated `📐 Lines Only` export button saves pure constellation lines + background night sky with zero distracting text clutter;
+> 3. **Full-Screen Zoomable Viewer Sync**: Eliminates stale layer snapshots when tapping into full-screen zoom, with bidirectional layer synchronization;
+> 4. **Label De-overlap & 4-Quadrant Boundary Clamping**: Suppresses star labels duplicate with Messier objects (Alcyone in M45, Hatysa in M42) and automatically places edge star labels into inward quadrants, eliminating text clipping at image edges.
+
+> **v1.5.78~v1.5.85 — Architectural Hardening & Tonight Sky Ephemeris (§0.111–§0.119)**:
+> 1. **Tonight Sky Card**: Pure JVM solar system ephemeris renders moon phases, lunar age, 5 visible planets' windows, and astrophotography recommendations on the home screen;
+> 2. **Parallel Engine Racing**: Runs local and native astrometry solvers in parallel for wide-field blind solving, aborting the loser within 1 ms when the first succeeds;
+> 3. **Lock-Free Concurrency**: Eliminates the global solve lock by encapsulating state in `MatchContext`;
+> 4. **Solve Cancellation Token & Global Deadlines**: Immediate termination when leaving screens, preventing thread pile-ups;
+> 5. **Instant 0ms History Loading**: Persists complete WCS matrix parameters to view solved photos instantly without re-solving;
+> 6. **Truth Bed Dual-Engine Cross-Calibration**: 12 demo photos cross-calibrated against official Astrometry.net truth, achieving 12/12 TRUE-SOLVE regression.
 
 > **v1.5.75 — stability & verifiability hardening.** Five P0 fixes: thread-safety in batch
 > recognition (a shared `SimpleDateFormat` → `DateTimeFormatter`), batch statistics rebuilt
