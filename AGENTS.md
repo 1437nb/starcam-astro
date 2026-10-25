@@ -14,30 +14,27 @@
 
 ## 0. 唯一工作区（重要）
 
-- **当前工作区：`/opt/starword`（2026-10-08 起，Linux 构建服务器）。**
-  由迁移包 `starword-migration-20261005.7z` 解出（含完整 `.git`），HEAD = `f2033f2`
-  与 GitHub `main` 同 SHA。`testdata/`、`apk/`、`indexes/` 为机器相关本地目录，不入库。
-- 仓库外的不可再生资产（发布签名密钥、astrometry 交叉静态库、星表原始输入、
-  git bundle 快照等）在 `/opt/starcam-migration-assets/`（即迁移包内 `_migration/`）。
-- 历史：本项目曾有多份副本互相分叉（`C:\star\StarCam` 等），已于 2026-09-12 合并；
-  原 Windows 工作区 `C:\starword` 的完整快照在 2026-10-05 打包为上述 7z
-  （归档副本在服务器 `/root/starword-handoff-20261006/`）。
-- **不要再从别处开发、不要手工同步副本。** 改代码只在当前工作区改。
-- 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），分支 `main`。
+- **当前唯一主力工作区：`C:\starcam`（本地 Windows 11 开发机，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）。**
+  `testdata/`、`apk/`、`indexes/` 为机器相关本地目录，不入库。
+- 仓库外的本地资产（发布签名密钥在 `~/.starcam/` 或 `C:\dev\`，astrometry 交叉静态库在 `C:\dev\astrometry-local\`）。
+- 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），主分支 `main`。
+- 辅助机器（配置在 `~/.ssh/config`，凭据绝不入库）：
+  - **`ec2-hk`**：AWS EC2（香港，2 核 / 3.8GB），用于海外网络跳板、测试回归与 Git 中转推送；
+  - **`huawei`**：Linux 服务器，用于辅助 GitHub Release 发布与官方授权管理。
 
 ### 凭据管理规范（务必遵守）
 
 **硬性规则**：
 
 1. **任何凭据不得进入 git 跟踪范围**（含历史）。服务器口令、API Key、token 一律走
-   环境变量或 `~/.starcam/*.env`（`.gitignore` 已覆盖 `*.env` 等）。
+   环境变量或 `~/.starcam/*.env`（`.gitignore` 已覆盖 `*.env`、`agent.md`、`*.internal.md` 等）。
 2. **提交前跑 `python tools/check_secrets.py`** —— 已装为 pre-commit 钩子
    （`core.hooksPath=.githooks`，新克隆需执行一次 `git config core.hooksPath .githooks`）。
 3. **不要依赖 CI 的默认扫描**：gitleaks 默认规则只认「已知凭据格式」，
    「自定义变量名 = 任意口令」不在其覆盖范围 —— 本项目必须用仓库内 `.gitleaks.toml`。
-4. **`tools/gh_api_push.py` 是唯一推送通道**（git push 被墙），它已内置推送前自检；
-   若绕过它用别的方式推送，先手动跑 `check_secrets.py`。
-5. **发布前审阅 `git diff`**，尤其 `tools/` 这类辅助目录。
+4. **发布前审阅 `git diff`**，尤其 `tools/` 与配置类文件。
+
+---
 
 ## 1. 项目是什么
 
@@ -59,90 +56,50 @@
 ```
 code/      Android 工程（app/src 为全部源码；assets/indexes 为 8 个 FITS 离线索引，
            随包必需；jniLibs/arm64-v8a 为求解引擎 .so）
-docs/      83 篇中文文档（编号即 §0.xx 章节；00 总览、01 代码地图、64 篇验证增补
-           §0.11~§0.78，7 份 release-notes，另有代码审查清单 `72-`、
-           外部评估响应 `76-`。⚠️ §0.73~§0.76 与 §0.79/§0.80 仍**未补独立报告**，
-           只记在 `PROGRESS.md`，属待还的文档债）
-tools/     34 个 Python 工具脚本（星表生成 / 定标 / 连线 / 评测 / 发版）
+docs/      100+ 篇中文文档（编号即 §0.xx 章节；00 总览、01 代码地图，已演进至 §0.120，
+           含 10 份 release-notes、代码审查清单 72- 等）
+tools/     35+ 个 Python/脚本工具（星表生成 / 定标 / 连线 / 凭据体检 / 发版自动化）
 apk/       可安装验证基线（git 忽略，仅本机保留）
 indexes/   8 个 FITS 索引副本（服务端 solve-field 定标用，git 忽略）
 交接说明.md 项目总纲（公开脱敏版）
 AGENTS.md  本文件
 ```
 
+---
+
 ## 2. 构建与测试
 
-> **2026-10-08 迁移说明（先读这段）**：工作区现于 Linux 服务器 `/opt/starword`。
-> 工具链已就位：JDK 17（`/usr/lib/jvm/java-17-openjdk`）、Android SDK 34
-> （`/opt/android-sdk`，`code/local.properties` 已指向）、Gradle 8.12.1
-> （`/opt/gradle-8.12.1/bin/gradle`）、NDK r26d（`/opt/ndk/android-ndk-r26d`）。
-> ⚠️ **本服务器仅 1.87GB 内存，无法完成 app 模块的 Kotlin 编译**（2026-10-08 实测
-> 4 次：in-process 512m / Kotlin 守护 768m / in-process 1024m 均在
-> `compileDebugKotlin` 阶段被内核 OOM 杀掉 —— 编译需 ~1.1GB+ 堆）。
-> → **全量单测与打包请在 ≥4GB 内存的机器执行**；本服务器适合：改代码、写文档、
-> 跑 Python 工具、重编 native `.so`（内存需求小）。
-> Linux 调用示例（在内存足够的机器上）：
-> ```bash
-> cd <工作区>/code
-> PHOTO_DIR=../testdata/realphotos PHOTO12_DIR=../testdata/gray12 NF_DIR=../testdata/narrowfield \
->   gradle --no-daemon --console=plain :app:testDebugUnitTest --rerun-tasks
-> ```
-> （后两个环境变量自 2026-10-08 起可不设 —— 素材路径已改为相对路径自动探测。）
-> native `.so` 重编的 Linux 路径：服务器脚本 `/opt/build_so_server.sh` + 交叉静态库
-> `/opt/starcam-migration-assets/astrometry-local/`（依赖 astrometry 源码树
-> `/tmp/astrometry.net-0.97`，重启后需按 `docs/03` 恢复；未完整验证）。
->
-> ✅ **2026-10-10 更新：全量单测已在验证机跑通**（31 类 / 215 项全绿，含 8 个真值
-> 回归类；详见 `docs/88`）。验证机为 AWS EC2（2 核 / 3.8GB，SSH 别名 **`ec2-hk`**，
-> 别名与密钥在本机 `~/.ssh/config`，不入库），工作区 `~/starword`、素材
-> `~/starword/testdata`。
->
-> **2026-10-14：验证机上的长任务用「丢出去就跑 + 自适应等待」**（跑一次 5~40 分钟，
-> 且**必须 detach** —— 挂在前台 ssh 上会话一断就把 gradle 杀在半路，两个半截实例并存
-> 还会 OOM，2026-10-11 实测）。启动与等待分离：
-> ```bash
-> ssh ec2-hk 'cd ~/starword/code && setsid nohup ./gradlew --no-daemon --console=plain \
->   :app:testDebugUnitTest --rerun-tasks < /dev/null > /tmp/full.log 2>&1 &'
-> tools/wait_remote_run.sh ec2-hk /tmp/full.log      # until 日志出现 BUILD SUCCESSFUL|FAILED; do sleep 10
-> ```
-> `tools/wait_remote_run.sh` 自适应轮询（出现收尾标志即返回，超时也返回、退出码 2），
-> 结束时打印日志尾部 —— 不要写固定 `sleep N` 死等。该机 `gradle.properties` 的 8GB 调参需覆盖：
-> ```bash
-> cd ~/starword/code
-> GRADLE_OPTS='-Dorg.gradle.jvmargs=-Xmx1024m -XX:MaxMetaspaceSize=512m' \
->   ./gradlew --no-daemon --console=plain --max-workers=1 --no-configuration-cache \
->   -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest --rerun-tasks
-> ```
-> （`--max-workers=1` 会把测试 fork 限成 1 个：内存最稳、全量约 40 分钟；内存有余量
-> 时去掉它可恢复 `maxParallelForks=2` 提速。）
+> **铁律（开发者 2026-09-17 明确要求）：所有编译优先在本机运行。**
+> 本机拥有高配置环境（i9-14900HX 24核32线程），Kotlin 编译、单元测试与打包均在本机高速完成。
 
-**以下为原 Windows 机约定，保留备查：**
+### 2.0 本机构建命令
 
-> **铁律（开发者 2026-09-17 明确要求）：所有编译必须在本机运行。**
-> 不再依赖远端构建服务器。下方命令均在本机实测通过。
+在 `C:\starcam\code` 下执行：
 
-```bash
-cd C:\starword\code
-gradle :app:testDebugUnitTest --rerun-tasks   # 全量单测（本机素材齐时 179 项）
-gradle :app:assembleDebug                     # 构建 debug APK（约 3 分钟）
+```powershell
+cd C:\starcam\code
+.\gradlew.bat :app:testDebugUnitTest --rerun-tasks -PskipPhotoTests=true   # 全量单测（35 类 / 276 项全绿，约 2.5 分钟）
+.\gradlew.bat :app:assembleDebug                                          # 构建 debug APK（约 2~3 分钟）
 ```
 
-### 2.0 native 库（`.so`）也本机构建
+- **环境**：OpenJDK 17（`C:\dev\jdk-17`）、Android SDK 34（`C:\dev\android-sdk`，`code/local.properties` 写 `sdk.dir=C:/dev/android-sdk`，该文件机器相关不入库）、Gradle 8.12.1。
+- **Shell 环境**：本机终端命令与脚本执行**严禁使用 Windows PowerShell 5 (`powershell.exe`)**，一律走 **PowerShell 7 (`pwsh`)**。
+- ⚠️ **单测必须加 `--rerun-tasks`**，否则 Gradle 可能 `FROM-CACHE` 复用旧结果，等于没跑。
+- ⚠️ **测试与打包要分两条命令串行执行**，不要放进同一次 gradle 调用：两者读写同一 class 缓存，并行会互锁。
+- ⚠️ **判成败看两处**：① 输出里的 `BUILD SUCCESSFUL`；② `code/app/build/test-results/testDebugUnitTest/*.xml` 的 `failures="0" errors="0"`。
+- native 仅 arm64-v8a；x86 模拟器走 JVM 引擎回退。
 
-```bash
-cd C:\starword
+### 2.1 native 库（`.so`）本机构建
+
+```powershell
+cd C:\starcam
 tools\build_so.bat                            # 重建 libstellar_solver.so（<1 分钟）
 tools\build_so.bat <自定义输出路径>            # 可选
 ```
 
-产物 `code/app/src/main/jniLibs/arm64-v8a/libstellar_solver.so`（约 5.07MB，
-6 个 JNI 导出符号）。改动 `code/app/src/main/cpp/astro_bridge.c` 后必须重跑它。
+产物 `code/app/src/main/jniLibs/arm64-v8a/libstellar_solver.so`（约 5.07MB，6 个 JNI 导出符号）。改动 `code/app/src/main/cpp/astro_bridge.c` 后必须重跑它。
 
-**关键事实（打通本机构建的前提）**：Windows 版 NDK clang **能直接链接 Linux ELF
-格式的 `.a` 静态库** —— 不需要 WSL / 虚拟机 / Linux 机器。
-
-依赖放在工程外（不入库，需在换机时重新准备）：
-
+依赖放在工程外（不入库）：
 ```
 C:\dev\astrometry-local\
   ├── src\include\astrometry\   astrometry 0.97 头文件
@@ -152,63 +109,28 @@ C:\dev\astrometry-local\
 C:\dev\android-ndk-r26d\        NDK r26d（Windows 原生 clang 17）
 ```
 
-- 环境：OpenJDK 17、Android SDK 34、Gradle 8.12.1。
-  **本机 SDK 在 `C:\dev\android-sdk`**（非默认位置），`code/local.properties` 写
-  `sdk.dir=C:/dev/android-sdk`。该文件为机器相关、不入库。
-- **Shell 环境**：本机已配置 **PowerShell 7 (`pwsh`)**，所有终端命令与脚本执行**严禁使用 Windows PowerShell 5 (`powershell.exe`)**，一律走 `pwsh`。
-- ⚠️ **单测必须加 `--rerun-tasks`**，否则 Gradle 可能 `FROM-CACHE` 复用旧结果，等于没跑。
-- ⚠️ **测试与打包要分两条命令串行执行**，不要放进同一次 gradle 调用：
-  两者都读写 `app/build/tmp/kotlin-classes/debug`，并行会互锁并报
-  `dexBuilderDebug` / `mergeDebugJavaResource` 失败（极易误判成环境限制）。
-- ⚠️ **不要并行发起多个 gradle 任务**，会抢守护进程互相拖死。
-- native 仅 arm64-v8a；x86 模拟器走 JVM 引擎回退。
-- `.bat` 构建脚本必须是 **CRLF 行尾**（LF 会被 CMD 逐行解析失败）。
-- ⚠️ **AI 工具（带执行沙箱）下跑 gradle 会异常慢，且退出码不可信** —— 2026-09-22 实测：
-  沙箱拒绝 Gradle 写 `~/.gradle/daemon/<版本>/registry.bin.lock`，daemon 反复失败重试，
-  `--rerun-tasks` 全量单测由 ~1 分钟膨胀到 **42 分钟**。更坑的是**脚本退出码非零**，
-  但结果其实全是好的。**判成败只看这两处，不看退出码**：
-  ① 输出里的 `BUILD SUCCESSFUL`；② `code/app/build/test-results/testDebugUnitTest/*.xml`
-  的 `failures` / `errors` 计数（本次：25 类 / 179 项 / 0 失败）。
-  要跑 gradle 就让命令**脱离沙箱执行**，否则时间成本极高。
-- 本机 2026-09-17 实测：debug APK 3 分 16 秒、单测 57 秒、`.so` <1 分钟，
-  均远快于服务器（后者 1.8GB 内存，R8/全量重编译多次 OOM）。
+### 2.2 发版（release）必读
 
-### 2.1 发版（release）必读 —— 2026-09-17 实测（§0.68）
-
-> **优先用 `tools/release.py`（§0.80）** —— 它把「改版本号三处 → 凭据预检 → 构建 →
-> 验签 + 与历史包比对同签名 → 归档 + SHA-256」串成一条命令，
-> **任一前置条件不满足都立即失败**，不再有「缺了不报错、静默产出未签名 APK」的降级：
+> **优先用 `tools/release.py`（§0.80）** —— 它把「改版本号三处 → 凭据预检 → 构建 → 验签 + 与历史包比对同签名 → 归档 + SHA-256」串成一条命令：
 >
-> ```bash
-> python tools/release.py --version 1.5.64 --desc fix-xxx            # 全流程
-> python tools/release.py --version 1.5.64 --desc fix-xxx --dry-run  # 只演算，不改文件不构建
-> python tools/release.py --version 1.5.64 --desc fix-xxx --skip-build  # 只改版本号
+> ```powershell
+> python tools/release.py --version 1.5.86 --desc fix-xxx            # 全流程
+> python tools/release.py --version 1.5.86 --desc fix-xxx --dry-run  # 只演算，不改文件不构建
+> python tools/release.py --version 1.5.86 --desc fix-xxx --skip-build  # 只改版本号
 > ```
->
-> 下文的手工步骤保留，作为**原理说明与故障排查依据**。
 
-发版在本机做，要点：
-
-1. **签名密钥必须先在位**：`C:\dev\starcam-release.jks` +
-   `C:\dev\starcam-keystore.properties`（后者里的 `storeFile` 指向 jks）。
-   三级查找顺序见 `code/app/build.gradle.kts`：环境变量 `STARCAM_KEYSTORE` →
-   `-PkeystoreProps` → `~/.starcam/…`。**缺了不会报错** —— `signingConfig` 静默
-   变 null，产物是**未签名 APK**（装不上）。**发版后必须验证签名**：
-   ```bash
+发版要点：
+1. **签名密钥在位**：`~/.starcam/starcam-keystore.properties` + `~/.starcam/starcam-release.jks`（或 `C:\dev\`）。`code/app/build.gradle.kts` 按环境变量 `STARCAM_KEYSTORE` → `-PkeystoreProps` → `~/.starcam/` 三级查找。发版后验证签名：
+   ```powershell
    java -jar C:\dev\android-sdk\build-tools\34.0.0\lib\apksigner.jar verify --print-certs <apk>
    # 期望 CN=StarCam，SHA-256 b04a854f…
    ```
-2. **release 构建要显式给堆**：默认堆可能让 R8 `OutOfMemoryError: Java heap space`
-   （**Java 堆溢出，不是物理 OOM**）。用：
-   ```bash
-   gradle -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=512m" \
-          --no-daemon --console=plain :app:assembleRelease
+2. **release 构建显式给堆**（防止 R8 堆溢出）：
+   ```powershell
+   .\gradlew.bat -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=512m" --no-daemon --console=plain :app:assembleRelease
    ```
 
-R8 若报 `Missing class xxx` → **不是 OOM，是缺 keep 规则**。R8 会把建议规则
-写到 `app/build/outputs/mapping/release/missing_rules.txt`，照抄进
-`code/app/proguard-rules.pro` 即可（§0.68 就是这么修的 Tink/errorprone 注释类）。
-
+---
 
 ## 3. 硬性约束（用户要求，不可违反）
 
@@ -219,71 +141,62 @@ R8 若报 `Missing class xxx` → **不是 OOM，是缺 keep 规则**。R8 会�
    除非开发者明确说「跑 release」。
 3. **隐私红线**：`testdata/`（私拍原图、`.gray`）**绝不提交 / 打包 / 分发**。
 4. **凭据红线**：任何 API key / 密码不得硬编码进源码或文档；
-   文档中服务器一律用 `<build-server-ip>`，SSH 一律用别名（如 `aa`）。
+   文档中服务器一律用 `<build-server-ip>`，SSH 一律用别名（如 `ec2-hk`、`huawei`）。
 5. **不要触碰项目之外的凭据文件**（密钥 / 密码 / token 类）——不读取、不修改、不提交。
    它们不属于本工程，不要因探索而翻动。
-6. **AR / 相机改动**：`ui/camera/CameraScreen.kt` 是超大文件（1500+ 行），
-   内部按 `§0.xx` 注释分区；须保持**零每帧分配**（Paint / 数组在 `remember` 里一次性创建）。
+6. **AR / 相机改动**：`ui/camera/CameraScreen.kt` 是超大文件，内部按 `§0.xx` 注释分区；
+   须保持**零每帧分配**（Paint / 数组在 `remember` 里一次性创建）。
 
-## 4. git 规矩
+---
 
-> **2026-10-08 起（工作区在 Linux 服务器）**：原生 `git` 直连 GitHub 已实测可用
-> （`git ls-remote https://github.com/1437nb/starcam-astro.git main` 正常返回，
-> 与 `f2033f2` 一致）—— fetch / push 可直接用原生 git；提交前仍必须跑
-> `python tools/check_secrets.py`（`core.hooksPath=.githooks` 的 pre-commit 钩子已装）。
-> 下文「`git push` 在本机不可用」的两条替代通道是原 Windows 机的历史记录，保留备查。
+## 4. git 规矩与推送通道
 
-- 提交身份：仓库级 `1437nb <1437nb@users.noreply.github.com>`。
+- **提交身份**：仓库级 `1437nb <1437nb@users.noreply.github.com>`。
   **不要用真实邮箱提交**（会永久写进公开历史），不要用 `--global` 覆盖。
-- ⚠️ **不要改写提交历史**：本环境实测 `git rebase --root` 会**删除整个 `.git` 目录**。
-  需要修正时用「重新 `init` + 一次干净提交」或 `--amend`；
-  动历史前先 `cp -r .git <仓库外目录>`。
-- 提交前红线体检：`testdata/`、`local.properties`、签名密钥、`/apk/`、`**/build/`、
-  `*.log`、`.workbuddy/`、`交接说明.internal.md` 一律不得进暂存区。
-  **禁止 `git add -f` 绕过 .gitignore。**
-- `.gitignore` 的两个锚定陷阱（**已修复，勿改回去**）：
-  `indexes/` 会连带排除 `code/app/src/main/assets/indexes/` 的 8 个 FITS 离线索引
-  （离线求解必需），必须写成 `/indexes/`；`/apk/` 同理。自查用 `git check-ignore -v <路径>`。
-- ⚠️ **`docs/71-*` 被 `.gitignore` 预留**（见该文件 `:63`，给「安全事件复盘」——
-  内容等于泄露细节说明书，绝不入库）。**新写的验证报告不要占 71 号**，
-  否则会被**静默排除**、提交时无声消失。docs 编号从 72 继续
-  （当前已用到 `73-`）。写新文档后请用 `git status` 确认它确实出现在待提交列表里。
-- `.gitattributes` 必须保留：仓库含 `.so` / `.fits` / `.jpg`，缺 `binary` 标记会被换行转换损坏。
-- ⚠️ **`git push` 在本机不可用**（`github.com:443` 被阻断，实测 Connection reset /
-  timeout；`ssh.github.com:443` 能连通但 publickey 被拒）。两条可用通道：
-  1. **拉取**：`git fetch https://ghfast.top/https://github.com/1437nb/starcam-astro.git main:refs/remotes/origin/main --force`
-     （ghfast.top 代理只读，**不能 push**）；
-  2. **推送**：用 GitHub **Git Data API**（`api.github.com` 可达，凭据从
-     `git credential fill` 取）：blobs → tree(base_tree) → commit → PATCH refs/heads/main。
-     逐提交重建（2026-10-05 起逐字节还原 message / author / committer，重建结果与本地
-     **同 SHA**，不再产生平行链），先确认远端是本地祖先（fast-forward）。
-     **务必用 `git show <sha>:<path>` 读内容**——直接读工作区文件会带 CRLF
-     （`core.autocrlf=true`），把整仓库行尾污染成 CRLF（v1.5.55 踩过，已用
-     `git add --renormalize` 修回）。
-  发布 Release 同样走 API：`POST /releases` + `POST uploads.github.com/.../assets`。
-  现成工具：`tools/gh_api_push.py`（`push` / `release` 两个子命令）。
-- **更省事的通道（2026-09-17 起）**：经构建服务器中转的 SOCKS 隧道能让
-  **原生 git** 直连 GitHub，不必再走 API 逐提交重建：
-  ```bash
-  python _socks_proxy.py &          # 监听 127.0.0.1:1080（仅回环）
-  git -c http.proxy=socks5h://127.0.0.1:1080 push origin main
-  ```
-  隧道依赖 paramiko + 服务器 SSH（凭据见 `ssh_helper.py`）。
-  注意：隧道是前台进程，shell 会话结束即断；用 nohup 起。
-- ⚠️ **`.github/workflows/` 下的文件无法通过 API 推送**：写入这类路径要求 token
-  具备 `workflow` scope，当前凭据只有 `repo` scope，GitHub 对这类路径一律回
-  404（Contents API 与 Git Data API 都是）。改 workflow 只能：
-  ① 在 GitHub 网页上直接编辑（推荐），或
-  ② 换一个带 `workflow` scope 的 token 再跑 `gh_api_push.py push`。
-  脚本会自动跳过这类文件并明确提示，不会静默丢失。
+- ⚠️ **不要改写历史**：动历史前先备份 `.git` 目录。
+- **提交前红线体检**：`testdata/`、`local.properties`、签名密钥、`/apk/`、`**/build/`、`*.log`、`agent.md`、`*.internal.md` 一律不得进暂存区。**禁止 `git add -f` 绕过 .gitignore。**
+- **路径排除规则**：`indexes/` 与 `apk/` 在 `.gitignore` 必须带根斜杠 `/indexes/` 与 `/apk/`，防止误排除 `code/app/src/main/assets/indexes/` 中的 8 个随包离线 FITS 索引。
+- ⚠️ **`docs/71-*` 被 `.gitignore` 预留**：新写的验证报告不要占 71 号，新文档从 72 往后编号（目前已用到 101+）。
+- `.gitattributes` 必须保留：仓库含 `.so` / `.fits` / `.jpg` 二进制资产，文本统一 `* text=auto`。
+
+### 推送通道说明（重要）
+
+在本机 Windows 环境下，直接 `git push` 直连 `github.com:443` 常被 GFW 阻断（Connection reset），且无桌面交互凭据。以下为验证通过的稳定推送方式：
+
+#### 推荐通道：通过香港验证机（`ec2-hk`）原生中转推送
+本机已配置 Windows OpenSSH（`core.sshCommand = "C:/Windows/System32/OpenSSH/ssh.exe"`），向 `ec2-hk` 推送毫秒级完成，再由 `ec2-hk` 直连 GitHub：
+```powershell
+# 1. 本地提交推送到 ec2-hk
+git push ec2-hk:~/starword main
+git push ec2-hk:~/starword <tag>       # 如有新 tag
+
+# 2. 借助 huawei 的 gh 授权，在 ec2-hk 上直推 GitHub
+$tok = (ssh huawei "/opt/gh_2.102.0_linux_amd64/bin/gh auth token").Trim()
+ssh ec2-hk "cd ~/starword && git push https://1437nb:$tok@github.com/1437nb/starcam-astro.git main"
+ssh ec2-hk "cd ~/starword && git push https://1437nb:$tok@github.com/1437nb/starcam-astro.git <tag>"
+```
+
+#### 备用通道：Git Data API 推送
+```powershell
+python tools/gh_api_push.py push
+```
+（`tools/gh_api_push.py` 已内置多级凭据探测，自动调用 `huawei` 的 `gh` 凭据授权逐提交重建）。
+
+#### Release 发布
+Release 及 APK 附件上传由 `huawei` 的 `gh` CLI 完成：
+```powershell
+# 将本地 Release APK 复制到 huawei /tmp 后执行发布
+scp apk/<release-apk> apk/<sha256> docs/<release-notes>.md huawei:/tmp/
+ssh huawei "/opt/gh_2.102.0_linux_amd64/bin/gh release create <tag> /tmp/<release-apk> /tmp/<sha256> -t '<title>' -F /tmp/<release-notes>.md -R 1437nb/starcam-astro"
+ssh huawei "rm -f /tmp/StarCam-* /tmp/<release-notes>.md"   # 及时清理
+```
+
+---
 
 ## 5. 文档与交接约定
 
 - **每做一个版本功能，补一篇** `docs/{编号}-验证报告增补-§0.xx-{主题}.md`，并同步更新 README。
 - 改动代码需与 `docs/` 保持同步；`交接说明.md` 为总纲，重大变更要更新。
-- **进度滚动记录在 `PROGRESS.md`**：每次实质工作（改代码 / 定方案 / 发版 / 合并）结束都要更新
-  「最近完成」与「下一步」。这是跨工具接力的关键一环。
-- 项目知识以 `docs/` + `交接说明.md` + `AGENTS.md` + `PROGRESS.md` 为准；
-  工具私有记忆（`.workbuddy/`、`.codex/` 等）**不入库、换个工具即失效**，
-  不要把「只该记一次」的东西写进那里。
-- 其他工具的入口文件（如 `CODEBUDDY.md`）只做指针，内容仍以本文件为唯一真源，避免多份不同步。
+- **进度滚动记录在 `PROGRESS.md`**：每次实质工作（改代码 / 定方案 / 发版 / 合并）结束都要更新「最近完成」与「下一步」。这是跨工具接力的关键一环。
+- 项目知识以 `docs/` + `交接说明.md` + `AGENTS.md` + `PROGRESS.md` 为准；工具私有记忆（`.workbuddy/`、`.codex/` 等）**不入库、换个工具即失效**。
+- 其他工具入口文件（如 `CODEBUDDY.md`）只做指针，内容以本文件为唯一真源。
