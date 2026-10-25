@@ -20,9 +20,12 @@ description 与 homepage 为空时，搜索结果、社交分享卡片、仓库�
 topics 是**整体替换**语义（不是追加），改 TOPICS 时务必带上想保留的旧条目。
 """
 import json
+import os
 import subprocess
 import sys
 import urllib.request
+
+REPO_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 OWNER = "1437nb"
 REPO = "starcam-astro"
@@ -60,7 +63,7 @@ def token() -> str:
         p = subprocess.run(
             ["git", "credential", "fill"],
             input="protocol=https\nhost=github.com\n\n",
-            capture_output=True, text=True, timeout=90, cwd=r"C:\starword",
+            capture_output=True, text=True, timeout=90, cwd=REPO_DIR,
         )
     except subprocess.TimeoutExpired:
         print("ERROR: git credential fill 超时（凭据管理器可能在等待交互）", file=sys.stderr)

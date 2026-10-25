@@ -5,7 +5,8 @@
 import os, sys, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-OUT = sys.argv[1] if len(sys.argv) > 1 else "/c/starword/testdata/narrowfield"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_HERE, os.pardir, "testdata", "narrowfield")
 JOBS = int(sys.argv[2]) if len(sys.argv) > 2 else 8
 os.makedirs(OUT, exist_ok=True)
 

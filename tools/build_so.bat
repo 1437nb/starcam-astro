@@ -24,10 +24,11 @@ set "NM=%NDK%\llvm-nm.exe"
 
 set "AN=C:\dev\astrometry-local"
 set "CROSS=%AN%\cross"
-set "SRC=C:\starword\code\app\src\main\cpp\astro_bridge.c"
+set "ROOT=%~dp0.."
+set "SRC=%ROOT%\code\app\src\main\cpp\astro_bridge.c"
 
 if "%~1"=="" (
-  set "OUT=C:\starword\code\app\src\main\jniLibs\arm64-v8a\libstellar_solver.so"
+  set "OUT=%ROOT%\code\app\src\main\jniLibs\arm64-v8a\libstellar_solver.so"
 ) else (
   set "OUT=%~1"
 )
