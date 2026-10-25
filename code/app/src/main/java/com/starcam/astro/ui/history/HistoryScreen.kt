@@ -73,7 +73,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun HistoryScreen(
     onBack: () -> Unit,
-    onOpenImage: (String) -> Unit,
+    onOpenEntry: (HistoryStore.Entry) -> Unit,
 ) {
     val context = LocalContext.current
     val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
@@ -250,7 +250,7 @@ fun HistoryScreen(
                         HistoryCell(
                             entry = e,
                             timeFmt = timeFmt,
-                            onClick = { onOpenImage(e.imagePath) },
+                            onClick = { onOpenEntry(e) },
                             onDelete = { deleting = e },
                         )
                     }

@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import com.starcam.astro.astro.SkyRegion
+import com.starcam.astro.astro.SolveResult
 
 /** 界面路由 */
 sealed interface Screen {
@@ -23,8 +24,13 @@ sealed interface Screen {
     /** 批量识别导出页；paths 为缓存目录中的照片路径列表 */
     data class Batch(val paths: List<String>) : Screen
 
-    /** 识别结果页；demoRegion 非空表示离线演示模式（使用内置生成的星空照片） */
-    data class Result(val imagePath: String, val demoRegion: SkyRegion? = null) : Screen
+    /** 识别结果页；demoRegion 非空表示离线演示模式；cachedSolve 非空直接呈现历史识别结果（免重复求解） */
+    data class Result(
+        val imagePath: String,
+        val demoRegion: SkyRegion? = null,
+        val cachedSolve: SolveResult? = null,
+        val cachedEngine: String? = null,
+    ) : Screen
 }
 
 /**

@@ -193,6 +193,11 @@ fun HomeScreen(
 
             Spacer(Modifier.height(StarCamDimens.sectionGap))
 
+            // ── 今日天象卡片（Material 3 风格）──
+            TonightSkyCard()
+
+            Spacer(Modifier.height(StarCamDimens.sectionGap))
+
             // ── 次级入口：分组列表卡片（Google 设置列表风格）──
             Surface(
                 modifier = Modifier.fillMaxWidth(),

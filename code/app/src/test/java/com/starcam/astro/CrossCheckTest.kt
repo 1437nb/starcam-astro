@@ -74,4 +74,34 @@ class CrossCheckTest {
         val n = native(65.0, 25.0, 120.0)
         assertFalse(StarSolver.crossCheckAccept(60.0, 25.0, 76.0, 8, n))
     }
+
+    @Test
+    fun highDeclinationSphericalSeparationAccepts() {
+        // 高赤纬（Dec = 80°）：ΔRA = 5°，旧逻辑 dra < 3° 会错误拦截；
+        // 实际上 cos(80°) ≈ 0.1736，天球真实角距约为 5° × 0.1736 ≈ 0.87° < 3°，应判定一致接受。
+        val n = native(65.0, 80.0, 120.0)
+        assertTrue(StarSolver.crossCheckAccept(60.0, 80.0, 76.0, 8, n))
+    }
+
+    @Test
+    fun highDeclinationLargeOffsetRejects() {
+        // 高赤纬（Dec = 80°）：ΔRA = 25°，真实角距约为 25° × 0.1736 ≈ 4.34° > 3°，判定不一致拒绝。
+        val n = native(85.0, 80.0, 120.0)
+        assertFalse(StarSolver.crossCheckAccept(60.0, 80.0, 76.0, 8, n))
+    }
+
+    @Test
+    fun angularSepDeg_accuratelyComputesSphericalDistance() {
+        // 赤道上 10° RA 差：精确为 10°
+        val dEq = StarSolver.angularSepDeg(10.0, 0.0, 20.0, 0.0)
+        org.junit.Assert.assertEquals(10.0, dEq, 1e-4)
+
+        // 赤经相同，赤纬相差 15°：精确为 15°
+        val dDec = StarSolver.angularSepDeg(100.0, 10.0, 100.0, 25.0)
+        org.junit.Assert.assertEquals(15.0, dDec, 1e-4)
+
+        // 北极点（Dec = 90°）：无论 RA 怎么变，角距都为 0
+        val dPole = StarSolver.angularSepDeg(0.0, 90.0, 180.0, 90.0)
+        org.junit.Assert.assertEquals(0.0, dPole, 1e-4)
+    }
 }

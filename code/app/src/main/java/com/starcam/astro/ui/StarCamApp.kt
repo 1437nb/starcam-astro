@@ -82,6 +82,8 @@ fun StarCamApp(viewModel: AppViewModel = viewModel()) {
         is Screen.Result -> ResultScreen(
             imagePath = s.imagePath,
             demoRegion = s.demoRegion,
+            cachedSolve = s.cachedSolve,
+            cachedEngine = s.cachedEngine,
             settings = settings,
             onBack = { viewModel.goBack() },
             onRetake = { viewModel.navigate(Screen.Camera) },
@@ -94,7 +96,15 @@ fun StarCamApp(viewModel: AppViewModel = viewModel()) {
 
         is Screen.History -> HistoryScreen(
             onBack = { viewModel.goBack() },
-            onOpenImage = { path -> viewModel.navigate(Screen.Result(path)) },
+            onOpenEntry = { entry ->
+                viewModel.navigate(
+                    Screen.Result(
+                        imagePath = entry.imagePath,
+                        cachedSolve = entry.toSolveResult(),
+                        cachedEngine = entry.engine,
+                    )
+                )
+            },
         )
 
         is Screen.Batch -> BatchScreen(

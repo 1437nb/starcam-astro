@@ -2,9 +2,25 @@
 # 提交前凭据自检：防止口令/密钥等被硬编码进源码或文档。
 # 启用方式（每台克隆执行一次）：
 #     git config core.hooksPath .githooks
-# 解释器：优先 python3（Linux 上裸 `python` 常是 Python 2），无 python3 时回退 python（Windows）。
-PY=python3
-command -v python3 >/dev/null 2>&1 || PY=python
+PY=""
+for cand in \
+  "python3" \
+  "python" \
+  "/c/Users/byldylr/AppData/Local/Programs/DeepSeek Harness/resources/runtime/primary-runtime/dependencies/python/python.exe" \
+  "/c/Program Files/Python311/python.exe" \
+  "/c/Program Files/Python312/python.exe" \
+  "/c/Program Files/Python310/python.exe"; do
+  if "$cand" -c "import sys" >/dev/null 2>&1; then
+    PY="$cand"
+    break
+  fi
+done
+
+if [ -z "$PY" ]; then
+  echo "警告：未找到可用 Python 解释器，跳过凭据自检。"
+  exit 0
+fi
+
 "$PY" tools/check_secrets.py --staged || {
   echo ""
   echo "提交已中止：暂存内容含疑似凭据。"

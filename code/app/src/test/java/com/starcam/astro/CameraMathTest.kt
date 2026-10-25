@@ -142,4 +142,45 @@ class CameraMathTest {
         // 空列表安全返回 null
         assertEquals(null, CameraMath.selectMainCameraFocal(null, 6.4, 4.8, true, true))
     }
+
+    @Test
+    fun computeFitCenterRect_calculatesAccurateAspectLetterbox() {
+        // 1) 竖屏长屏（1080x2400，9:20）：预览流 4:3 竖放（3:4 = 0.75）
+        // 宽度充满 1080，高度应为 1080 / 0.75 = 1440，上下居中留黑边 480px
+        val rectPortrait43 = CameraMath.computeFitCenterRect(
+            containerWidth = 1080f,
+            containerHeight = 2400f,
+            streamAspectLandscape = 4f / 3f,
+            isPortrait = true,
+        )
+        assertEquals(0f, rectPortrait43.left, 1e-4f)
+        assertEquals(480f, rectPortrait43.top, 1e-4f)
+        assertEquals(1080f, rectPortrait43.width, 1e-4f)
+        assertEquals(1440f, rectPortrait43.height, 1e-4f)
+
+        // 2) 横屏宽屏（1920x1080，16:9）：预览流 4:3 横放（4:3 ≈ 1.3333）
+        // 高度充满 1080，宽度应为 1080 * 4/3 = 1440，左右留黑边 240px
+        val rectLandscape43 = CameraMath.computeFitCenterRect(
+            containerWidth = 1920f,
+            containerHeight = 1080f,
+            streamAspectLandscape = 4f / 3f,
+            isPortrait = false,
+        )
+        assertEquals(240f, rectLandscape43.left, 1e-4f)
+        assertEquals(0f, rectLandscape43.top, 1e-4f)
+        assertEquals(1440f, rectLandscape43.width, 1e-4f)
+        assertEquals(1080f, rectLandscape43.height, 1e-4f)
+
+        // 3) 宽屏预览流（16:9）：在 16:9 容器内完全贴合无黑边
+        val rect169 = CameraMath.computeFitCenterRect(
+            containerWidth = 1920f,
+            containerHeight = 1080f,
+            streamAspectLandscape = 16f / 9f,
+            isPortrait = false,
+        )
+        assertEquals(0f, rect169.left, 1e-4f)
+        assertEquals(0f, rect169.top, 1e-4f)
+        assertEquals(1920f, rect169.width, 1e-4f)
+        assertEquals(1080f, rect169.height, 1e-4f)
+    }
 }

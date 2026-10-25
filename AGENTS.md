@@ -155,6 +155,7 @@ C:\dev\android-ndk-r26d\        NDK r26d（Windows 原生 clang 17）
 - 环境：OpenJDK 17、Android SDK 34、Gradle 8.12.1。
   **本机 SDK 在 `C:\dev\android-sdk`**（非默认位置），`code/local.properties` 写
   `sdk.dir=C:/dev/android-sdk`。该文件为机器相关、不入库。
+- **Shell 环境**：本机已配置 **PowerShell 7 (`pwsh`)**，所有终端命令与脚本执行**严禁使用 Windows PowerShell 5 (`powershell.exe`)**，一律走 `pwsh`。
 - ⚠️ **单测必须加 `--rerun-tasks`**，否则 Gradle 可能 `FROM-CACHE` 复用旧结果，等于没跑。
 - ⚠️ **测试与打包要分两条命令串行执行**，不要放进同一次 gradle 调用：
   两者都读写 `app/build/tmp/kotlin-classes/debug`，并行会互锁并报

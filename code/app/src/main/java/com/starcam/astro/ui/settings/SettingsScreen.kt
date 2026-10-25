@@ -68,6 +68,7 @@ fun SettingsScreen(
     var themeMode by remember { mutableStateOf(ThemeState.mode) }
     var appLanguage by remember { mutableStateOf(LocaleState.language) }
     var sensorPointing by remember { mutableStateOf(settings.sensorAssistedPointing) }
+    var parallelRacing by remember { mutableStateOf(settings.parallelEngineRacing) }
     var saved by remember { mutableStateOf(false) }
     // §0.70 识别日志
     var logEnabled by remember {
@@ -85,10 +86,11 @@ fun SettingsScreen(
     var nativeEngine by remember { mutableStateOf<Boolean?>(null) }
     // §0.99 版本号：排查"我装的到底是哪一版"时最直接的依据
     var appVersion by remember { mutableStateOf("") }
+    val isEn = LocaleState.isEnglish
     val scope = rememberCoroutineScope()
     suspend fun loadLogInfo() {
         withContext(Dispatchers.IO) {
-            logStats = com.starcam.astro.data.SolveLogStore.stats(context)
+            logStats = com.starcam.astro.data.SolveLogStore.stats(context, LocaleState.isEnglish)
             logDirPath = com.starcam.astro.data.SolveLogStore.logDir(context).absolutePath
             encryptedStorage = settings.isApiKeyStorageEncrypted()
             nativeEngine = com.starcam.astro.astro.NativeEngineProbe.available
@@ -100,8 +102,7 @@ fun SettingsScreen(
     fun refreshStats() {
         scope.launch { loadLogInfo() }
     }
-    LaunchedEffect(Unit) { loadLogInfo() }
-    val isEn = LocaleState.isEnglish
+    LaunchedEffect(isEn) { loadLogInfo() }
 
     Scaffold(
         topBar = {
@@ -240,12 +241,6 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Spacer(Modifier.height(20.dp))
-
-            // §0.70 识别日志：用户报告「识别不了」时，这里是取证据的入口
-            Text("识别日志", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier
@@ -254,11 +249,43 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("记录识别过程", fontWeight = FontWeight.Medium)
+                    Text(if (isEn) "Parallel Engine Racing" else "双引擎并发竞速", fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "记录每次识别的引擎轨迹与失败原因；识别不出的照片会额外保存" +
-                            "现场数据。只存本机、不上传，可随时清空。",
+                        if (isEn) "Race local star table and native engine concurrently on unknown FOV photos for fastest solve"
+                        else "未知视场照片同时启动本地星表与官方引擎并发加速，取最先解出者",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(16.dp))
+                Switch(
+                    checked = parallelRacing,
+                    onCheckedChange = { checked ->
+                        parallelRacing = checked
+                        settings.parallelEngineRacing = checked
+                    },
+                )
+            }
+
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.height(20.dp))
+
+            // §0.70 识别日志：用户报告「识别不了」时，这里是取证据的入口
+            Text(com.starcam.astro.ui.I18n.Settings.logSection, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(com.starcam.astro.ui.I18n.Settings.logTitle, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        com.starcam.astro.ui.I18n.Settings.logDesc,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -281,7 +308,7 @@ fun SettingsScreen(
             )
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { refreshStats() }) { Text("刷新统计") }
+                OutlinedButton(onClick = { refreshStats() }) { Text(com.starcam.astro.ui.I18n.Settings.logRefresh) }
                 OutlinedButton(
                     onClick = {
                         // §0.81：clearAll 会 deleteRecursively 整个日志目录，不能放主线程
@@ -292,11 +319,11 @@ fun SettingsScreen(
                             refreshStats()
                         }
                     },
-                ) { Text("清空日志") }
+                ) { Text(com.starcam.astro.ui.I18n.Settings.logClear) }
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                "日志目录：$logDirPath",
+                com.starcam.astro.ui.I18n.Settings.logDirLabel(logDirPath),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

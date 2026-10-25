@@ -33,6 +33,10 @@ object I18n {
         val offlineDemo: String get() = if (isEn) "✨  Offline Demo (Built-in Photos)" else "✨  离线演示（内置真实星空照片）"
         val history: String get() = if (isEn) "🕘  Recognition History" else "🕘  识别历史"
         val settings: String get() = if (isEn) "⚙️  Settings (API Key)" else "⚙️  设置（API Key）"
+        val tonightSky: String get() = if (isEn) "Tonight's Sky" else "今日天象"
+        val visiblePlanets: String get() = if (isEn) "Visible Planets" else "可见行星"
+        val moonIllumination: String get() = if (isEn) "Illumination" else "月照"
+        val moonAge: String get() = if (isEn) "Moon age" else "月龄"
         val apiKeyConfigured: String get() = if (isEn) "✓ API Key configured, online solving available" else "✓ 已配置 API Key，可在线识别"
         val apiKeyNotConfigured: String get() = if (isEn) "API Key not configured: free key needed for online solving. Try \"Offline Demo\" first" else "未配置 API Key：在线识别需免费 Key；可先体验「离线演示」"
         val howToUseTitle: String get() = if (isEn) "How to Use" else "如何使用"
@@ -82,6 +86,18 @@ object I18n {
         val serverHelp: String get() = if (isEn) "Default: https://nova.astrometry.net/api; change if using a self-hosted instance." else "默认 https://nova.astrometry.net/api；自建 astrometry.net 服务时可修改。"
         val privacySection: String get() = if (isEn) "Privacy Notice" else "隐私说明"
         val privacyContent: String get() = if (isEn) "• For online solving, photos are uploaded to the chosen server (default astrometry.net).\n• Photos are stripped of EXIF data (GPS location, camera parameters) before upload.\n• Uploads are flagged as private by default and will not be added to public galleries.\n• Offline solving does not upload photos." else "• 在线识别时，照片会上传到所选服务器（默认 astrometry.net）。\n• 上传前照片会被重新编码：拍摄位置（GPS）、时间、相机参数等 EXIF 信息已剥离，仅上传像素内容。\n• 上传默认标记为「不公开」，不会被加入公开星图库。\n• 位置信息仅在本地用于天区先验（缩小搜索范围），绝不上传。\n• 无需网络时可使用主页「离线演示」功能完整体验。"
+
+        // §0.70 识别日志
+        val logSection: String get() = if (isEn) "Recognition Log" else "识别日志"
+        val logTitle: String get() = if (isEn) "Record Solving Process" else "记录识别过程"
+        val logDesc: String get() = if (isEn) {
+            "Record engine trace and failure reasons for each solve; captures diagnostic data for failed photos. Stored locally only, never uploaded; can be cleared at any time."
+        } else {
+            "记录每次识别的引擎轨迹与失败原因；识别不出的照片会额外保存现场数据。只存本机、不上传，可随时清空。"
+        }
+        val logRefresh: String get() = if (isEn) "Refresh Stats" else "刷新统计"
+        val logClear: String get() = if (isEn) "Clear Logs" else "清空日志"
+        fun logDirLabel(path: String): String = if (isEn) "Log directory: $path" else "日志目录：$path"
     }
 
     // ==================== 结果页 (ResultScreen) ====================
@@ -157,8 +173,13 @@ object I18n {
         val reSolve: String get() = if (isEn) "Solve Again" else "重新识别"
         val retake: String get() = if (isEn) "Retake" else "重拍一张"
         val saveToGallery: String get() = if (isEn) "💾 Save to Gallery" else "💾 保存到相册"
+        /** §0.120：保存当前所选标注（含用户自定义图层开关） */
+        val saveAnnotated: String get() = if (isEn) "💾 Save Current" else "💾 保存当前标注"
+        /** §0.120：仅导出星座连线图（无星名与其它杂项标注） */
+        val saveLinesOnly: String get() = if (isEn) "📐 Lines Only" else "📐 仅星座连线"
         val saving: String get() = if (isEn) "Saving…" else "保存中…"
         fun savedToast(loc: String): String = if (isEn) "Saved to gallery: $loc" else "已保存到本地：$loc"
+        fun savedLinesOnlyToast(loc: String): String = if (isEn) "Saved lines-only image: $loc" else "已保存仅星座连线图：$loc"
         val saveFailed: String get() = if (isEn) "Save failed, check storage" else "保存失败，请检查存储空间"
 
         val viewerTitleSuccess: String get() = if (isEn) "Star Chart & Constellations (Pinch to Zoom)" else "星空与星座连线（双指缩放查看）"
@@ -238,7 +259,7 @@ object I18n {
     object Gallery {
         val title: String get() = if (isEn) "Select Star Photo (Original)" else "选择星空照片（原图）"
         val multiSelect: String get() = if (isEn) "Multi-Select" else "多选"
-        val cancelMulti: String get() = if (isEn) "Cancel Multi-Select" else "取消多选"
+        val cancelMulti: String get() = if (isEn) "Cancel" else "取消"
         fun identifySelected(count: Int, max: Int): String =
             if (isEn) "Solve Selected ($count${if (count >= max) ", max reached" else ""})"
             else "识别所选（$count${if (count >= max) "，已达上限" else ""}）"
@@ -312,7 +333,7 @@ object I18n {
     object Layers {
         val panelTitle: String get() = if (isEn) "Layers" else "图层"
         val lines: String get() = if (isEn) "Constellation lines" else "星座连线"
-        val starNames: String get() = if (isEn) "Star names" else "恒星名称"
+        val starNames: String get() = if (isEn) "Star names" else "星星名字"
         val constellationNames: String get() = if (isEn) "Constellation names" else "星座名称"
         val messier: String get() = if (isEn) "Messier objects" else "梅西耶天体"
         /** §0.58 太阳系天体图层 */

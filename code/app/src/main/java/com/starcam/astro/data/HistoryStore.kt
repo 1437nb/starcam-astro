@@ -6,7 +6,9 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import com.starcam.astro.astro.Constellations
+import com.starcam.astro.astro.SolveResult
 import com.starcam.astro.astro.StarCatalogData
+import com.starcam.astro.astro.WcsTransform
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -34,7 +36,119 @@ object HistoryStore {
         val fovDeg: Double,
         val engine: String,
         val constellation: String,
-    )
+        // WCS & 求解结果元数据（用于历史记录 0ms 即开，免重复求解）
+        val pixScaleArcsec: Double? = null,
+        val orientationDeg: Double? = null,
+        val parity: Int? = null,
+        val imageWidth: Int? = null,
+        val imageHeight: Int? = null,
+        val wcsCrpix1: Double? = null,
+        val wcsCrpix2: Double? = null,
+        val wcsCrval1: Double? = null,
+        val wcsCrval2: Double? = null,
+        val wcsCd11: Double? = null,
+        val wcsCd12: Double? = null,
+        val wcsCd21: Double? = null,
+        val wcsCd22: Double? = null,
+        val nMatch: Int? = null,
+        val logodds: Double? = null,
+    ) {
+        /** 从存储的元数据还原 [SolveResult]（含 WCS 投影），数据不全返回 null */
+        fun toSolveResult(): SolveResult? {
+            val w = imageWidth ?: return null
+            val h = imageHeight ?: return null
+            val scale = pixScaleArcsec ?: return null
+            val orient = orientationDeg ?: 0.0
+            val par = parity ?: 1
+            val wcs = if (
+                wcsCrpix1 != null && wcsCrpix2 != null &&
+                wcsCrval1 != null && wcsCrval2 != null &&
+                wcsCd11 != null && wcsCd12 != null &&
+                wcsCd21 != null && wcsCd22 != null
+            ) {
+                WcsTransform(
+                    crpix1 = wcsCrpix1,
+                    crpix2 = wcsCrpix2,
+                    crval1 = wcsCrval1,
+                    crval2 = wcsCrval2,
+                    cd11 = wcsCd11,
+                    cd12 = wcsCd12,
+                    cd21 = wcsCd21,
+                    cd22 = wcsCd22,
+                )
+            } else null
+            return SolveResult(
+                raDeg = raDeg,
+                decDeg = decDeg,
+                pixScaleArcsec = scale,
+                orientationDeg = orient,
+                parity = par,
+                imageWidth = w,
+                imageHeight = h,
+                wcs = wcs,
+                nMatch = nMatch,
+                logodds = logodds,
+            )
+        }
+
+        companion object {
+            /** 便捷工厂方法：从 [SolveResult] 完整打包历史条目 */
+            fun fromSolve(
+                timestamp: Long,
+                imagePath: String,
+                solve: SolveResult,
+                engine: String,
+                constellation: String,
+            ): Entry {
+                val wcs = solve.wcs
+                return Entry(
+                    timestamp = timestamp,
+                    imagePath = imagePath,
+                    raDeg = solve.raDeg,
+                    decDeg = solve.decDeg,
+                    fovDeg = solve.fieldWidthDeg,
+                    engine = engine,
+                    constellation = constellation,
+                    pixScaleArcsec = solve.pixScaleArcsec,
+                    orientationDeg = solve.orientationDeg,
+                    parity = solve.parity,
+                    imageWidth = solve.imageWidth,
+                    imageHeight = solve.imageHeight,
+                    wcsCrpix1 = wcs?.crpix1,
+                    wcsCrpix2 = wcs?.crpix2,
+                    wcsCrval1 = wcs?.crval1,
+                    wcsCrval2 = wcs?.crval2,
+                    wcsCd11 = wcs?.cd11,
+                    wcsCd12 = wcs?.cd12,
+                    wcsCd21 = wcs?.cd21,
+                    wcsCd22 = wcs?.cd22,
+                    nMatch = solve.nMatch,
+                    logodds = solve.logodds,
+                )
+            }
+        }
+    }
+
+    /**
+     * 将图片文件持久化复制到应用私有目录 `filesDir/history`。
+     * 防止系统或用户清理缓存目录 `cacheDir` 导致历史条目图片失效。
+     */
+    private fun persistImageForHistory(context: Context, originalPath: String): String {
+        return try {
+            val src = File(originalPath)
+            if (!src.exists()) return originalPath
+            val historyDir = File(context.filesDir, "history").apply { mkdirs() }
+            if (src.parentFile?.canonicalPath == historyDir.canonicalPath) {
+                return src.absolutePath
+            }
+            val targetName = "${System.currentTimeMillis()}_${src.name}"
+            val targetFile = File(historyDir, targetName)
+            src.copyTo(targetFile, overwrite = true)
+            targetFile.absolutePath
+        } catch (_: Exception) {
+            originalPath
+        }
+    }
 
     /**
      * §0.92：写入必须串行化。
@@ -43,23 +157,46 @@ object HistoryStore {
      * load→改→写回；并发时后写覆盖先写，历史条目会**静默丢失**。
      * 底层是 SharedPreferences（`edit().apply()` 自身原子），所以只需保证
      * 「读-改-写」整段互斥：加在对象上的监视器即可（同 JVM 内串行）。
+     *
+     * 支持去重（同一图片路径不重复插入）与缓存保护（自动转存至 filesDir/history）。
      */
     @Synchronized
-    fun save(context: Context, entry: Entry) {
+    fun save(context: Context, entry: Entry): Entry {
+        val persistentPath = persistImageForHistory(context, entry.imagePath)
+        val persistentEntry = if (persistentPath != entry.imagePath) {
+            entry.copy(imagePath = persistentPath)
+        } else {
+            entry
+        }
         val all = load(context)
         val newList = ArrayList<Entry>(MAX_ENTRIES)
-        newList.add(entry)
+        newList.add(persistentEntry)
         for (e in all) {
             if (newList.size >= MAX_ENTRIES) break
+            // 去重：同一图片路径（含转存前与转存后路径）跳过
+            if (e.imagePath == persistentEntry.imagePath || e.imagePath == entry.imagePath) continue
             newList.add(e)
         }
         write(context, newList)
+        return persistentEntry
     }
 
-    /** 删除单条（§0.40）；§0.92：与 [save] 共用同一把锁，避免丢更新 */
+    /** 删除单条（§0.40）；§0.92：与 [save] 共用同一把锁，避免丢更新；清理转存文件 */
     @Synchronized
     fun remove(context: Context, timestamp: Long) {
-        write(context, load(context).filterNot { it.timestamp == timestamp })
+        val all = load(context)
+        val toRemove = all.find { it.timestamp == timestamp }
+        val remaining = all.filterNot { it.timestamp == timestamp }
+        write(context, remaining)
+        if (toRemove != null) {
+            val file = File(toRemove.imagePath)
+            val historyDir = File(context.filesDir, "history")
+            if (file.parentFile?.canonicalPath == historyDir.canonicalPath) {
+                if (remaining.none { it.imagePath == toRemove.imagePath }) {
+                    runCatching { file.delete() }
+                }
+            }
+        }
     }
 
     private fun write(context: Context, entries: List<Entry>) {
@@ -74,6 +211,21 @@ object HistoryStore {
                     put("fov", e.fovDeg)
                     put("engine", e.engine)
                     put("con", e.constellation)
+                    e.pixScaleArcsec?.let { put("scale", it) }
+                    e.orientationDeg?.let { put("orient", it) }
+                    e.parity?.let { put("parity", it) }
+                    e.imageWidth?.let { put("w", it) }
+                    e.imageHeight?.let { put("h", it) }
+                    e.wcsCrpix1?.let { put("crpix1", it) }
+                    e.wcsCrpix2?.let { put("crpix2", it) }
+                    e.wcsCrval1?.let { put("crval1", it) }
+                    e.wcsCrval2?.let { put("crval2", it) }
+                    e.wcsCd11?.let { put("cd11", it) }
+                    e.wcsCd12?.let { put("cd12", it) }
+                    e.wcsCd21?.let { put("cd21", it) }
+                    e.wcsCd22?.let { put("cd22", it) }
+                    e.nMatch?.let { put("nmatch", it) }
+                    e.logodds?.let { put("logodds", it) }
                 },
             )
         }
@@ -101,6 +253,21 @@ object HistoryStore {
                         fovDeg = o.getDouble("fov"),
                         engine = o.optString("engine", ""),
                         constellation = o.optString("con", ""),
+                        pixScaleArcsec = if (o.has("scale") && !o.isNull("scale")) o.getDouble("scale") else null,
+                        orientationDeg = if (o.has("orient") && !o.isNull("orient")) o.getDouble("orient") else null,
+                        parity = if (o.has("parity") && !o.isNull("parity")) o.getInt("parity") else null,
+                        imageWidth = if (o.has("w") && !o.isNull("w")) o.getInt("w") else null,
+                        imageHeight = if (o.has("h") && !o.isNull("h")) o.getInt("h") else null,
+                        wcsCrpix1 = if (o.has("crpix1") && !o.isNull("crpix1")) o.getDouble("crpix1") else null,
+                        wcsCrpix2 = if (o.has("crpix2") && !o.isNull("crpix2")) o.getDouble("crpix2") else null,
+                        wcsCrval1 = if (o.has("crval1") && !o.isNull("crval1")) o.getDouble("crval1") else null,
+                        wcsCrval2 = if (o.has("crval2") && !o.isNull("crval2")) o.getDouble("crval2") else null,
+                        wcsCd11 = if (o.has("cd11") && !o.isNull("cd11")) o.getDouble("cd11") else null,
+                        wcsCd12 = if (o.has("cd12") && !o.isNull("cd12")) o.getDouble("cd12") else null,
+                        wcsCd21 = if (o.has("cd21") && !o.isNull("cd21")) o.getDouble("cd21") else null,
+                        wcsCd22 = if (o.has("cd22") && !o.isNull("cd22")) o.getDouble("cd22") else null,
+                        nMatch = if (o.has("nmatch") && !o.isNull("nmatch")) o.getInt("nmatch") else null,
+                        logodds = if (o.has("logodds") && !o.isNull("logodds")) o.getDouble("logodds") else null,
                     ),
                 )
             } catch (e: Exception) {
@@ -110,11 +277,13 @@ object HistoryStore {
         return out
     }
 
-    /** §0.92：与 [save]/[remove] 同一把锁 —— 避免「清空」与「保存」交错后条目复活 */
+    /** §0.92：与 [save]/[remove] 同一把锁 —— 避免「清空」与「保存」交错后条目复活；清空持久化图片目录 */
     @Synchronized
     fun clear(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().remove(KEY).apply()
+        val historyDir = File(context.filesDir, "history")
+        runCatching { historyDir.deleteRecursively() }
     }
 
     /**
@@ -171,7 +340,7 @@ object HistoryStore {
         "\"" + v.replace("\"", "\"\"") + "\""
 
     /** 天球角距（度） */
-    private fun angSep(ra1: Double, dec1: Double, ra2: Double, dec2: Double): Double {
+    internal fun angSep(ra1: Double, dec1: Double, ra2: Double, dec2: Double): Double {
         val r = PI / 180.0
         val s = sin(dec1 * r) * sin(dec2 * r) +
             cos(dec1 * r) * cos(dec2 * r) * cos((ra1 - ra2) * r)

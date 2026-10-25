@@ -26,6 +26,13 @@ import sys
 import urllib.error
 import urllib.request
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 OWNER = "1437nb"
 REPO = "starcam-astro"
 BRANCH = "main"
@@ -39,12 +46,12 @@ GIT_C = (GIT, "-c", "core.quotepath=false")
 def _run(cmd, **kw):
     """subprocess.run 的兼容包装：capture_output / text 是 Python 3.7+ 关键字，
     本构建服务器（Alibaba Cloud Linux 3，Python 3.6）需要降级成 3.6 写法。"""
-    if sys.version_info < (3, 7):
-        if kw.pop("capture_output", False):
-            kw.setdefault("stdout", subprocess.PIPE)
-            kw.setdefault("stderr", subprocess.PIPE)
-        if kw.pop("text", False):
-            kw["universal_newlines"] = True
+    if kw.pop("capture_output", False):
+        kw["stdout"] = subprocess.PIPE
+        kw["stderr"] = subprocess.PIPE
+    if kw.pop("text", False):
+        kw["encoding"] = "utf-8"
+        kw["errors"] = "replace"
     return subprocess.run(cmd, **kw)
 
 
@@ -54,13 +61,32 @@ def git(*args):
 
 
 def get_token():
-    out = _run(GIT_C + ("credential", "fill"),
-                         input="protocol=https\nhost=github.com\n\n",
-                         capture_output=True, text=True, cwd=WD).stdout
-    for line in out.splitlines():
-        if line.startswith("password="):
-            return line.split("=", 1)[1].strip()
-    sys.exit("找不到 GitHub 凭据（git credential fill 未返回 password）")
+    tok = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if tok:
+        return tok.strip()
+    try:
+        env = os.environ.copy()
+        env["GCM_INTERACTIVE"] = "never"
+        p = subprocess.Popen(GIT_C + ("credential", "fill"),
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             cwd=WD, env=env)
+        out, _ = p.communicate(b"protocol=https\nhost=github.com\n\n", timeout=2)
+        for line in out.decode("utf-8", "replace").splitlines():
+            if line.startswith("password="):
+                return line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    # 尝试从构建服务器的 gh 获取凭据
+    try:
+        p = subprocess.Popen(['ssh', '-q', 'huawei', '/opt/gh_2.102.0_linux_amd64/bin/gh auth git-credential get'],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, _ = p.communicate(b'protocol=https\nhost=github.com\n\n', timeout=10)
+        for line in out.decode('utf-8', 'replace').splitlines():
+            if line.startswith("password="):
+                return line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    sys.exit("找不到 GitHub 凭据（git credential fill / ssh helper 未返回 password）")
 
 
 TOK = get_token()

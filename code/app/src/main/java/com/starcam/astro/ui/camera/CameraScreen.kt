@@ -457,15 +457,19 @@ fun CameraScreen(
                                 while (deltaAz > 180.0) deltaAz -= 360.0
                                 while (deltaAz < -180.0) deltaAz += 360.0
                             }
+                            // 仅高置信度解（浅域且内点≥18，或官方引擎 logodds≥25）才允许写回持久化配置（Audit B3）
+                            val isHighConfidence = (res.inlierCount >= 18 &&
+                                res.catalogDomain == com.starcam.astro.astro.CatalogDomain.SHALLOW) ||
+                                ((res.solve.logodds ?: 0.0) >= 25.0)
                             mainHandler.post {
                                 previewOverlay = null
                                 previewLabel = label
-                                if (solvedFov in 35.0..85.0) {
+                                if (isHighConfidence && solvedFov in 35.0..85.0) {
                                     arFovDeg = solvedFov.toFloat().coerceIn(40f, 90f)
                                     fovAutoCalibrated = true
                                     settings.arFovDeg = arFovDeg
                                 }
-                                if (kotlin.math.abs(deltaAz) <= 45.0) {
+                                if (isHighConfidence && kotlin.math.abs(deltaAz) <= 45.0) {
                                     arAzimuthOffsetDeg.set(deltaAz)
                                     arCalibrated = true
                                 }
@@ -741,13 +745,15 @@ fun CameraScreen(
                     // §0.53 全天星空：仅需姿态 + 定位（朝下也画"脚下半球"星空）
                     val canDraw = p.hasOrientation && p.latDeg != null && p.lonDeg != null
                     if (canDraw) {
-                        // PreviewView FIT_CENTER：假设预览流 4:3（旋转后竖屏 3:4），
-                        // 计算整幅可见的显示矩形，AR 星图精确覆盖该矩形
-                        val streamAspect = if (isPortrait) 3f / 4f else 4f / 3f // 宽:高
-                        val rectH = minOf(size.height, size.width / streamAspect)
-                        val rectW = rectH * streamAspect
-                        val rectL = (size.width - rectW) / 2f
-                        val rectT = (size.height - rectH) / 2f
+                        // PreviewView FIT_CENTER：计算整幅可见的显示矩形（§0.115 纯函数化），
+                        // AR 星图精确覆盖该矩形
+                        val fitRect = com.starcam.astro.astro.CameraMath.computeFitCenterRect(
+                            size.width, size.height, isPortrait = isPortrait,
+                        )
+                        val rectL = fitRect.left
+                        val rectT = fitRect.top
+                        val rectW = fitRect.width
+                        val rectH = fitRect.height
 
                         val lon = p.lonDeg ?: 0.0
                         val lat = p.latDeg ?: 0.0
@@ -1033,13 +1039,14 @@ fun CameraScreen(
                         detectTapGestures { pos ->
                             val arOn = arEnabled && settings.sensorAssistedPointing
                             if (arOn) {
-                                // 换算到 AR 显示矩形坐标，命中 arSky 中的天体
-                                val streamAspect = if (isPortrait) 3f / 4f else 4f / 3f
-                                val boxH = size.height.toFloat()
-                                val rectH = minOf(boxH, size.width.toFloat() / streamAspect)
-                                val rectW = rectH * streamAspect
-                                val rectL = (size.width - rectW) / 2f
-                                val rectT = (size.height - rectH) / 2f
+                                // 换算到 AR 显示矩形坐标，命中 arSky 中的天体（§0.115 纯函数化）
+                                val fitRect = com.starcam.astro.astro.CameraMath.computeFitCenterRect(
+                                    size.width.toFloat(), size.height.toFloat(), isPortrait = isPortrait,
+                                )
+                                val rectL = fitRect.left
+                                val rectT = fitRect.top
+                                val rectW = fitRect.width
+                                val rectH = fitRect.height
                                 val rx = pos.x - rectL
                                 val ry = pos.y - rectT
                                 if (rx in 0f..rectW && ry in 0f..rectH) {

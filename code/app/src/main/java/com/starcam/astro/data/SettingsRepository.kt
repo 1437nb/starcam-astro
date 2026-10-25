@@ -170,6 +170,21 @@ class SettingsRepository(context: Context) {
         get() = prefs.getFloat(KEY_AR_FOV, 62f)
         set(value) = prefs.edit().putFloat(KEY_AR_FOV, value.coerceIn(40f, 90f)).apply()
 
+    /**
+     * 求解全局时间总预算（秒，10~120）：默认 30 秒。
+     */
+    var solveBudgetSec: Int
+        get() = prefs.getInt(KEY_SOLVE_BUDGET, 30)
+        set(value) = prefs.edit().putInt(KEY_SOLVE_BUDGET, value.coerceIn(10, 120)).apply()
+
+    /**
+     * 双引擎并发竞速（§0.114）：未知视场时本地星表与官方引擎并发加速，取最先命中者。
+     * 仅在非低内存设备生效，默认开启。
+     */
+    var parallelEngineRacing: Boolean
+        get() = prefs.getBoolean(KEY_PARALLEL_RACING, true)
+        set(value) = prefs.edit().putBoolean(KEY_PARALLEL_RACING, value).apply()
+
     companion object {
         private const val TAG = "SettingsRepository"
         private const val KEY_API_KEY = "api_key"
@@ -180,6 +195,8 @@ class SettingsRepository(context: Context) {
         private const val KEY_SENSOR_POINTING = "sensor_pointing"
         private const val KEY_AR_LIVE = "ar_live_star_map"
         private const val KEY_AR_FOV = "ar_fov_deg"
+        private const val KEY_SOLVE_BUDGET = "solve_budget_sec"
+        private const val KEY_PARALLEL_RACING = "parallel_engine_racing"
         const val DEFAULT_SERVER = "https://nova.astrometry.net/api"
     }
 }

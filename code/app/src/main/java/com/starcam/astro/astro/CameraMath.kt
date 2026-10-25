@@ -44,7 +44,39 @@ object CameraMath {
             "1/$denom s"
         }
         sec % 1.0 == 0.0 -> "${sec.toInt()} s"
-        else -> "${"%.1f".format(sec)} s"
+        else -> "${String.format(java.util.Locale.ROOT, "%.1f", sec)} s"
+    }
+
+    /**
+     * PreviewView FIT_CENTER 显示矩形（§0.115 审计 B14 纯函数化）。
+     */
+    data class FitRect(
+        val left: Float,
+        val top: Float,
+        val width: Float,
+        val height: Float,
+    )
+
+    /**
+     * PreviewView FIT_CENTER 显示矩形计算（纯数学，无 Android 依赖，§0.115 修复审计 B14）。
+     *
+     * @param containerWidth 渲染容器宽度（如屏幕或 Box 宽度）
+     * @param containerHeight 渲染容器高度
+     * @param streamAspectLandscape 相机预览流横屏横纵比（典型如 4f / 3f 或 16f / 9f）
+     * @param isPortrait 是否为竖屏显示
+     */
+    fun computeFitCenterRect(
+        containerWidth: Float,
+        containerHeight: Float,
+        streamAspectLandscape: Float = 4f / 3f,
+        isPortrait: Boolean = true,
+    ): FitRect {
+        val aspect = if (isPortrait) 1f / streamAspectLandscape else streamAspectLandscape
+        val rectH = minOf(containerHeight, containerWidth / aspect)
+        val rectW = rectH * aspect
+        val rectL = (containerWidth - rectW) / 2f
+        val rectT = (containerHeight - rectH) / 2f
+        return FitRect(rectL, rectT, rectW, rectH)
     }
 
     /** 档位秒 → 曝光纳秒（Camera2 SENSOR_EXPOSURE_TIME 单位） */

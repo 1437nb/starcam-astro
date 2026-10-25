@@ -118,12 +118,10 @@ fun BatchScreen(
                         try {
                             HistoryStore.save(
                                 context,
-                                HistoryStore.Entry(
+                                HistoryStore.Entry.fromSolve(
                                     timestamp = System.currentTimeMillis(),
                                     imagePath = path,
-                                    raDeg = solve.raDeg,
-                                    decDeg = solve.decDeg,
-                                    fovDeg = solve.fieldWidthDeg,
+                                    solve = solve,
                                     engine = "批量导出",
                                     constellation = HistoryStore.nearestConstellationZh(
                                         solve.raDeg, solve.decDeg,

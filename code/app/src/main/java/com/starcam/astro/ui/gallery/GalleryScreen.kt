@@ -34,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -127,14 +128,16 @@ fun GalleryScreen(
                 },
                 actions = {
                     if (items != null && items!!.isNotEmpty()) {
-                        IconButton(onClick = {
+                        TextButton(onClick = {
                             multi = !multi
                             selected.clear()
                         }) {
                             Text(
                                 if (multi) com.starcam.astro.ui.I18n.Gallery.cancelMulti else com.starcam.astro.ui.I18n.Gallery.multiSelect,
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                softWrap = false,
                             )
                         }
                     }

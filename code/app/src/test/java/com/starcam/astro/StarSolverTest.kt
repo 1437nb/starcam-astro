@@ -82,6 +82,38 @@ class StarSolverTest {
         assertTrue(!FovEstimate.isPortrait(3))  // ROTATE_180
     }
 
+    // ---------------- 内置离线演示图已知视场先验 ----------------
+
+    @Test
+    fun demoPhotoFov_coversAllTwelveBuiltinPhotos() {
+        val photos = listOf(
+            "photo4963.jpg" to 77.2,
+            "photo4974.jpg" to 77.0,
+            "photo4984.jpg" to 76.0,
+            "photo4998.jpg" to 75.6,
+            "photo5031.jpg" to 76.0,
+            "photo5040.jpg" to 77.0,
+            "photo5049.jpg" to 71.0,
+            "photo5057.jpg" to 75.0,
+            "photo5068.jpg" to 72.0,
+            "photo5076.jpg" to 72.0,
+            "photo5087.jpg" to 76.0,
+            "photo5092.jpg" to 76.0,
+        )
+        for ((name, expectFov) in photos) {
+            val fov = StarSolver.demoPhotoFov(name)
+            assertNotNull("$name 应有已知视场先验", fov)
+            assertEquals("$name 视场应与真值一致", expectFov, fov!!, 0.01)
+        }
+    }
+
+    @Test
+    fun demoPhotoFov_unknownPhotoReturnsNull() {
+        assertNull(StarSolver.demoPhotoFov("user_pic.jpg"))
+        assertNull(StarSolver.demoPhotoFov("photo1234.jpg"))
+        assertNull(StarSolver.demoPhotoFov("IMG_20261024.jpg"))
+    }
+
     // ---------------- StarSolver.planSteps ----------------
 
     @Test
@@ -296,5 +328,45 @@ class StarSolverTest {
         val r2 = StarSolver.rescaleSolveFor(noWcs, fromW, fromH, toW, toH)
         assertNull(r2.wcs)
         assertEquals(toW, r2.imageWidth)
+    }
+
+    // ---------------- 双引擎并发竞速判定 canRace ----------------
+
+    @Test
+    fun canRace_normalConditions_returnsTrue() {
+        val steps = listOf(SolveEngine.LOCAL_MATCHER, SolveEngine.ASTROMETRY_NATIVE)
+        val ok = StarSolver.canRace(
+            isLowRam = false,
+            maxMemoryBytes = 512L * 1024 * 1024,
+            isNativeAvailable = true,
+            fovDeg = null,
+            steps = steps,
+        )
+        assertTrue("未知视场且非低内存机应支持竞速", ok)
+
+        val okWide = StarSolver.canRace(
+            isLowRam = false,
+            maxMemoryBytes = 512L * 1024 * 1024,
+            isNativeAvailable = true,
+            fovDeg = 60.0,
+            steps = steps,
+        )
+        assertTrue("广角视场且非低内存机应支持竞速", okWide)
+    }
+
+    @Test
+    fun canRace_constrainedEnvironment_returnsFalse() {
+        val steps = listOf(SolveEngine.LOCAL_MATCHER, SolveEngine.ASTROMETRY_NATIVE)
+        // 低内存设备
+        assertTrue(!StarSolver.canRace(true, 512L * 1024 * 1024, true, null, steps))
+        // 堆内存不足 256MB
+        assertTrue(!StarSolver.canRace(false, 128L * 1024 * 1024, true, null, steps))
+        // 原生库不可用
+        assertTrue(!StarSolver.canRace(false, 512L * 1024 * 1024, false, null, steps))
+        // 窄场 (<8°)
+        assertTrue(!StarSolver.canRace(false, 512L * 1024 * 1024, true, 4.0, steps))
+        // 步骤未包含双引擎
+        val singleStep = listOf(SolveEngine.LOCAL_MATCHER)
+        assertTrue(!StarSolver.canRace(false, 512L * 1024 * 1024, true, null, singleStep))
     }
 }

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -34,6 +35,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,13 +50,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,6 +90,7 @@ import com.starcam.astro.astro.SkyRegion
 import com.starcam.astro.astro.SolveDiagnostics
 import com.starcam.astro.astro.SolveEngine
 import com.starcam.astro.astro.SolveResult
+import com.starcam.astro.astro.SolveToken
 import com.starcam.astro.astro.StarChartOverlay
 import com.starcam.astro.astro.StarNames
 import com.starcam.astro.astro.StarSolver
@@ -95,14 +102,15 @@ import com.starcam.astro.ui.theme.AppThemeMode
 import com.starcam.astro.ui.theme.ThemeState
 import com.starcam.astro.util.ImageUtils
 import com.starcam.astro.util.LocationHelper
+import java.util.concurrent.CancellationException
 import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 识别结果页状态（internal：放大查看器命中测试复用 Success 数据） */
-internal sealed interface ResultUiState {
+/** 识别结果页状态（放大查看器命中测试复用 Success 数据） */
+sealed interface ResultUiState {
     data class Loading(val bitmap: Bitmap? = null, val message: String) : ResultUiState
     data class Success(
         val solve: SolveResult,
@@ -149,7 +157,7 @@ internal sealed interface ResultUiState {
  * §0.94 成功页的重活产物：在 IO 线程算好后再回主线程赋 `state`，
  * 使 [ResultScreen] 的主线程只做一次状态写入。
  */
-private data class PreparedSuccess(
+internal data class PreparedSuccess(
     val stars: List<StarChartOverlay.Star2D>,
     val lines: List<StarChartOverlay.Line2D>,
     val labels: List<StarChartOverlay.Label2D>,
@@ -167,15 +175,32 @@ private data class PreparedSuccess(
 fun ResultScreen(
     imagePath: String,
     demoRegion: SkyRegion?,
+    cachedSolve: SolveResult? = null,
+    cachedEngine: String? = null,
     settings: SettingsRepository,
     onBack: () -> Unit,
     onRetake: () -> Unit,
+    viewModel: ResultViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        key = "$imagePath-${cachedSolve != null}-${demoRegion?.name}",
+        factory = ResultViewModel.factory(LocalContext.current.applicationContext as android.app.Application),
+    ),
 ) {
-    val context = LocalContext.current
-    var state by remember { mutableStateOf<ResultUiState>(ResultUiState.Loading(null, com.starcam.astro.ui.I18n.Result.preparing)) }
-    var attempt by remember { mutableIntStateOf(0) }
-    // 识别等待时的天文冷知识（§0.33.4）：每张照片/每次重试换一条
-    val tip = remember(imagePath, demoRegion, attempt) { AstroTips.random() }
+    LaunchedEffect(imagePath, demoRegion, cachedSolve) {
+        viewModel.initiateSolve(
+            imagePath = imagePath,
+            demoRegion = demoRegion,
+            cachedSolve = cachedSolve,
+            cachedEngine = cachedEngine,
+            settings = settings,
+        )
+    }
+
+    val state = viewModel.state
+    val detectedStars = viewModel.detectedStars
+    val detectedStarTotal = viewModel.detectedStarTotal
+
+    // 识别等待时的天文冷知识（§0.33.4）：每张照片换一条
+    val tip = remember(imagePath, demoRegion) { AstroTips.random() }
     // 全屏缩放查看器（§0.34/§0.37）：成功页/失败页点击图片打开
     // Triple(原图, 标注图, 标题)，查看器内可切换原图/标注
     var viewer by remember { mutableStateOf<Triple<Bitmap, Bitmap, String>?>(null) }
@@ -186,176 +211,6 @@ fun ResultScreen(
     var viewerHit by remember { mutableStateOf<((Float, Float, Float) -> SkyObjectRef?)?>(null) }
     val messierTolScreenPx = with(LocalDensity.current) { 28.dp.toPx() }
     val starTolScreenPx = with(LocalDensity.current) { 32.dp.toPx() }
-    // 加载阶段实时预览：本地提星完成后立即回调（§0.36）
-    var detectedStars by remember { mutableStateOf<List<SolveDiagnostics.DiagStar>>(emptyList()) }
-    // §0.86 真实检出总数（未受 200 上限截断）：旧版直接显示 detectedStars.size，
-    // 而那个列表被上限压住，真实星空照片恒为 ~197，读数没有信息量。
-    var detectedStarTotal by remember { mutableIntStateOf(0) }
-
-    // 识别成功 → 投影星表并切换到成功页；失败返回 false
-    //
-    // §0.94：投影、EXIF 读取与定位都是 CPU 或 IO 重活 —— `projectStars` 遍历全星表，
-    // `ExifPriorsReader` 读文件，`LocationHelper.getBestLocation()` 是**阻塞式定位**；
-    // 它们原先都在主线程执行（LaunchedEffect 默认主调度器）。现全部下沉到 IO，
-    // 只有 `state` 赋值留在主线程（Compose 状态必须在主线程写）。
-    suspend fun showSuccess(
-        solve: SolveResult,
-        bitmap: Bitmap,
-        engine: SolveEngine?,
-        engineDetail: String?,
-        isDemo: Boolean,
-        elapsedMs: Long = 0,
-    ): Boolean {
-        val w = bitmap.width
-        val h = bitmap.height
-        val rawWcs = solve.wcs ?: run {
-            state = ResultUiState.Error(com.starcam.astro.ui.I18n.Result.missingWcs)
-            return false
-        }
-        val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
-        val prepared = withContext(Dispatchers.IO) {
-            // 若求解尺寸与显示尺寸不一致，做等比换算
-            val wcs = if (solve.imageWidth == w && solve.imageHeight == h) {
-                rawWcs
-            } else {
-                rawWcs.rescaledFor(solve.imageWidth, solve.imageHeight, w, h)
-            }
-            val stars = StarChartOverlay.projectStars(wcs, w, h)
-            val lines = StarChartOverlay.projectLines(stars)
-            val labels = StarChartOverlay.constellationLabels(stars, isEn)
-            val messier = StarChartOverlay.projectMessier(wcs, w, h)
-            // §0.58/§0.59 太阳系天体（月亮/行星）：位置随时刻变化，需拍摄时间 + 位置。
-            // 时间必来自 EXIF；位置优先 EXIF GPS，缺失时用当前定位兜底（未必是拍摄地）。
-            // 演示模式为合成天区，直接跳过。
-            val needFallback =
-                com.starcam.astro.astro.ExifPriorsReader.needsLocationFallback(imagePath)
-            val fallbackLoc = if (needFallback) {
-                runCatching { LocationHelper(context).getBestLocation() }.getOrNull()
-            } else {
-                null
-            }
-            val solar = if (isDemo) {
-                emptyList()
-            } else {
-                runCatching {
-                    StarChartOverlay.projectSolarSystem(
-                        wcs, w, h,
-                        com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(
-                            imagePath,
-                            fallbackLoc?.let { it.latitude to it.longitude },
-                        ),
-                    )
-                }.getOrDefault(emptyList())
-            }
-            PreparedSuccess(stars, lines, labels, messier, solar, fallbackLoc != null)
-        }
-        state = ResultUiState.Success(
-            solve, bitmap, prepared.stars, prepared.lines, prepared.labels, prepared.messier,
-            isDemo, engine, engineDetail, elapsedMs, prepared.solar,
-            locationIsFallback = prepared.locationIsFallback,
-        )
-        return true
-    }
-
-    LaunchedEffect(imagePath, demoRegion, attempt) {
-        state = ResultUiState.Loading(null, com.starcam.astro.ui.I18n.Result.preparingPhoto)
-        detectedStars = emptyList()
-        detectedStarTotal = 0
-        try {
-            if (demoRegion != null) {
-                // 离线演示：内置天区合成的模拟星空照片，不与真实求解链路交互
-                val display = withContext(Dispatchers.IO) {
-                    ImageUtils.decodeSampledBitmap(imagePath, 2200)
-                }
-                if (display == null) {
-                    state = ResultUiState.Error(com.starcam.astro.ui.I18n.Result.cannotReadImage)
-                    return@LaunchedEffect
-                }
-                state = ResultUiState.Loading(display, com.starcam.astro.ui.I18n.Result.generatingDemo)
-                delay(800)
-                val solve = DemoSolver.solveFor(demoRegion)
-                if (!showSuccess(solve, display, null, null, isDemo = true)) return@LaunchedEffect
-            } else {
-                // 真实照片：三层引擎调度（官方 astrometry 本地 → 内置星表宽场 → 在线 nova）
-                val display = withContext(Dispatchers.IO) {
-                    ImageUtils.decodeSampledBitmap(imagePath, 2200)
-                }
-                if (display == null) {
-                    state = ResultUiState.Error(com.starcam.astro.ui.I18n.Result.cannotReadImage)
-                    return@LaunchedEffect
-                }
-                state = ResultUiState.Loading(display, com.starcam.astro.ui.I18n.Result.preparingSolve)
-                var diag: SolveDiagnostics? = null
-                val t0 = System.currentTimeMillis() // 识别打点计时（§0.40）
-                val result = StarSolver.solve(
-                    context, display, imagePath, settings,
-                    onProgress = { msg -> state = ResultUiState.Loading(display, msg) },
-                    onDiagnostics = { diag = it },
-                    onStarsDetected = { list, total ->
-                        detectedStars = list
-                        detectedStarTotal = total
-                    },
-                )
-                val elapsedMs = System.currentTimeMillis() - t0
-                if (result == null) {
-                    // §0.93：统计落盘是 IO（500 条 JSON 全量重写），不能在主线程做 ——
-                    // LaunchedEffect 默认跑在主调度器上，直接调用会掉帧、极端情况 ANR。
-                    withContext(Dispatchers.IO) {
-                        StatsStore.record(context, ok = false, engine = "无", ms = elapsedMs)
-                    }
-                    val message = if (!settings.hasApiKey) {
-                        com.starcam.astro.ui.I18n.Result.solveFailedNoKey
-                    } else {
-                        com.starcam.astro.ui.I18n.Result.solveFailedWithKey
-                    }
-                    state = ResultUiState.Error(message, display, diag, elapsedMs)
-                    return@LaunchedEffect
-                }
-                if (!showSuccess(
-                        result.solve,
-                        result.displayBitmap,
-                        result.engine,
-                        result.detail,
-                        isDemo = false,
-                        elapsedMs = elapsedMs,
-                    )
-                ) return@LaunchedEffect
-                // §0.40 识别打点 + §0.40 历史写入：§0.93 起整段下沉到 IO 线程 ——
-                // 统计是 500 条 JSON 全量重写，nearestConstellation 还要遍历全星表算角距，
-                // 两者原本都在主线程执行（LaunchedEffect 默认主调度器）。
-                try {
-                    withContext(Dispatchers.IO) {
-                        StatsStore.record(
-                            context,
-                            ok = true,
-                            engine = result.engine?.name ?: "?",
-                            ms = elapsedMs,
-                        )
-                        HistoryStore.save(
-                            context,
-                            HistoryStore.Entry(
-                                timestamp = System.currentTimeMillis(),
-                                imagePath = imagePath,
-                                raDeg = result.solve.raDeg,
-                                decDeg = result.solve.decDeg,
-                                fovDeg = result.solve.fieldWidthDeg,
-                                engine = result.detail ?: (result.engine?.name ?: ""),
-                                constellation = HistoryStore.nearestConstellation(
-                                    result.solve.raDeg, result.solve.decDeg,
-                                    com.starcam.astro.ui.theme.LocaleState.isEnglish,
-                                ),
-                            ),
-                        )
-                    }
-                } catch (_: Exception) {
-                }
-            }
-        } catch (e: PlateSolveException) {
-            state = ResultUiState.Error(e.message ?: com.starcam.astro.ui.I18n.Result.solveFailed)
-        } catch (e: Exception) {
-            state = ResultUiState.Error("${com.starcam.astro.ui.I18n.Result.solveFailed}：${e.message ?: ""}")
-        }
-    }
 
     Box {
         Scaffold(
@@ -363,7 +218,10 @@ fun ResultScreen(
                 TopAppBar(
                     title = { Text(com.starcam.astro.ui.I18n.Result.title) },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = {
+                            viewModel.cancel()
+                            onBack()
+                        }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = com.starcam.astro.ui.I18n.back)
                         }
                     },
@@ -375,14 +233,22 @@ fun ResultScreen(
         ) { padding ->
             when (val s = state) {
                 is ResultUiState.Loading -> LoadingContent(
-                    s, tip, detectedStars, detectedStarTotal, Modifier.padding(padding),
+                    state = s,
+                    tip = tip,
+                    stars = detectedStars,
+                    starTotal = detectedStarTotal,
+                    onCancel = {
+                        viewModel.cancel()
+                        onBack()
+                    },
+                    modifier = Modifier.padding(padding),
                 )
                 is ResultUiState.Success -> SuccessContent(
                     state = s,
                     modifier = Modifier.padding(padding),
                     layerFlags = layerFlags,
                     onFlagsChange = { layerFlags = it },
-                    onRetry = { attempt++ },
+                    onRetry = { viewModel.retry(imagePath, demoRegion, settings) },
                     onRetake = onRetake,
                     onBack = onBack,
                     onOpenViewer = { orig, anno ->
@@ -391,6 +257,7 @@ fun ResultScreen(
                             hitTestObjectAt(
                                 s, bx, by,
                                 messierTolScreenPx / pxPerBmp, starTolScreenPx / pxPerBmp,
+                                flags = layerFlags,
                             )
                         }
                         viewer = Triple(orig, anno, com.starcam.astro.ui.I18n.Result.viewerTitleSuccess)
@@ -402,7 +269,7 @@ fun ResultScreen(
                     diagnostics = s.diagnostics,
                     elapsedMs = s.elapsedMs,
                     modifier = Modifier.padding(padding),
-                    onRetry = { attempt++ },
+                    onRetry = { viewModel.retry(imagePath, demoRegion, settings) },
                     onBack = onBack,
                     onOpenViewer = { orig, anno ->
                         viewerRender = null
@@ -418,6 +285,7 @@ fun ResultScreen(
                 onClose = { viewer = null },
                 renderAnnotated = viewerRender,
                 initialFlags = layerFlags,
+                onFlagsChange = { layerFlags = it },
                 hitTest = viewerHit,
             )
         }
@@ -430,6 +298,7 @@ private fun LoadingContent(
     tip: String,
     stars: List<SolveDiagnostics.DiagStar>,
     starTotal: Int,
+    onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -495,6 +364,13 @@ private fun LoadingContent(
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 32.dp),
         )
+        Spacer(Modifier.height(16.dp))
+        OutlinedButton(
+            onClick = onCancel,
+            modifier = Modifier.padding(top = 4.dp),
+        ) {
+            Text(com.starcam.astro.ui.I18n.cancel)
+        }
     }
 }
 
@@ -515,6 +391,7 @@ private fun ErrorContent(
 ) {
     // §0.81：全分辨率诊断图合成要移出主线程（见下方 clickable）
     val scope = rememberCoroutineScope()
+    val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -543,7 +420,7 @@ private fun ErrorContent(
             ) {
                 Image(
                     bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "星点检测标注图",
+                    contentDescription = if (isEn) "Star detection diagnostic" else "星点检测标注图",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )
@@ -560,7 +437,7 @@ private fun ErrorContent(
                 }
                 // 点击放大提示
                 Text(
-                    "🔍 点击图片放大查看",
+                    com.starcam.astro.ui.I18n.tapToZoom,
                     color = Color.White.copy(alpha = 0.65f),
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
@@ -580,7 +457,6 @@ private fun ErrorContent(
             Text("😕", fontSize = 44.sp)
         }
 
-        val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
         if (diagnostics != null) {
             Spacer(Modifier.height(16.dp))
             Text(
@@ -682,13 +558,36 @@ private fun SuccessContent(
             },
         )
         Spacer(Modifier.height(8.dp))
+        // §0.120：图层快捷开关（识别完毕后直接切换星星名字、连线、星座名等标注）
+        LayerFilterChips(
+            flags = layerFlags,
+            onFlagsChange = onFlagsChange,
+            showPlanets = state.solar.isNotEmpty(),
+        )
+        Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.End,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            SaveToGalleryButton(state, layerFlags)
+            // §0.120：导出只有星座连线的纯净图片
+            SaveToGalleryButton(
+                state = state,
+                flags = LayerFlags.LINES_ONLY,
+                label = com.starcam.astro.ui.I18n.Result.saveLinesOnly,
+                isOutlined = true,
+                toastProvider = { com.starcam.astro.ui.I18n.Result.savedLinesOnlyToast(it) },
+            )
+            // 保存当前自定义图层配置的标注图
+            SaveToGalleryButton(
+                state = state,
+                flags = layerFlags,
+                label = com.starcam.astro.ui.I18n.Result.saveAnnotated,
+                isOutlined = false,
+                toastProvider = { com.starcam.astro.ui.I18n.Result.savedToast(it) },
+            )
         }
         Spacer(Modifier.height(8.dp))
         InfoPanel(state, Modifier.padding(horizontal = 16.dp))
@@ -713,16 +612,82 @@ private fun SuccessContent(
     }
 }
 
-/** 保存到相册：把照片 + 星座标注合成图存入本地（Android 10+ 直接入相册；§0.47 遵循图层开关） */
+/** §0.120 图层快捷开关栏（识别成功后直接切换星星名字、星座连线等标注） */
 @Composable
-private fun SaveToGalleryButton(state: ResultUiState.Success, flags: LayerFlags = LayerFlags.ALL) {
+private fun LayerFilterChips(
+    flags: LayerFlags,
+    onFlagsChange: (LayerFlags) -> Unit,
+    showPlanets: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FilterChip(
+            selected = flags.starNames,
+            onClick = { onFlagsChange(flags.copy(starNames = !flags.starNames)) },
+            label = { Text(com.starcam.astro.ui.I18n.Layers.starNames) },
+            leadingIcon = if (flags.starNames) {
+                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+            } else null,
+        )
+        FilterChip(
+            selected = flags.lines,
+            onClick = { onFlagsChange(flags.copy(lines = !flags.lines)) },
+            label = { Text(com.starcam.astro.ui.I18n.Layers.lines) },
+            leadingIcon = if (flags.lines) {
+                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+            } else null,
+        )
+        FilterChip(
+            selected = flags.constellationNames,
+            onClick = { onFlagsChange(flags.copy(constellationNames = !flags.constellationNames)) },
+            label = { Text(com.starcam.astro.ui.I18n.Layers.constellationNames) },
+            leadingIcon = if (flags.constellationNames) {
+                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+            } else null,
+        )
+        FilterChip(
+            selected = flags.messier,
+            onClick = { onFlagsChange(flags.copy(messier = !flags.messier)) },
+            label = { Text(com.starcam.astro.ui.I18n.Layers.messier) },
+            leadingIcon = if (flags.messier) {
+                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+            } else null,
+        )
+        if (showPlanets) {
+            FilterChip(
+                selected = flags.planets,
+                onClick = { onFlagsChange(flags.copy(planets = !flags.planets)) },
+                label = { Text(com.starcam.astro.ui.I18n.Layers.planets) },
+                leadingIcon = if (flags.planets) {
+                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                } else null,
+            )
+        }
+    }
+}
+
+/** 保存到相册：把照片 + 星座标注合成图存入本地（Android 10+ 直接入相册；§0.47 遵循图层开关，§0.120 支持仅连线导出） */
+@Composable
+private fun SaveToGalleryButton(
+    state: ResultUiState.Success,
+    flags: LayerFlags = LayerFlags.ALL,
+    label: String = com.starcam.astro.ui.I18n.Result.saveToGallery,
+    isOutlined: Boolean = false,
+    toastProvider: (String) -> String = { com.starcam.astro.ui.I18n.Result.savedToast(it) },
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
 
-    TextButton(
-        onClick = {
-            if (saving) return@TextButton
+    val onClick = {
+        if (!saving) {
             saving = true
             scope.launch {
                 val location = withContext(Dispatchers.IO) {
@@ -742,13 +707,28 @@ private fun SaveToGalleryButton(state: ResultUiState.Success, flags: LayerFlags 
                 saving = false
                 Toast.makeText(
                     context,
-                    if (location != null) com.starcam.astro.ui.I18n.Result.savedToast(location) else com.starcam.astro.ui.I18n.Result.saveFailed,
+                    if (location != null) toastProvider(location) else com.starcam.astro.ui.I18n.Result.saveFailed,
                     Toast.LENGTH_LONG,
                 ).show()
             }
-        },
-        enabled = !saving,
-    ) { Text(if (saving) com.starcam.astro.ui.I18n.Result.saving else com.starcam.astro.ui.I18n.Result.saveToGallery) }
+        }
+    }
+
+    if (isOutlined) {
+        OutlinedButton(
+            onClick = onClick,
+            enabled = !saving,
+        ) {
+            Text(if (saving) com.starcam.astro.ui.I18n.Result.saving else label)
+        }
+    } else {
+        Button(
+            onClick = onClick,
+            enabled = !saving,
+        ) {
+            Text(if (saving) com.starcam.astro.ui.I18n.Result.saving else label)
+        }
+    }
 }
 
 /** 将识别结果（照片 + 星座连线 + 星名标注）渲染为位图，供保存/分享（支持双语与图层开关 §0.47） */
@@ -822,6 +802,8 @@ private fun StarPhotoOverlay(
     onFlagsChange: (LayerFlags) -> Unit,
     onTap: () -> Unit,
 ) {
+    val currentOnTap by rememberUpdatedState(onTap)
+    val currentFlags by rememberUpdatedState(flags)
     val bitmap = state.bitmap
     val w = bitmap.width
     val h = bitmap.height
@@ -844,7 +826,7 @@ private fun StarPhotoOverlay(
             .height(480.dp)
             .onSizeChanged { boxSize = it }
             .background(Color.Black)
-            .pointerInput(Unit) {
+            .pointerInput(state, flags) {
                 detectTapGestures(
                     onPress = { _ ->
                         holdingOriginal = true
@@ -864,11 +846,12 @@ private fun StarPhotoOverlay(
                             val hit = hitTestObjectAt(
                                 state, imgX, imgY,
                                 messierTolPx / scale, starTolPx / scale,
+                                flags = currentFlags,
                             )
                             if (hit != null) {
                                 cardObject = hit
                             } else {
-                                onTap()
+                                currentOnTap()
                             }
                         }
                     },
@@ -893,7 +876,7 @@ private fun StarPhotoOverlay(
             // §0.47：按住时显示纯净原图，松开恢复标注；叠加层按 flags 逐层绘制
             Image(
                 bitmap = bitmap.asImageBitmap(),
-                contentDescription = "星空照片（识别结果叠加）",
+                contentDescription = if (isEn) "Star photo (solved overlay)" else "星空照片（识别结果叠加）",
                 modifier = imageModifier,
                 contentScale = androidx.compose.ui.layout.ContentScale.FillBounds,
             )
@@ -1039,46 +1022,54 @@ internal fun hitTestObjectAt(
     imgY: Float,
     messierTolImgPx: Float,
     starTolImgPx: Float,
+    flags: LayerFlags = LayerFlags.ALL,
 ): SkyObjectRef? {
-    // §0.58 太阳系天体优先级最高：日月行星是全画面最醒目的目标，
-    // 且常与深空天体近邻（如月亮掠过毕星团），必须先命中
-    var solarRef: SkyObjectRef? = null
-    var solarDist = messierTolImgPx * 1.6f
-    for (s in state.solar) {
-        if (!s.visible) continue
-        val d = kotlin.math.hypot((s.x - imgX).toDouble(), (s.y - imgY).toDouble()).toFloat()
-        if (d < solarDist) {
-            solarDist = d
-            solarRef = SkyObjectRef.SolarRef(s.pos)
+    // §0.58 太阳系天体优先级最高：日月行星是全画面最醒目的目标
+    if (flags.planets) {
+        var solarRef: SkyObjectRef? = null
+        var solarDist = messierTolImgPx * 1.6f
+        for (s in state.solar) {
+            if (!s.visible) continue
+            val d = kotlin.math.hypot((s.x - imgX).toDouble(), (s.y - imgY).toDouble()).toFloat()
+            if (d < solarDist) {
+                solarDist = d
+                solarRef = SkyObjectRef.SolarRef(s.pos)
+            }
         }
+        if (solarRef != null) return solarRef
     }
-    if (solarRef != null) return solarRef
 
     // 梅西耶
-    var best: SkyObjectRef? = null
-    var bestDist = messierTolImgPx
-    for (m in state.messier) {
-        if (!m.visible) continue
-        val d = kotlin.math.hypot((m.x - imgX).toDouble(), (m.y - imgY).toDouble()).toFloat()
-        if (d < bestDist) {
-            bestDist = d
-            best = SkyObjectRef.MessierRef(m.obj)
+    if (flags.messier) {
+        var best: SkyObjectRef? = null
+        var bestDist = messierTolImgPx
+        for (m in state.messier) {
+            if (!m.visible) continue
+            val d = kotlin.math.hypot((m.x - imgX).toDouble(), (m.y - imgY).toDouble()).toFloat()
+            if (d < bestDist) {
+                bestDist = d
+                best = SkyObjectRef.MessierRef(m.obj)
+            }
         }
+        if (best != null) return best
     }
-    if (best != null) return best
 
     // 亮星：只挑有标注价值的亮星（mag ≤ 3.2，与星名图层同域）
-    var starDist = starTolImgPx
-    var starRef: SkyObjectRef? = null
-    for (s in state.stars) {
-        if (!s.visible || s.entry.mag > 3.2) continue
-        val d = kotlin.math.hypot((s.x - imgX).toDouble(), (s.y - imgY).toDouble()).toFloat()
-        if (d < starDist) {
-            starDist = d
-            starRef = SkyObjectRef.StarRef(s.entry)
+    if (flags.starNames) {
+        var starDist = starTolImgPx
+        var starRef: SkyObjectRef? = null
+        for (s in state.stars) {
+            if (!s.visible || s.entry.mag > 3.2) continue
+            val d = kotlin.math.hypot((s.x - imgX).toDouble(), (s.y - imgY).toDouble()).toFloat()
+            if (d < starDist) {
+                starDist = d
+                starRef = SkyObjectRef.StarRef(s.entry)
+            }
         }
+        return starRef
     }
-    return starRef
+
+    return null
 }
 
 /** §0.47：天体科普卡片（照片底部浮层，中英双语；Messier 与亮星两种；放大查看器亦复用） */
@@ -1388,47 +1379,81 @@ private fun formatDec(decDeg: Double): String {
 @Composable
 private fun SolveLogDetails(diagnostics: SolveDiagnostics?) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
     var expanded by androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf(false)
     }
-    val detail = androidx.compose.runtime.remember {
+    val detail = androidx.compose.runtime.remember(diagnostics, isEn) {
         buildString {
-            appendLine("检星 ${diagnostics?.starCount ?: 0} 颗")
-            appendLine("引擎轨迹：${diagnostics?.enginesTried?.joinToString(" → ") ?: "-"}")
-            // §0.86 逐轮显示：§0.75 之后一次求解最多跑两遍（浅域 + 深域重试），
-            // 而调试字段是单槽、后写的深域会覆盖浅域。实测 5031 浅域打分轮
-            // 16/30 可解、深域只有 7/715 的伪解 —— 只显示后者会把死因判错，
-            // 所以两轮分开列，并各自标出对齐率是否过了 20% 门槛。
-            fun rate(best: Int?, inFrame: Int?): String =
-                if (best != null && inFrame != null && inFrame > 0) {
-                    val r = best.toFloat() / inFrame
-                    "%.2f%s".format(r, if (r >= 0.20f) " 过门" else " 未过门")
-                } else "-"
-            val shallowVote = LocalStarMatcher.debugShallowVoteStats
-            if (shallowVote != null) {
-                appendLine("── 浅域（mag≤4.0）──")
-                appendLine("  投票轮：$shallowVote")
-                appendLine("  打分轮：${LocalStarMatcher.debugShallowScoredStats ?: "-"}")
+            if (isEn) {
+                appendLine("Stars detected: ${diagnostics?.starCount ?: 0}")
+                appendLine("Engine trace: ${diagnostics?.enginesTried?.joinToString(" → ") ?: "-"}")
+                fun rate(best: Int?, inFrame: Int?): String =
+                    if (best != null && inFrame != null && inFrame > 0) {
+                        val r = best.toFloat() / inFrame
+                        "%.2f%s".format(r, if (r >= 0.20f) " passed" else " below threshold")
+                    } else "-"
+                val shallowVote = LocalStarMatcher.debugShallowVoteStats
+                if (shallowVote != null) {
+                    appendLine("── Shallow Catalog (mag≤4.0) ──")
+                    appendLine("  Voting: $shallowVote")
+                    appendLine("  Scoring: ${LocalStarMatcher.debugShallowScoredStats ?: "-"}")
+                    appendLine(
+                        "  Best aligned: ${LocalStarMatcher.debugShallowScoredBest ?: 0}" +
+                            " / in-frame ${LocalStarMatcher.debugShallowScoredInFrame ?: 0}" +
+                            " (alignment rate ${rate(LocalStarMatcher.debugShallowScoredBest, LocalStarMatcher.debugShallowScoredInFrame)})",
+                    )
+                }
+                appendLine("── Deep Catalog Retry (mag≤6.5) ──")
+                appendLine("  Voting: ${LocalStarMatcher.debugVoteStats ?: "-"}")
+                appendLine("  Scoring: ${LocalStarMatcher.debugScoredStats ?: "-"}")
                 appendLine(
-                    "  最优对齐 ${LocalStarMatcher.debugShallowScoredBest ?: 0} 颗" +
-                        " / 画面内 ${LocalStarMatcher.debugShallowScoredInFrame ?: 0} 颗" +
-                        "（对齐率 ${rate(LocalStarMatcher.debugShallowScoredBest, LocalStarMatcher.debugShallowScoredInFrame)}）",
+                    "  Best aligned: ${LocalStarMatcher.debugScoredBest ?: 0}" +
+                        " / in-frame ${LocalStarMatcher.debugScoredInFrame ?: 0}" +
+                        " (alignment rate ${rate(LocalStarMatcher.debugScoredBest, LocalStarMatcher.debugScoredInFrame)})",
+                )
+            } else {
+                appendLine("检星 ${diagnostics?.starCount ?: 0} 颗")
+                appendLine("引擎轨迹：${diagnostics?.enginesTried?.joinToString(" → ") ?: "-"}")
+                // §0.86 逐轮显示：§0.75 之后一次求解最多跑两遍（浅域 + 深域重试），
+                // 而调试字段是单槽、后写的深域会覆盖浅域。实测 5031 浅域打分轮
+                // 16/30 可解、深域只有 7/715 的伪解 —— 只显示后者会把死因判错，
+                // 所以两轮分开列，并各自标出对齐率是否过了 20% 门槛。
+                fun rate(best: Int?, inFrame: Int?): String =
+                    if (best != null && inFrame != null && inFrame > 0) {
+                        val r = best.toFloat() / inFrame
+                        "%.2f%s".format(r, if (r >= 0.20f) " 过门" else " 未过门")
+                    } else "-"
+                val shallowVote = LocalStarMatcher.debugShallowVoteStats
+                if (shallowVote != null) {
+                    appendLine("── 浅域（mag≤4.0）──")
+                    appendLine("  投票轮：$shallowVote")
+                    appendLine("  打分轮：${LocalStarMatcher.debugShallowScoredStats ?: "-"}")
+                    appendLine(
+                        "  最优对齐 ${LocalStarMatcher.debugShallowScoredBest ?: 0} 颗" +
+                            " / 画面内 ${LocalStarMatcher.debugShallowScoredInFrame ?: 0} 颗" +
+                            "（对齐率 ${rate(LocalStarMatcher.debugShallowScoredBest, LocalStarMatcher.debugShallowScoredInFrame)}）",
+                    )
+                }
+                appendLine("── 深域重试（mag≤6.5）──")
+                appendLine("  投票轮：${LocalStarMatcher.debugVoteStats ?: "-"}")
+                appendLine("  打分轮：${LocalStarMatcher.debugScoredStats ?: "-"}")
+                appendLine(
+                    "  最优对齐 ${LocalStarMatcher.debugScoredBest ?: 0} 颗" +
+                        " / 画面内 ${LocalStarMatcher.debugScoredInFrame ?: 0} 颗" +
+                        "（对齐率 ${rate(LocalStarMatcher.debugScoredBest, LocalStarMatcher.debugScoredInFrame)}）",
                 )
             }
-            appendLine("── 深域重试（mag≤6.5）──")
-            appendLine("  投票轮：${LocalStarMatcher.debugVoteStats ?: "-"}")
-            appendLine("  打分轮：${LocalStarMatcher.debugScoredStats ?: "-"}")
-            appendLine(
-                "  最优对齐 ${LocalStarMatcher.debugScoredBest ?: 0} 颗" +
-                    " / 画面内 ${LocalStarMatcher.debugScoredInFrame ?: 0} 颗" +
-                    "（对齐率 ${rate(LocalStarMatcher.debugScoredBest, LocalStarMatcher.debugScoredInFrame)}）",
-            )
         }
     }
     Spacer(Modifier.height(14.dp))
     TextButton(onClick = { expanded = !expanded }) {
         Text(
-            if (expanded) "▾ 隐藏技术细节" else "▸ 查看技术细节（反馈问题时可复制）",
+            if (isEn) {
+                if (expanded) "▾ Hide Technical Details" else "▸ View Technical Details (can copy for feedback)"
+            } else {
+                if (expanded) "▾ 隐藏技术细节" else "▸ 查看技术细节（反馈问题时可复制）"
+            },
             style = MaterialTheme.typography.bodySmall,
         )
     }
@@ -1452,10 +1477,13 @@ private fun SolveLogDetails(diagnostics: SolveDiagnostics?) {
                             val clip = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                 as android.content.ClipboardManager
                             clip.setPrimaryClip(
-                                android.content.ClipData.newPlainText("StarCam 诊断", detail),
+                                android.content.ClipData.newPlainText(
+                                    if (isEn) "StarCam Diagnostics" else "StarCam 诊断",
+                                    detail,
+                                ),
                             )
                         },
-                        label = { Text("复制") },
+                        label = { Text(if (isEn) "Copy" else "复制") },
                     )
                     AssistChip(
                         onClick = {
@@ -1463,16 +1491,22 @@ private fun SolveLogDetails(diagnostics: SolveDiagnostics?) {
                             val clip = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                 as android.content.ClipboardManager
                             clip.setPrimaryClip(
-                                android.content.ClipData.newPlainText("StarCam 日志路径", dir.absolutePath),
+                                android.content.ClipData.newPlainText(
+                                    if (isEn) "StarCam Log Path" else "StarCam 日志路径",
+                                    dir.absolutePath,
+                                ),
                             )
                         },
-                        label = { Text("复制日志路径") },
+                        label = { Text(if (isEn) "Copy Log Path" else "复制日志路径") },
                     )
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "完整现场（含匹配器输入的像素）已存于应用日志目录，" +
-                        "可在「设置 → 识别日志」导出。",
+                    if (isEn) {
+                        "Full diagnostic dump (including matcher input pixels) is saved in the app log directory and can be exported in Settings → Recognition Log."
+                    } else {
+                        "完整现场（含匹配器输入的像素）已存于应用日志目录，可在「设置 → 识别日志」导出。"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

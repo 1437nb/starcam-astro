@@ -50,6 +50,8 @@ Thumbs.db
 
 # --- 工具状态目录（WorkBuddy 工作记忆等；项目知识以 docs/ 与交接说明.md 为准） ---
 .workbuddy/
+agent.md
+*.internal.md
 
 # --- 临时文件与日志 ---
 *.log

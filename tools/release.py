@@ -31,6 +31,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 ROOT = Path(__file__).resolve().parent.parent
 GRADLE_KTS = ROOT / "code" / "app" / "build.gradle.kts"
 LOCAL_PROPS = ROOT / "code" / "local.properties"
@@ -172,8 +178,9 @@ def preflight() -> None:
 
 def build(desc: str) -> Path:
     step("release 构建（R8 压缩，显式给堆）")
+    gradle_bin = shutil.which("gradle") or str(ROOT / "code" / ("gradlew.bat" if os.name == "nt" else "gradlew"))
     cmd = [
-        "gradle",
+        gradle_bin,
         "-Dorg.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m",
         "--no-daemon", "--console=plain",
         ":app:assembleRelease",

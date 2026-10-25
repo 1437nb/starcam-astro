@@ -186,14 +186,23 @@ object SolveLogStore {
                 // 星空图低频为主，实测可压到 1/5 左右，且**无损**，
                 // 开发机解压后仍是逐字节相同的像素，重放结果不受影响。
                 val f = File(dir, "input.gray.gz")
-                java.io.DataOutputStream(
-                    java.util.zip.GZIPOutputStream(
-                        java.io.BufferedOutputStream(f.outputStream()),
-                    ),
-                ).use { o ->
-                    o.writeInt(grayW)
-                    o.writeInt(grayH)
-                    for (v in gray) o.writeFloat(v)
+                java.util.zip.GZIPOutputStream(
+                    java.io.BufferedOutputStream(f.outputStream(), 65536),
+                ).use { gz ->
+                    val header = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.BIG_ENDIAN)
+                    header.putInt(grayW).putInt(grayH)
+                    gz.write(header.array())
+
+                    val chunkSize = 8192 // 8192 floats = 32KB block I/O
+                    val byteBuf = java.nio.ByteBuffer.allocate(chunkSize * 4).order(java.nio.ByteOrder.BIG_ENDIAN)
+                    var offset = 0
+                    while (offset < gray.size) {
+                        val count = minOf(chunkSize, gray.size - offset)
+                        byteBuf.clear()
+                        byteBuf.asFloatBuffer().put(gray, offset, count)
+                        gz.write(byteBuf.array(), 0, count * 4)
+                        offset += count
+                    }
                 }
             }
             pruneFailDirs(context)
@@ -227,13 +236,17 @@ object SolveLogStore {
         }
     }
 
-    /** 统计信息（设置页展示用） */
-    fun stats(context: Context): String {
+    /** 统计信息（设置页展示用，支持中英双语） */
+    fun stats(context: Context, isEnglish: Boolean = false): String {
         val dir = logDir(context)
         val logs = dir.listFiles()?.size ?: 0
         val fails = listFailDirs(context).size
         val sizeKb = (dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }) / 1024
-        return "日志文件 $logs 个 · 失败现场 $fails 份 · 共 ${sizeKb}KB"
+        return if (isEnglish) {
+            "$logs log files · $fails failure dumps · ${sizeKb}KB total"
+        } else {
+            "日志文件 $logs 个 · 失败现场 $fails 份 · 共 ${sizeKb}KB"
+        }
     }
 
     // ==================== 结构化报告构造 ====================

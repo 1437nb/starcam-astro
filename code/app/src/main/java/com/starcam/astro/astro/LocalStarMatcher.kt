@@ -1,4 +1,4 @@
-﻿package com.starcam.astro.astro
+package com.starcam.astro.astro
 
 import android.graphics.Bitmap
 import kotlin.math.PI
@@ -170,33 +170,52 @@ object LocalStarMatcher {
         fovHintDeg != null && fovHintDeg > DEEP_PATH_MAX_FOV_DEG
 
     /**
-     * §0.77 运行时星表域：**对象级状态，受 [solveLock] 保护**。
+     * 单次求解上下文（Sprint 4：4.3 去除 solveLock 全局排他锁）。
      *
-     * 为什么不是 ThreadLocal（一条走过的弯路，留作记录）：投票轮内部用线程池并行
-     * （`voteChunk` 里的 `Executors.newFixedThreadPool` + `pool.submit`），而
-     * ThreadLocal 在 worker 线程上会退回 `initialValue()` —— 也就是**浅域**。
-     * 于是深域兜底时主线程按深域取索引、worker 却按浅域口径工作，实测直接让
-     * apod3（船帆座窄场）从「解出 8.5° / 20 内点」退回 UNSOLVED。
-     * 结论：域是**整次求解的属性**，必须让所有参与线程看到同一个值。
-     *
-     * 为什么不是无保护的共享变量：`catalogMag()` 在一次求解里要被读 6 次
-     * （三角形索引、第 4 星验证网格、打分表、假设展开、内点统计…）。两个并发求解
-     * 互相改域，就可能让**同一次**求解出现「深域索引 + 浅域验证网格」，
-     * 涉及暗星的三角形被整体否决（§0.43 实测的形态）→ **静默 UNSOLVED**。
-     *
-     * 所以取「对象级状态 + 求解入口互斥」：同一时刻只有一个求解在跑，域在整个
-     * 求解期间保持稳定，所有线程读到同一个值（见 [match] / [solveLock]）。
+     * 解决历史问题：星表域（mag）、打分轮候选上限（cap）与调试留档原为单例对象级可变字段，
+     * 靠进程级 solveLock 互斥，导致批量识别与双引擎竞速被全局锁串行化。
+     * 将单次求解的可变状态与留档封装于 MatchContext 中，使多线程并发求解各自独立、无锁运行。
      */
+    data class MatchContext(
+        var catalogMag: Float = debugForceCatalogMag ?: PROD_CATALOG_MAG,
+        var scoredCap: Long = SCORED_MAX_CANDIDATES,
+        val token: SolveToken? = null,
+    ) {
+        var voteStats: String? = null
+        var scoredStats: String? = null
+        var phaseTimings: String? = null
+        var scoredBest: Int? = null
+        var scoredInFrame: Int? = null
+        var scoredWinPairs: Int? = null
+        var scoredExpandedPairs: Int? = null
+        var scoredWinSeed: String? = null
+        var scoredWinAt: Long = -1L
+        var usedFallback: Boolean = false
+        var expandDetail: String? = null
+        var shallowVoteStats: String? = null
+        var shallowScoredStats: String? = null
+        var shallowScoredBest: Int? = null
+        var shallowScoredInFrame: Int? = null
+        var deepRejectedReason: String? = null
+
+        fun snapshotDiagnostics(): MatchDiagnostics = MatchDiagnostics(
+            usedFallback = usedFallback,
+            deepRejectedReason = deepRejectedReason,
+            voteStats = voteStats,
+            scoredStats = scoredStats,
+            scoredBest = scoredBest,
+            scoredInFrame = scoredInFrame,
+            shallowVoteStats = shallowVoteStats,
+            shallowScoredStats = shallowScoredStats,
+            shallowScoredBest = shallowScoredBest,
+            shallowScoredInFrame = shallowScoredInFrame,
+        )
+    }
+
+    /** 兼容历史调试读取：最后一次求解完成时同步更新对象级字段（见 syncLegacyDiagnostics） */
     @Volatile
     private var runtimeCatalogMag: Float = PROD_CATALOG_MAG
 
-    /** §0.77 求解互斥：保证星表域在整次求解期间不被另一个求解改写（见 [runtimeCatalogMag]） */
-    private val solveLock = Any()
-
-    /**
-     * §0.89 本轮打分轮候选上限（默认 [SCORED_MAX_CANDIDATES]；探测模式下调小）。
-     * 与 [runtimeCatalogMag] 同一约定：受 [solveLock] 保护，只在单次求解内临时改写。
-     */
     @Volatile
     private var runtimeScoredCap: Long = SCORED_MAX_CANDIDATES
 
@@ -366,20 +385,13 @@ object LocalStarMatcher {
         val entries: Array<StarEntry>,
     )
 
-    @Volatile
-    private var cachedScoreTable: ScoreTable? = null
+    private val scoreTableCache = java.util.concurrent.ConcurrentHashMap<Float, ScoreTable>()
 
-    @Volatile
-    private var cachedScoreTableMag: Float = Float.NaN
-
-    private fun scoreTable(): ScoreTable {
-        val mag = catalogMag()
-        cachedScoreTable?.let { if (cachedScoreTableMag == mag) return it }
-        synchronized(this) {
-            cachedScoreTable?.let { if (cachedScoreTableMag == mag) return it }
+    private fun scoreTable(mag: Float = catalogMag()): ScoreTable {
+        return scoreTableCache.computeIfAbsent(mag) { m ->
             val list = ArrayList<StarEntry>(512)
             for (st in StarCatalogData.stars) {
-                if (st.mag > mag) continue
+                if (st.mag > m) continue
                 list.add(st)
             }
             val n = list.size
@@ -397,10 +409,7 @@ object LocalStarMatcher {
                 ras[i] = st.ra
                 decs[i] = st.dec
             }
-            val tbl = ScoreTable(ux, uy, uz, ras, decs, list.toTypedArray())
-            cachedScoreTable = tbl
-            cachedScoreTableMag = mag
-            return tbl
+            ScoreTable(ux, uy, uz, ras, decs, list.toTypedArray())
         }
     }
 
@@ -822,8 +831,7 @@ object LocalStarMatcher {
         return idx.triMap.values.sumOf { it.size } to ms
     }
 
-    private fun index(): StarIndex {
-        val mag = catalogMag()
+    private fun index(mag: Float = catalogMag()): StarIndex {
         indexCache[mag]?.let { return it }
         synchronized(this) {
             indexCache[mag]?.let { return it }
@@ -848,23 +856,12 @@ object LocalStarMatcher {
      * §0.81：归还可重建的**托管堆**缓存（内存压力时由 [StarCamApplication] 调用）。
      *
      * 这三份都是纯派生数据、随时可重建：[indexCache]（深域单域就是 55.6 万三角形）、
-     * 打分表 [cachedScoreTable]、第 4 星验证网格 [cachedGrid]。此前它们
-     * **没有任何释放入口** —— v1.5.57 的 `onTrimMemory` 只归还原生侧的 8 档索引
-     * （约 11MB），托管堆这几份全留着，低端机上会加剧被系统杀掉的风险。
-     *
-     * 代价：下次求解重建一次（浅域约 0.4s；深域约 9s，且只在窄场失败路径上付，
-     * 之后又会命中缓存）。当前实现是全清；若要更细粒度，可以只清深域槽。
-     *
-     * 线程安全：与写入侧用同一把 `synchronized(this)` 保护。
+     * 打分表 [scoreTableCache]、第 4 星验证网格 [catGridCache]。
      */
     fun trimCaches() {
         indexCache.clear()
-        synchronized(this) {
-            cachedScoreTable = null
-            cachedScoreTableMag = Float.NaN
-            cachedGrid = null
-            cachedGridMag = Float.NaN
-        }
+        scoreTableCache.clear()
+        catGridCache.clear()
     }
 
     /**
@@ -885,6 +882,7 @@ object LocalStarMatcher {
         width: Int,
         height: Int,
         pointingHint: PointingHint?,
+        tbl: ScoreTable = scoreTable(),
     ): IntArray {
         val eA = hipMap[t.hipA] ?: return ZERO_SCORE
         val eB = hipMap[t.hipB] ?: return ZERO_SCORE
@@ -996,7 +994,6 @@ object LocalStarMatcher {
         val nx = c0y * exz - c0z * exy
         val ny = c0z * exx - c0x * exz
         val nz = c0x * exy - c0y * exx
-        val tbl = scoreTable()
         // hint 预过滤的常量提到循环外（点积 -> 角距，避免每星多次三角函数）
         val hintRadius = if (pointingHint != null) pointingHint.radiusDeg + 45.0 else 0.0
         val hx: Double; val hy: Double; val hz: Double
@@ -1250,8 +1247,9 @@ object LocalStarMatcher {
         allowDeepRetry: Boolean = true,
         fallbackDetected: List<DetectedStar>? = null,
         fovHintDeg: Double? = null,
+        token: SolveToken? = null,
     ): LocalMatchResult? = matchWithDiagnostics(
-        detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg,
+        detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg, token,
     ).result
 
     /**
@@ -1271,18 +1269,41 @@ object LocalStarMatcher {
         allowDeepRetry: Boolean = true,
         fallbackDetected: List<DetectedStar>? = null,
         fovHintDeg: Double? = null,
-    ): MatchAttempt = synchronized(solveLock) {
-        // §0.77：整个求解在 solveLock 内执行。域（runtimeCatalogMag）是对象级状态，
-        // 必须保证它在整次求解期间不被另一个求解改写；投票轮的 worker 线程也因此
-        // 与主线程看到同一个域（**不能**用 ThreadLocal，原因见 runtimeCatalogMag）。
-        val result = matchLocked(
-            detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg,
+        token: SolveToken? = null,
+    ): MatchAttempt {
+        val ctx = MatchContext(
+            catalogMag = debugForceCatalogMag ?: PROD_CATALOG_MAG,
+            scoredCap = SCORED_MAX_CANDIDATES,
+            token = token,
         )
-        // 快照必须留在锁内 —— 出了这个块，另一个 worker 就能覆写这些单槽字段
-        MatchAttempt(result, snapshotDiagnostics())
+        val result = matchInternalContext(
+            ctx, detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg,
+        )
+        val diag = ctx.snapshotDiagnostics()
+        syncLegacyDiagnostics(ctx)
+        return MatchAttempt(result, diag)
     }
 
-    /** 锁内快照（§0.107）。**必须在 [solveLock] 内调用**。 */
+    private fun syncLegacyDiagnostics(ctx: MatchContext) {
+        debugVoteStats = ctx.voteStats
+        debugScoredStats = ctx.scoredStats
+        debugPhaseTimings = ctx.phaseTimings
+        debugScoredBest = ctx.scoredBest
+        debugScoredInFrame = ctx.scoredInFrame
+        debugShallowVoteStats = ctx.shallowVoteStats
+        debugShallowScoredStats = ctx.shallowScoredStats
+        debugShallowScoredBest = ctx.shallowScoredBest
+        debugShallowScoredInFrame = ctx.shallowScoredInFrame
+        debugDeepRejectedReason = ctx.deepRejectedReason
+        debugScoredWinPairs = ctx.scoredWinPairs
+        debugScoredExpandedPairs = ctx.scoredExpandedPairs
+        debugScoredWinSeed = ctx.scoredWinSeed
+        debugScoredWinAt = ctx.scoredWinAt
+        lastMatchUsedFallback = ctx.usedFallback
+        debugExpandDetail = ctx.expandDetail
+    }
+
+    /** 锁内快照（§0.107 历史留档）。 */
     private fun snapshotDiagnostics(): MatchDiagnostics = MatchDiagnostics(
         usedFallback = lastMatchUsedFallback,
         deepRejectedReason = debugDeepRejectedReason,
@@ -1296,7 +1317,6 @@ object LocalStarMatcher {
         shallowScoredInFrame = debugShallowScoredInFrame,
     )
 
-    /** [match] 的实现体。**必须在 [solveLock] 内调用**（见 [runtimeCatalogMag]）。 */
     private fun matchLocked(
         detected: List<DetectedStar>,
         width: Int,
@@ -1305,21 +1325,44 @@ object LocalStarMatcher {
         allowDeepRetry: Boolean,
         fallbackDetected: List<DetectedStar>? = null,
         fovHintDeg: Double? = null,
+        token: SolveToken? = null,
     ): LocalMatchResult? {
+        val ctx = MatchContext(
+            catalogMag = debugForceCatalogMag ?: PROD_CATALOG_MAG,
+            scoredCap = SCORED_MAX_CANDIDATES,
+            token = token,
+        )
+        val res = matchInternalContext(
+            ctx, detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg,
+        )
+        syncLegacyDiagnostics(ctx)
+        return res
+    }
+
+    private fun matchInternalContext(
+        ctx: MatchContext,
+        detected: List<DetectedStar>,
+        width: Int,
+        height: Int,
+        pointingHint: PointingHint?,
+        allowDeepRetry: Boolean,
+        fallbackDetected: List<DetectedStar>? = null,
+        fovHintDeg: Double? = null,
+    ): LocalMatchResult? {
+        ctx.token?.check()
         if (detected.size < 5) return null
         // §0.86：清掉上一张图的留档，避免失败页显示陈旧的浅域数字
-        debugShallowVoteStats = null
-        debugShallowScoredStats = null
-        debugShallowScoredBest = null
-        debugShallowScoredInFrame = null
-        debugDeepRejectedReason = null
-        lastMatchUsedFallback = false
+        ctx.shallowVoteStats = null
+        ctx.shallowScoredStats = null
+        ctx.shallowScoredBest = null
+        ctx.shallowScoredInFrame = null
+        ctx.deepRejectedReason = null
+        ctx.usedFallback = false
         if (pointingHint != null) {
-            val hintResult = matchInternal(detected, width, height, pointingHint)
+            ctx.token?.check()
+            val hintResult = matchInternal(ctx, detected, width, height, pointingHint)
             if (hintResult != null) return hintResult
         }
-        val shallow = matchInternal(detected, width, height, null)
-        if (shallow != null) return shallow
         // §0.88 备用星表：主星表浅域无解时，用第二个检测器的列表再试一次。两个检测器
         // 是独立证据 —— 真机实测（5031，宽场欠曝）：SEP 列表 177 颗把打分轮打到 2 万
         // 候选上限仍只有 8/206（对齐率 0.04，**真解候选根本生成不出来**），而同一张
@@ -1332,22 +1375,29 @@ object LocalStarMatcher {
         val hasAlt = fallbackDetected != null && fallbackDetected !== detected &&
             fallbackDetected.size >= 5
         if (hasAlt) {
-            val savedCap = runtimeScoredCap
-            runtimeScoredCap = SCORED_PROBE_CANDIDATES
+            ctx.token?.check()
+            val savedCap = ctx.scoredCap
+            ctx.scoredCap = SCORED_PROBE_CANDIDATES
             val probe = try {
-                matchInternal(detected, width, height, null)
+                matchInternal(ctx, detected, width, height, null)
             } finally {
-                runtimeScoredCap = savedCap
+                ctx.scoredCap = savedCap
             }
             if (probe != null) return probe
-            val alt = matchInternal(fallbackDetected!!, width, height, null)
+            ctx.token?.check()
+            val alt = matchInternal(ctx, fallbackDetected!!, width, height, null)
             if (alt != null) {
-                lastMatchUsedFallback = true
+                ctx.usedFallback = true
                 return alt
             }
+            ctx.token?.check()
             // 备用列表也没解出：回到主星表的完整预算（即未启用备用时的默认搜索）
-            val full = matchInternal(detected, width, height, null)
+            val full = matchInternal(ctx, detected, width, height, null)
             if (full != null) return full
+        } else {
+            ctx.token?.check()
+            val shallow = matchInternal(ctx, detected, width, height, null)
+            if (shallow != null) return shallow
         }
         // §0.77 深域准入闸门：深域重试的触发条件是「浅域整条阶梯无解」，而这个词对
         // **任何**失败帧都成立 —— 白天、室内、纯噪声帧全都算。相机预览是每 5~8s 一次
@@ -1356,65 +1406,45 @@ object LocalStarMatcher {
         // 浅域覆盖的宽场里，深域是给 ≤30° 窄场照片兜底的。
         if (!allowDeepRetry) return null
         if (debugDisableDeepCatalog) return null
+        ctx.token?.check()
         // §0.103（P0-2.5）深域准入：有可信 EXIF 视场且 > [DEEP_PATH_MAX_FOV_DEG] 时
         // **直接跳过深域**。两条依据：① 深域是窄场路径，宽场在浅域就该解出；浅域全败的
         // 宽场照片拿到深域"解"基本是坍缩伪影；② 深域在这种视场下过门在数学上不可达
         // （§0.87 密度换算：>66° 不可达），真机 5057 因此白跑 60 秒（PROGRESS §0.97）。
         // 判据**只用手持的 EXIF 视场**，绝不用浅域失败候选反推的视场（§0.98 的回滚教训）。
         if (shouldSkipDeepRetry(fovHintDeg)) {
-            debugDeepRejectedReason = buildString {
-                append("可信视场 ")
-                append("%.1f°".format(fovHintDeg))
-                append(" > ")
-                append("%.0f°".format(DEEP_PATH_MAX_FOV_DEG))
-                append("，深域不可达/只会出伪解，已跳过")
-            }
+            ctx.deepRejectedReason = String.format(
+                java.util.Locale.ROOT,
+                "可信视场 %.1f° > %.0f°，深域不可达/只会出伪解，已跳过",
+                fovHintDeg,
+                DEEP_PATH_MAX_FOV_DEG,
+            )
             return null
         }
         // §0.75 窄场兜底：浅星表域（mag<=4.0）整条阶梯都无解时，用深星表域
-        // （mag<=6.5）重试一次。宽场照片在浅域就能解出，永远不会走到这里 ——
-        // 这是分级而非全局加深的原因：实测全局加深会让 30° 宽场（mid30 的
-        // 9 内点弱解）从 SOLVED 变 UNSOLVED，并让 4 个窄场出现尺度坍缩错解
-        // （报出 FOV 115°~170°）。
-        //
-        // 切域方式：catalogMag() 是**五个域共用的唯一取值点** —— 三角形索引、
-        // 第 4 星验证网格（catGrid）、打分表（scoreTable）、假设展开
-        // （expandHypothesisPairs）、内点统计（countInliers）。§0.43 已用实测
-        // 记下教训：只改其中一个域「完全无效」（4.5→6.5 深扫全部 UNSOLVED 且慢
-        // 14~35 倍）。所以这里统一切到深域，而不是只换索引。
-        //
-        // §0.77 切域方式：改对象级 runtimeCatalogMag。整个求解已在 solveLock 内
-        // （见 match / matchLocked），所以这次改域不会与另一个求解交错；投票轮的
-        // worker 线程读到的也是同一个值 —— 原实现的毛病正是「写入侧加锁、读取侧裸奔」。
-        // §0.86：切深域会覆盖单槽调试字段 —— 先把「浅域（主星表）」那一轮留档。
-        // 此刻单槽里是主星表**最后一次**调用的数字（有备用列表时是完整预算那一遍），
-        // 正是失败页需要与深域并列显示的那组。
-        debugShallowVoteStats = debugVoteStats
-        debugShallowScoredStats = debugScoredStats
-        debugShallowScoredBest = debugScoredBest
-        debugShallowScoredInFrame = debugScoredInFrame
-        val savedMag = runtimeCatalogMag
-        runtimeCatalogMag = DEEP_CATALOG_MAG
+        // （mag<=6.5）重试一次。
+        ctx.shallowVoteStats = ctx.voteStats
+        ctx.shallowScoredStats = ctx.scoredStats
+        ctx.shallowScoredBest = ctx.scoredBest
+        ctx.shallowScoredInFrame = ctx.scoredInFrame
+        val savedMag = ctx.catalogMag
+        ctx.catalogMag = DEEP_CATALOG_MAG
         val deep = try {
-            matchInternal(detected, width, height, null)
+            ctx.token?.check()
+            matchInternal(ctx, detected, width, height, null)
         } finally {
-            runtimeCatalogMag = savedMag
+            ctx.catalogMag = savedMag
         }
         // §0.75 深域是**窄场路径**，对它的解再设一道视场上界（§0.103 起为 45°）。
-        //
-        // 为什么需要：深域候选密度是浅域的 16 倍，尺度坍缩型伪影随之增多 ——
-        // 实测 6 个窄场从 UNSOLVED 变成 WRONG，报出视场 104°~170° 而真值只有
-        // 1°~5°。而一个解若声称视场远超窄场上界，它本质是宽场；宽场在浅域就该解出
-        // （宽场回归 12/12），浅域整条阶梯都无解的宽场照片拿到这种"解"，基本都是
-        // 坍缩伪影。窄场目标（≤20°）远低于此界，不受影响。
         if (deep != null &&
             maxOf(deep.solve.fieldWidthDeg, deep.solve.fieldHeightDeg) > DEEP_PATH_MAX_FOV_DEG
         ) {
-            debugDeepRejectedReason = "深域解视场 %.1f° 超出窄场上界 %.0f°，按坍缩伪解拒绝"
-                .format(
-                    maxOf(deep.solve.fieldWidthDeg, deep.solve.fieldHeightDeg),
-                    DEEP_PATH_MAX_FOV_DEG,
-                )
+            ctx.deepRejectedReason = String.format(
+                java.util.Locale.ROOT,
+                "深域解视场 %.1f° 超出窄场上界 %.0f°，按坍缩伪解拒绝",
+                maxOf(deep.solve.fieldWidthDeg, deep.solve.fieldHeightDeg),
+                DEEP_PATH_MAX_FOV_DEG,
+            )
             return null
         }
         // §0.103（P0-2.5）：标记解来源域 —— 调用方（识别日志/结果页）据此知道
@@ -1423,11 +1453,13 @@ object LocalStarMatcher {
     }
 
     private fun matchInternal(
+        ctx: MatchContext,
         detected: List<DetectedStar>,
         width: Int,
         height: Int,
         pointingHint: PointingHint?,
     ): LocalMatchResult? {
+        ctx.token?.check()
         val (t1, t2) = voteThresholds(detected.map { it.brightness })
         val tStart = System.currentTimeMillis()
         var msPrimary = 0L; var msMulti = 0L; var msWeak = 0L
@@ -1437,25 +1469,27 @@ object LocalStarMatcher {
         // （v1.5.8 的双阈值曾按"每 parity × 每阈值"各投一次，投票最多 4 轮，
         //  失败/弱解照片识别耗时从 ~2s 涨到 ~9s；本重构降回最多 2 轮，成功率不变）
         val tA = System.currentTimeMillis()
-        val primaryPairs = votePairs(detected, width, height, t1, pointingHint = pointingHint)
-        var best = bestCandidate(detected, width, height, primaryPairs, pointingHint)
+        val primaryPairs = votePairs(ctx, detected, width, height, t1, pointingHint = pointingHint)
+        var best = bestCandidate(detected, width, height, primaryPairs, pointingHint, mag = ctx.catalogMag)
         msPrimary = System.currentTimeMillis() - tA
         if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
-            debugPhaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
+            ctx.phaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
             return best
         }
         // §0.43 稀疏场重投：单候选轮完全无解时，用每星 top-3 候选重投一轮
         // （仅当无解，有解路径完全不动；伪解由 plausibleFov/skySpan 门槛把守）。
         if (best == null) {
+            ctx.token?.check()
             val tB = System.currentTimeMillis()
             best = bestCandidate(
                 detected, width, height,
-                votePairs(detected, width, height, t1, multi = true, pointingHint = pointingHint),
+                votePairs(ctx, detected, width, height, t1, multi = true, pointingHint = pointingHint),
                 pointingHint,
+                mag = ctx.catalogMag,
             )
             msMulti = System.currentTimeMillis() - tB
             if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
-                debugPhaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
+                ctx.phaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
                 return best
             }
         }
@@ -1466,6 +1500,7 @@ object LocalStarMatcher {
         // §0.71：下限同样改为相对值（原 25 @box-blur top≈4154 → 0.0060×top），
         // 否则 SEP flux 量纲下 25 会把弱星轮也堵死。
         if (best == null) {
+            ctx.token?.check()
             val tC = System.currentTimeMillis()
             val desc = detected.map { it.brightness }.sortedDescending()
             val anchor20 = desc.getOrElse(19) { 0f }
@@ -1477,28 +1512,32 @@ object LocalStarMatcher {
             if (weakT < t1) {
                 best = bestCandidate(
                     detected, width, height,
-                    votePairs(detected, width, height, weakT, pointingHint = pointingHint),
+                    votePairs(ctx, detected, width, height, weakT, pointingHint = pointingHint),
                     pointingHint,
+                    mag = ctx.catalogMag,
                 )
                 if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
                     msWeak = System.currentTimeMillis() - tC
-                    debugPhaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
+                    ctx.phaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
                     return best
                 }
             }
             msWeak = System.currentTimeMillis() - tC
         }
         if (t2 != t1) {
+            ctx.token?.check()
             val tD = System.currentTimeMillis()
-            val backupPairs = votePairs(detected, width, height, t2, pointingHint = pointingHint)
-            var alt = bestCandidate(detected, width, height, backupPairs, pointingHint)
+            val backupPairs = votePairs(ctx, detected, width, height, t2, pointingHint = pointingHint)
+            var alt = bestCandidate(detected, width, height, backupPairs, pointingHint, mag = ctx.catalogMag)
             msBackup = System.currentTimeMillis() - tD
             if (alt == null) {
+                ctx.token?.check()
                 val tE = System.currentTimeMillis()
                 alt = bestCandidate(
                     detected, width, height,
-                    votePairs(detected, width, height, t2, multi = true, pointingHint = pointingHint),
+                    votePairs(ctx, detected, width, height, t2, multi = true, pointingHint = pointingHint),
                     pointingHint,
+                    mag = ctx.catalogMag,
                 )
                 msBackupMulti = System.currentTimeMillis() - tE
             }
@@ -1514,11 +1553,12 @@ object LocalStarMatcher {
         // 14~19 票）。但"逐候选拟合 + 数对齐星数"分离度极高：真候选对齐
         // 16.8/25 颗，伪候选仅 1.0/25（实测同一张照片）。故投票全败时按此打分。
         if (best == null && !debugDisableScored) {
+            ctx.token?.check()
             val tF = System.currentTimeMillis()
-            best = scoredRound(detected, width, height, pointingHint)
+            best = scoredRound(ctx, detected, width, height, pointingHint)
             msScored = System.currentTimeMillis() - tF
         }
-        debugPhaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;" +
+        ctx.phaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;" +
                 "backup=$msBackup;backupMulti=$msBackupMulti;scored=$msScored;" +
                 "total=${System.currentTimeMillis() - tStart}"
         return best
@@ -1534,12 +1574,14 @@ object LocalStarMatcher {
      * 而投票轮同一组真对应只得 4~11 票、伪对应 14~19 票（被淹没）。
      */
     private fun scoredRound(
+        ctx: MatchContext,
         detected: List<DetectedStar>,
         width: Int,
         height: Int,
         pointingHint: PointingHint?,
     ): LocalMatchResult? {
-        val idx = index()
+        val idx = index(ctx.catalogMag)
+        val tbl = scoreTable(ctx.catalogMag)
         val (t1, _) = voteThresholds(detected.map { it.brightness })
         val workIdx = detected.indices.filter { detected[it].brightness >= t1 * 0.5f }.take(45)
         val work = workIdx.map { detected[it] }
@@ -1553,13 +1595,13 @@ object LocalStarMatcher {
         var bestPairs: List<Pair<Int, StarEntry>>? = null
         val seen = HashSet<Long>()
         val tStart = System.nanoTime()
-        val capThisRound = runtimeScoredCap
+        val capThisRound = ctx.scoredCap
         var nCand = 0L
         var nScored = 0L
         var earlyOut = false
         var cutByCap = false
         var cutByTime = false
-        debugScoredWinAt = -1
+        ctx.scoredWinAt = -1
 
         for (pi in work.indices) {
             val a = work[pi]
@@ -1580,11 +1622,6 @@ object LocalStarMatcher {
                     val r3 = sides[2] / sides[0]
                     if (r2 < 0.12f) continue
                     // 打分轮查询：**角度比键**（严格窗 + 宽松窗）。
-                    // §0.71b 曾尝试在这里用投影键，实测在旧照片（南宁）上候选数从
-                    // ~2.3 万暴涨到 ~7.2 万，且最佳候选 inFrame=160（尺度坍缩型错误
-                    // 模型）→ 旧照片从 SOLVED 回归 UNSOLVED。打分轮真正的修复在
-                    // scoreHypothesis（y 翻转 + 向量平均中心），候选召回用角度比 +
-                    // 宽窗已足够。该投影键已在 §0.77 连同 projMap 一并删除。
                     val merged = HashMap<Long, TriEntry>()
                     for (key in quantizeKeys(r2, r3, window = 2)) {
                         idx.triMap[key]?.let { list ->
@@ -1607,7 +1644,7 @@ object LocalStarMatcher {
                     nCand += candidates.size
                     for (t in candidates) {
                         nScored++
-                        val sc = scoreHypothesis(work, a, b, c, t, width, height, pointingHint)
+                        val sc = scoreHypothesis(work, a, b, c, t, width, height, pointingHint, tbl)
                         val aligned = sc[0]
                         val inFrame = sc[1]
                         val key = triKey(t)
@@ -1619,19 +1656,18 @@ object LocalStarMatcher {
                             if (eA != null && eB != null && eC != null) {
                                 bestScore = aligned
                                 bestInFrame = inFrame
-                                debugScoredWinAt = nScored
+                                ctx.scoredWinAt = nScored
                                 bestPairs = listOf(
                                     workIdx[pi] to eA,
                                     workIdx[bi] to eB,
                                     workIdx[ci] to eC,
                                 )
-                                debugScoredWinSeed = "a=(%.1f,%.1f)h%d b=(%.1f,%.1f)h%d c=(%.1f,%.1f)h%d".format(
+                                ctx.scoredWinSeed = String.format(
+                                    java.util.Locale.ROOT,
+                                    "a=(%.1f,%.1f)h%d b=(%.1f,%.1f)h%d c=(%.1f,%.1f)h%d",
                                     a.x, a.y, t.hipA, b.x, b.y, t.hipB, c.x, c.y, t.hipC,
                                 )
                                 // 提前退出：仅在**高置信**真解形态下收工。
-                                // 注意门槛不能压到 minAligned()/minAlignRate() 本身——
-                                // 那会让第一个勉强达标的候选就终止搜索，选到次优解
-                                // （实测用户照片 inl 15 → 9、scale 122.8 → 118.6）。
                                 if (inFrame >= SCORED_MIN_IN_FRAME &&
                                     aligned >= SCORED_EARLY_ALIGNED &&
                                     aligned.toFloat() / inFrame >= SCORED_EARLY_RATE
@@ -1646,12 +1682,13 @@ object LocalStarMatcher {
                             earlyOut = true
                             break
                         }
-                        if ((nScored and 0x3F) == 0L &&
-                            (System.nanoTime() - tStart) / 1_000_000 > SCORED_HARD_TIME_LIMIT_MS
-                        ) {
-                            cutByTime = true
-                            earlyOut = true
-                            break
+                        if ((nScored and 0x3F) == 0L) {
+                            ctx.token?.check()
+                            if ((System.nanoTime() - tStart) / 1_000_000 > SCORED_HARD_TIME_LIMIT_MS) {
+                                cutByTime = true
+                                earlyOut = true
+                                break
+                            }
                         }
                     }
                     if (earlyOut) break
@@ -1660,10 +1697,10 @@ object LocalStarMatcher {
             }
             if (earlyOut) break
         }
-        debugScoredBest = bestScore
-        debugScoredInFrame = bestInFrame
-        debugScoredWinPairs = bestPairs?.size
-        debugScoredStats = "cand=$nCand scored=$nScored work=${work.size} " +
+        ctx.scoredBest = bestScore
+        ctx.scoredInFrame = bestInFrame
+        ctx.scoredWinPairs = bestPairs?.size
+        ctx.scoredStats = "cand=$nCand scored=$nScored work=${work.size} " +
             "ms=${(System.nanoTime() - tStart) / 1_000_000}" +
             (
                 if (cutByCap) {
@@ -1686,9 +1723,9 @@ object LocalStarMatcher {
             return null
         }
         // bestCandidate 需要 ≥4 对：用获胜候选的拟合把全部对齐星补进对应集
-        val expanded = expandHypothesisPairs(bestPairs, detected, width, height)
-        debugScoredExpandedPairs = expanded?.size
-        return bestCandidate(detected, width, height, expanded ?: bestPairs, pointingHint)
+        val expanded = expandHypothesisPairs(bestPairs, detected, width, height, ctx)
+        ctx.scoredExpandedPairs = expanded?.size
+        return bestCandidate(detected, width, height, expanded ?: bestPairs, pointingHint, mag = ctx.catalogMag)
     }
 
     /**
@@ -1700,30 +1737,15 @@ object LocalStarMatcher {
         detected: List<DetectedStar>,
         width: Int,
         height: Int,
+        ctx: MatchContext,
     ): List<Pair<Int, StarEntry>>? {
         if (seed.size < 3) {
             return null
         }
-        // §0.71c 重写：**用 buildWcs 生成 WCS 再投影**，替代手写逆映射。
-        //
-        // 原实现手写逆映射（u = (a(X-tx)+b(Y-ty))/det + cx 等），但该公式没有
-        // 复刻 buildWcs 的镜像语义：fitPairs 用「中心化屏幕像素」与「北正切平面」
-        // 拟合，得到的是蕴含一次镜像的相似变换；buildWcs 用 CD=[a,b;b,-a]（或
-        // mirror 变体）显式补偿。手写逆映射漏了补偿 → 真值三点反投偏出 50~220px，
-        // 扩展出的全是错误对应（实测 expand 返回 null，打分轮找到的 22 内点解
-        // 因此作废）。
-        //
-        // 正确做法：两种 mirror 各试一次（主路径 fitAndVerify 正是这样），
-        // 取扩展对应多者。
         var best: List<Pair<Int, StarEntry>>? = null
         for (mirror in booleanArrayOf(false, true)) {
             val fp0 = fitPairs(detected, seed, width, height, mirror) ?: continue
             var fp: FitParams = fp0
-            // §0.71e 切平面原点迭代到图像中心（与 fitAndVerify §0.63 同思路）。
-            // 打分轮的胜出模型把原点收敛到了画面中心；这里若沿用 3 颗种子星的
-            // 平均位置当原点，宽场下（种子星可离中心 30°+）外推模型与打分模型
-            // 差出整个视场 —— 实测 5087/5092 打分轮 aligned=24（对齐率 0.75，
-            // 远超 0.20 门槛）但扩展返回 null，24 内点解整体作废、照片 UNSOLVED。
             repeat(SCORED_ORIGIN_ITERATIONS) {
                 val w = buildWcs(fp, width, height, mirror)
                 val (cRa, cDec) = w.fitsPixelToSky(width / 2.0 + 0.5, height / 2.0 + 0.5)
@@ -1735,7 +1757,7 @@ object LocalStarMatcher {
             val wcs = buildWcs(fp, width, height, mirror)
             val out = ArrayList<Pair<Int, StarEntry>>()
             val used = HashSet<Int>()
-            val mag = catalogMag()
+            val mag = ctx.catalogMag
             for (star in StarCatalogData.stars) {
                 if (star.mag > mag) continue
                 val p = wcs.skyToScreen(star.ra, star.dec, width, height)
@@ -1764,8 +1786,11 @@ object LocalStarMatcher {
             if (out.size >= 3 && (best == null || out.size > best.size)) {
                 best = out
             }
-            debugExpandDetail = "mirror=$mirror out=${out.size} " +
-                "center=(%.3f,%.3f)".format(wcs.crval1, wcs.crval2)
+            ctx.expandDetail = String.format(
+                java.util.Locale.ROOT,
+                "mirror=%s out=%d center=(%.3f,%.3f)",
+                mirror, out.size, wcs.crval1, wcs.crval2,
+            )
         }
         return best
     }
@@ -1779,14 +1804,18 @@ object LocalStarMatcher {
         sb.append("detected=${detected.size} ")
         val (t1, t2) = voteThresholds(detected.map { it.brightness })
         sb.append("t1=$t1 t2=$t2 ")
+        val mag = debugForceCatalogMag ?: PROD_CATALOG_MAG
+        val traceCtx = MatchContext(catalogMag = mag)
         for ((tag, t) in listOf("t1" to t1, "t2" to t2)) {
-            val pairs = votePairs(detected, width, height, t)
+            val pairs = votePairs(traceCtx, detected, width, height, t)
             sb.append("[$tag] pairs=${pairs.size} ")
             for (mx in listOf(false, true)) {
-                val r = fitAndVerify(detected, width, height, pairs, mirrorX = mx)
+                val r = fitAndVerify(detected, width, height, pairs, mirrorX = mx, mag = mag)
                 if (r != null) {
                     sb.append(
-                        "%s=%d星[ra=%.1f dec=%.1f fov=%.1f] ".format(
+                        String.format(
+                            java.util.Locale.ROOT,
+                            "%s=%d星[ra=%.1f dec=%.1f fov=%.1f] ",
                             if (mx) "mir" else "nor",
                             r.inlierCount, r.solve.raDeg, r.solve.decDeg,
                             maxOf(r.solve.fieldWidthDeg, r.solve.fieldHeightDeg),
@@ -1811,10 +1840,11 @@ object LocalStarMatcher {
         height: Int,
         pairs: List<Pair<Int, StarEntry>>,
         pointingHint: PointingHint? = null,
+        mag: Float = PROD_CATALOG_MAG,
     ): LocalMatchResult? {
         if (pairs.size < 4) return null
-        val normal = fitAndVerify(detected, width, height, pairs, mirrorX = false)
-        val mirrored = fitAndVerify(detected, width, height, pairs, mirrorX = true)
+        val normal = fitAndVerify(detected, width, height, pairs, mirrorX = false, mag = mag)
+        val mirrored = fitAndVerify(detected, width, height, pairs, mirrorX = true, mag = mag)
         return listOfNotNull(normal, mirrored)
             .filter { it.inlierCount >= 6 && plausibleFov(it.solve.pixScaleArcsec, width, height) }
             .filter { skySpanConsistent(it, detected) }
@@ -1873,7 +1903,7 @@ object LocalStarMatcher {
         return fovDeg in 0.05..180.0
     }
 
-    /** 三角形投票 → 候选对应集（照片星下标 → 星表星）。 */
+    /** 三角形投票 → 候选对应集（照片星下标 → 星表星）。兼容历史调用。 */
     internal fun votePairs(
         detected: List<DetectedStar>,
         width: Int,
@@ -1881,8 +1911,25 @@ object LocalStarMatcher {
         threshold: Float = voteBrightnessThreshold(detected.map { it.brightness }),
         multi: Boolean = false,
         pointingHint: PointingHint? = null,
+        token: SolveToken? = null,
+    ): List<Pair<Int, StarEntry>> = votePairs(
+        MatchContext(token = token),
+        detected, width, height, threshold, multi, pointingHint,
+    )
+
+    /** 三角形投票 → 候选对应集（带 MatchContext 上下文，支持无锁并发）。 */
+    internal fun votePairs(
+        ctx: MatchContext,
+        detected: List<DetectedStar>,
+        width: Int,
+        height: Int,
+        threshold: Float = voteBrightnessThreshold(detected.map { it.brightness }),
+        multi: Boolean = false,
+        pointingHint: PointingHint? = null,
     ): List<Pair<Int, StarEntry>> {
-        val idx = index()
+        ctx.token?.check()
+        val idx = index(ctx.catalogMag)
+        val grid = catGrid(ctx.catalogMag)
 
         // 1) 照片局部三角形：只用亮度足以进入星表索引的亮星（阈值由调用方
         //    依据双通道方案传入，见 voteThresholds），取前 45 颗参与投票。
@@ -1898,7 +1945,7 @@ object LocalStarMatcher {
         // 多线程投票：每颗照片星的三角形投票相互独立（key 高位含 photoIdx），
         // 按照片星分块并行，各线程本地累加后合并 —— 结果与单线程完全一致。
         if (work.size <= 8) {
-            voteChunk(votes, work, 0, work.size, idx, maxSide)
+            voteChunk(votes, work, 0, work.size, idx, maxSide, grid)
         } else {
             val chunkCount = Runtime.getRuntime().availableProcessors().coerceIn(2, work.size)
             val chunkSize = (work.size + chunkCount - 1) / chunkCount
@@ -1911,11 +1958,12 @@ object LocalStarMatcher {
                 if (from >= to) break
                 futures.add(votePool.submit(Callable {
                     val local = HashMap<Long, Int>()
-                    voteChunk(local, work, from, to, idx, maxSide)
+                    voteChunk(local, work, from, to, idx, maxSide, grid)
                     local
                 }))
             }
             for (f in futures) {
+                ctx.token?.check()
                 val local = f.get()
                 for ((k, v) in local) votes[k] = (votes[k] ?: 0) + v
             }
@@ -1943,8 +1991,8 @@ object LocalStarMatcher {
                 topV = maxOf(topV, s[0])
                 if (s.size > 1) sumMargin += s[0].toDouble() / s[1]
             }
-            debugVoteStats = "work=${work.size} votedStars=$nPhoto topVote=$topV " +
-                "avgMargin=${if (nPhoto > 0) "%.2f".format(sumMargin / nPhoto) else "-"}"
+            val avgMarginStr = if (nPhoto > 0) String.format(java.util.Locale.ROOT, "%.2f", sumMargin / nPhoto) else "-"
+            ctx.voteStats = "work=${work.size} votedStars=$nPhoto topVote=$topV avgMargin=$avgMarginStr"
         }
         val pairs = ArrayList<Pair<Int, StarEntry>>()
         for ((photoIdx, m) in byPhoto) {
@@ -2068,6 +2116,7 @@ object LocalStarMatcher {
         to: Int,
         idx: StarIndex,
         maxSide: Float,
+        grid: Map<Int, List<StarEntry>> = catGrid(),
     ) {
         // §0.74 计数器：局部累加、退出时一次性并入原子量。内循环每轮要扫数百万条目，
         // 在那里做 AtomicLong 自增会把生产路径拖慢（实测总时长反升）。
@@ -2167,7 +2216,7 @@ object LocalStarMatcher {
                     for (q in 0 until n) candidates.add(sel[q]!!)
 
                     // 3) 顶点对应投票：先做几何验证（第 4 星校验），只投验证通过的候选
-                    val verified = candidates.filter { verifyCandidate(a, b, c, it, nbrs, work) }
+                    val verified = candidates.filter { verifyCandidate(a, b, c, it, nbrs, work, grid) }
                     for (t in verified) {
                         vote(votes, pi, t.hipA)
                         vote(votes, bi, t.hipB)
@@ -2209,33 +2258,23 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
         ) { r -> Thread(r, "starcam-vote").apply { isDaemon = true } }
     }
 
-    @Volatile
-    private var cachedGrid: HashMap<Int, MutableList<StarEntry>>? = null
-
-    /** [cachedGrid] 构建时使用的星等上限（调试覆盖变化时用于失效重建） */
-    @Volatile
-    private var cachedGridMag: Float = Float.NaN
+    private val catGridCache = java.util.concurrent.ConcurrentHashMap<Float, Map<Int, List<StarEntry>>>()
 
     /** 星表赤道网格（5°×5° 赤经/赤纬格），用于验证时的快速最近星查询 */
-    private fun catGrid(): HashMap<Int, MutableList<StarEntry>> {
-        val mag = catalogMag()
-        cachedGrid?.let { if (cachedGridMag == mag) return it }
-        synchronized(this) {
-            cachedGrid?.let { if (cachedGridMag == mag) return it }
+    private fun catGrid(mag: Float = catalogMag()): Map<Int, List<StarEntry>> {
+        return catGridCache.computeIfAbsent(mag) { m ->
             val grid = HashMap<Int, MutableList<StarEntry>>()
             // 验证网格只收录照片可检测的亮星（与投票索引同域，见 catalogMag）：
             // §0.42 扩容新增的暗星照片里检测不到，放进来会让假候选的"第 4 星
             // 外推撞星"通过率上升 → 假阳性回归（apod5/pleiades 实测），
             // 而真候选外推应命中的是可检测亮星，不受影响。
             for (star in StarCatalogData.stars) {
-                if (star.mag > mag) continue
+                if (star.mag > m) continue
                 val col = (((star.ra % 360.0) + 360.0) % 360.0 / 5.0).toInt()
                 val row = ((star.dec + 90.0) / 5.0).toInt().coerceIn(0, 35)
                 grid.getOrPut(col * 1000 + row) { ArrayList() }.add(star)
             }
-            cachedGrid = grid
-            cachedGridMag = mag
-            return grid
+            grid
         }
     }
 
@@ -2251,8 +2290,12 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
     }
 
     /** (ra, dec) 附近 [tolDeg] 内最近的星表星，无则 null */
-    private fun nearestStarInGrid(ra: Double, dec: Double, tolDeg: Double): StarEntry? {
-        val grid = catGrid()
+    private fun nearestStarInGrid(
+        ra: Double,
+        dec: Double,
+        tolDeg: Double,
+        grid: Map<Int, List<StarEntry>> = catGrid(),
+    ): StarEntry? {
         val col0 = ((((ra - 0.5) % 360.0) + 360.0) % 360.0 / 5.0).toInt()
         val col1 = ((((ra + 0.5) % 360.0) + 360.0) % 360.0 / 5.0).toInt()
         val row0 = ((dec - 0.5 + 90.0) / 5.0).toInt().coerceIn(0, 35)
@@ -2293,6 +2336,7 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
         t: TriEntry,
         nbrs: List<Pair<Int, Float>>,
         stars: List<DetectedStar>,
+        grid: Map<Int, List<StarEntry>> = catGrid(),
     ): Boolean {
         val eA = hipMap[t.hipA] ?: return false
         val eB = hipMap[t.hipB] ?: return false
@@ -2354,7 +2398,7 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
                 val xm = s * d.x - ss * d.y + tx
                 val ym = ss * d.x + s * d.y + ty
                 val (raP, decP) = tanInverse(if (negX) -xm else xm, ym, ra0, dec0)
-                if (nearestStarInGrid(raP, decP, 0.35) != null) return true
+                if (nearestStarInGrid(raP, decP, 0.35, grid) != null) return true
             }
         }
         return false
@@ -2458,7 +2502,7 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
             printed++
             val trueHip = actual[pi]
             val trueV = if (trueHip != null) votes[(pi.toLong() shl 20) or trueHip.toLong()] ?: 0 else -1
-            sb.append("P#$pi b=${"%.0f".format(work[pi].brightness)}" +
+            sb.append("P#$pi b=${String.format(java.util.Locale.ROOT, "%.0f", work[pi].brightness)}" +
                 (if (trueHip != null) " trueHip=$trueHip(trueV=$trueV)" else " noTruth") +
                 " : " + sorted.joinToString { "hip=${it.key and 0xFFFFF}(v=${it.value})" } + "\n")
         }
@@ -2575,6 +2619,7 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
         height: Int,
         pairs: List<Pair<Int, StarEntry>>,
         mirrorX: Boolean,
+        mag: Float = PROD_CATALOG_MAG,
     ): LocalMatchResult? {
         if (pairs.size < 4) return null
         val rng = Random(42)
@@ -2647,7 +2692,7 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
         val finalWcs = buildWcs(refined, width, height, mirrorX)
 
         // 全星表验证
-        val inliers = countInliers(finalWcs, detected, width, height)
+        val inliers = countInliers(finalWcs, detected, width, height, mag = mag)
         if (inliers < 5) return null
 
         val matched = bestInliers.mapNotNull { (pi, star) ->
@@ -2855,12 +2900,17 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
         return DoubleArray(n) { m[it][n] / m[it][it] }
     }
 
-    private fun countInliers(wcs: WcsTransform, detected: List<DetectedStar>, width: Int, height: Int): Int {
+    private fun countInliers(
+        wcs: WcsTransform,
+        detected: List<DetectedStar>,
+        width: Int,
+        height: Int,
+        mag: Float = PROD_CATALOG_MAG,
+    ): Int {
         var count = 0
         // 只统计照片可检测的亮星（与投票索引/验证网格同域，见 catalogMag）——
         // §0.42 扩容的暗星在 2200px 照片里检测不到，遍历它们既虚增内点
         // （假解更易过门槛）又拖慢 10 倍（实测单张 3~5s → 20~50s）。
-        val mag = catalogMag()
         for (star in StarCatalogData.stars) {
             if (star.mag > mag) continue
             val p = wcs.skyToScreen(star.ra, star.dec, width, height)

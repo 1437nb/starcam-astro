@@ -5,10 +5,9 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-15（§0.103 闸门真值台上线：45° 跨线双样本 + 四路对照；v1.5.77 待真机验证后发版）
+**最后更新**：2026-10-25（§0.120 图层快捷开关与放大查看器图层状态双向同步：识别完成后支持直接开关星星名字与其它图层，导出纯净连线图；修复放大查看器图层与预览图不一致 Bug；彻底解决 M45 与星名重叠、边缘星名越界裁切；v1.5.86 交付）
 **当前基线**：v1.5.76（versionCode 96，**已发版** 2026-10-15，tag `v1.5.76`）
-**工作区**：`/opt/starword`（Linux 服务器；2026-10-08 由迁移包解出；原 Windows `C:\starword`
-已归档为 `starword-migration-20261005.7z`）
+**工作区**：`C:\starcam`（本地 Windows 11 主力开发；i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机编译）
 **构建环境**：本服务器 1.87GB 内存**无法完成 app 模块的 Kotlin 编译**（2026-10-08
 实测 4 次均被内核 OOM 杀掉）——本机只做改码/文档/Python 工具；**全量单测与打包用
 验证机 `ec2-hk`**（3.8GB，2026-10-10 起跑通全量 215 项，见 `docs/88`；别名与密钥在
@@ -74,7 +73,7 @@
 
 6. **AR 视场/地平线真机复测** — v1.5.47 的修复（磁偏角真北、3D 航向校准、地平线四边求交、
    主摄 FOV 优选）尚未在真机确认。**需实体手机，只能由开发者执行。**
-7. **今日天象卡片** — 月相、行星可见性、当晚亮点。
+7. ~~**今日天象卡片**~~ — **已完成**（§0.116 / v1.5.82）：基于 `SolarSystemEphemeris` 纯 JVM 历表解算月相照度、月龄、主要亮行星（金木土火水）距角视窗及观星建议，在首页呈现 Material 3 `TonightSkyCard`。
 8. **工程化**（CI 构建、F-Droid 发布准备）— 建议等有外部用户后再投入。
 9. 可选细节：木星伽利略卫星、土星环倾角对星等的影响（v1.5.48 遗留）。
 10. **银河密场的 blob 污染**（§0.76 新发现，低优先级）：10°~20° 的 4 个失败场全是
@@ -85,13 +84,11 @@
     注意真实长焦照片的星云比 DSS 拉伸图暗得多，实际影响可能远小于回归所示。
 11. **代码审查遗留（已修 18 条）** —— 完整清单见
     `docs/72-代码审查问题清单-20260922.md`（已标注哪些修掉了）。
-    **已修**：A1~A8 全部 + B1 B4 B5 B6 B7 B8 B9 B10 B11 B12 B15。
-    **未修 4 条 + C 类**：
+    **已修**：A1~A8 全部 + B1 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B14 B15。
+    **未修 2 条 + C 类**：
     - **B2**：视场 90° 上界是窄场路径唯一防线，76.9~90° 的坍缩伪解可能直达用户
-    - **B3**：AR 视场标定会被深域解污染（写进用户持久化设置）
     - **B13**：`BatchScreen` 用消息文案前缀判成败 —— 改文案即静默错判
-    - **B14**：letterbox 硬编码 `streamAspect = 3/4` —— AR 视场修复里
-      **唯一无法离线证伪的假设**，只能真机复测
+    - ~~**B14**~~：已在 Sprint 4 (§0.115) 纯函数化为 `CameraMath.computeFitCenterRect` 并全量单测覆盖
     - C 类全部（注释漂移、i18n 两套机制并存、死代码）+ A6/A7 收尾小项（见 `docs/74` 第四节）
     ⚠️ **§0.78 / §0.81 / §0.82 的改动都没有离线测试能覆盖渲染、相机与内存**，
     真机验证清单见 `docs/74` 第五节。
@@ -107,6 +104,91 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-10-25（§0.120：图层快捷开关与放大查看器图层状态双向同步，v1.5.86 交付）**：
+  - **背景与原因**：
+    1. 用户需求：图片识别完毕后希望能在界面上自由开关是否标记星星名字，并希望能直接导出只有星座连线的纯净图片；
+    2. Bug 1：M45 昴星团与内部最亮星昴宿六（Alcyone）坐标完全重合，原有渲染逻辑在同一屏幕位置叠加打印，文字挤成一团（显示为「昂M45 昂星团」）；类似问题存在于 M42 与伐三；
+    3. Bug 2：靠画幅边缘的恒星（如顶部卷舌二、天船三，左侧参宿一/二/三）名字被画幅边缘切成两半，或伸出图片边界；
+    4. Bug 3（用户即时反馈）：在预览图中只勾选了星座连线和星座名称，点击图片进入全屏双指放大查看器时，大图依然显示了所有图层（包含星名与深空天体），状态未同步。
+  - **核心方案与修复**：
+    1. **图层快捷 FilterChip 栏**：在 `ResultScreen` 照片下方增加横向滚动的快捷图层操作栏，支持一键切换「星星名字」（`starNames`）、「星座连线」（`lines`）、「星座名称」（`constellationNames`）、「深空天体」（`messier`）及「月亮与行星」（`planets`），点击即刻重绘画面与大图查看器；
+    2. **纯净星座连线图导出**：在 `LayerFlags` 中预置 `LINES_ONLY` 常量，相册保存栏增加双按钮：`📐 仅星座连线`（一键导出背景星空 + 纯净星座连线图）与 `💾 保存当前标注`（导出根据当前 FilterChip 挑选的标注组合）；
+    3. **梅西耶天体近邻星名抑制**：在 `LayeredRenderer` 中，当梅西耶图层开启时，中心距离小于 28dp（~56px）的恒星自动抑制星名标注（M45 内部的昴宿六、M42 内部的伐三不再与深空标签重复绘制冲突）；
+    4. **4 象限防碰撞与边界安全收敛算法**：
+       - 剔除超出画幅坐标范围的恒星；按星等升序排列（亮星优先占位）；
+       - 采用纯 JVM 轻量 `BoundingBox` 进行全局冲突检测；
+       - 为恒星依次尝试右上（默认）、右下（专门适配顶部边缘星）、左上（专门适配右侧边缘星）、左下 4 个象限；
+       - 若 4 象限均碰撞，执行安全边界收敛，且对严重冲突的暗星进行安全避让舍弃；
+       - 标签文字严格约束在安全边界内，彻底根除文字被截断或超出画幅的问题；
+    5. **大图放大查看器与预览图图层状态闭环同步**：
+       - 重构 `StarPhotoOverlay` 的点击手势闭包，使用 `rememberUpdatedState` 与动态 key 捕获即时 `layerFlags`，消除初次挂载时 `LayerFlags.ALL` 的静态闭包快照；
+       - `hitTestObjectAt` 增加图层感知，当关闭星名或行星时不再拦截点击；
+       - `ZoomableImageViewer` 绑定 `remember(initialFlags)` 与 `remember(annotated)` 动态重置，新增 `onFlagsChange` 回调实现大图与主页图层双向同步；补齐「月亮与行星」开关项。
+  - **测试与验证**：
+    - 新增 `LayeredRendererLabelTest` 单元测试，6/6 全绿通过；
+    - 运行 `OfflinePhotosTruthTest` 真实照片管线回归，12/12 满分通过；
+    - `python tools/check_secrets.py` 扫描 319 个文件 0 泄露；
+    - 完成 `1.5.86` 正式 Release 构建，官方签名验签通过，产物 `StarCam-v1.5.86-fix-viewer-layer-sync-release.apk`（15.8 MB，SHA-256 `068373FE34C0D9FF1DCEEE5F9785E449E10A179B71BA959549DBBF26257D03BA`）。
+
+- **2026-10-25（§0.119：公开演示照片真值表双引擎交叉校准）**：
+  - **背景与原因**：12 张内置公开演示照片早期真值表（`DemoPhotoTruth.kt`）部分条目源自早期人工目视粗标（如 5076 记为 55.3, 26.0；5087 记为 351.2, 24.3），与机器高精定标存在约 1.5°~2.5° 的粗标偏差；
+  - **双引擎交叉校验**：利用官方云端服务（`nova.astrometry.net`）与本地自研匹配引擎（`docs/91` CI 基线）对 12 张照片进行全量高精交叉定标；两套独立引擎在 5076、5087、5092 等照片上的天球中心解算结果精确吻合至小数点后两位（相差 $<0.01^\circ$）；
+  - **真值表精度升级**：重构 `DemoPhotoTruth.byId` 12 组真值条目，全面升级为双引擎交叉锚定物理真值；
+  - **自动化测试验证**：运行 `OfflinePhotosTruthTest`（生产编排管线），12 张公开演示照片全部 `TRUE-SOLVE`（12/12 满分通过，0 failure / 0 miss / 0 false-positive）。
+
+- **2026-10-25（§0.118：修复相册多选按钮英文换行截断与识别日志多语言缺失，v1.5.84 交付）**：
+  - **根因分析**：
+    1. 相册（`GalleryScreen`）顶部右侧操作按钮原使用固定 48dp×48dp 的 `IconButton`，英文 "Cancel Multi-Select"（19 字符）放入后严重超宽，被迫换行为 "Canc\nel" 双行甚至截断；
+    2. 设置页（`SettingsScreen`）中「识别日志」分区标题、说明文案、统计信息、操作按钮及路径标签全为硬编码中文；
+    3. 结果页（`ResultScreen`）底部「技术细节（查看/隐藏）」、引擎轨迹、检星统计、两轮星表评分、一键复制及诊断说明未跟随系统语言本地化。
+  - **组件与文案重构**：
+    1. `GalleryScreen` 顶部操作按钮由固定尺寸的 `IconButton` 替换为自适应内容宽度的 `TextButton`，并增加 `maxLines = 1, softWrap = false`；同时收敛多语言文案为标准的 `Multi-Select` / `Cancel`（多选 / 取消）；
+    2. `I18n.Settings` 补齐 `logSection`, `logTitle`, `logDesc`, `logRefresh`, `logClear`, `logDirLabel` 双语定义；
+    3. `SolveLogStore.stats(context, isEnglish)` 增加英文多语言支持，输出 `$logs log files · $fails failure dumps · ${sizeKb}KB total`；
+    4. `SettingsScreen` 绑定 `LaunchedEffect(isEn)`，语言即时切换时日志统计实时重组刷新；
+    5. `ResultScreen.SolveLogDetails` 全量支持双语，技术细节报告按语言输出规范中英文字段。
+  - **测试与发版**：凭据扫描 319 个文件 0 泄露；`tools/release.py` 构建正式 Release 包并完成官方签名验签，产物 `StarCam-v1.5.84-fix-gallery-i18n-and-log-settings-release.apk`（15.8 MB）。
+
+- **2026-10-25（§0.117：修复今日天象卡片英文模式挤压与多语言细节，v1.5.83 交付）**：
+  - **根因分析**：在英文语言模式下，行星名称较长（如 `Jupiter -2.0m`, `Saturn +0.7m`, `Mars +1.0m`），导致第四个胶囊标签 `Mercury +0.7m` 在 `Row(fillMaxWidth())` 中被挤压至仅剩 10px 宽度，字符被迫逐字纵向换行拉伸为 300px 高的细长柱体，撑大整行并留下大片深蓝空白；
+  - **布局加固**：`TonightSkyCard` 行星胶囊标签行增加 `horizontalScroll(rememberScrollState())`，各标签 Text 声明 `maxLines = 1, softWrap = false`，彻底消除垂直挤压形变，在任意屏幕与语言下均可平滑水平滑动浏览；
+  - **多语言与排版收敛**：月龄文案根据 `isEn` 输出 `days` / `天`，冒号自适应中英标点；展开列表中行星名称赋予最小安全宽度，方位描述赋予 `weight(1f)` 并右对齐，消除折行碰撞；
+  - **测试与发版**：单测 4 项全绿；凭据扫描 0 泄露；`tools/release.py` 构建正式 Release 包并完成官方签名验签，产物 `StarCam-v1.5.83-fix-tonight-sky-card-layout-release.apk`（15.8 MB）。
+
+- **2026-10-24（§0.116：今日天象卡片与天象历表增强 Sprint 5，v1.5.82 交付）** — 落实弱点深度分析报告产品层面与 PROGRESS 下一步第 7 项：
+  - **`TonightSky` 纯 JVM 太阳系天象业务层**：基于 `SolarSystemEphemeris` 纳秒级纯数学历表体系，实现全天候天象解算；通过地心赤经差 $\Delta\alpha = \alpha_{\text{moon}} - \alpha_{\text{sun}}$ 严格判定渐盈（Waxing）与渐亏（Waning），精确解算八大月相（新月/蛾眉/上弦/盈凸/满月/亏凸/下弦/残月）、月相符号、连续月龄天数及照亮百分比；
+  - **裸眼主要亮行星视窗判定**：计算金星、木星、土星、火星、水星的视星等与太阳距角，结合赤经相对位置判定晨伏/昏伏、长庚/启明、冲日整夜可见等天文观测视窗；
+  - **观星与深空摄影智能指引**：依据当晚月照条件动态推荐深空摄影、月面环形山明暗界线或满月全貌观测场景；
+  - **Material 3 `TonightSkyCard` 首页呈现**：在 `HomeScreen.kt` 主操作区与次级菜单之间呈现优雅的折叠/展开卡片，默认展示月相符号、月照比、观测建议与行星小徽标；点击平滑展开月龄与各行星详细方位；
+  - **引擎调度注释与文案修正（§3.5）**：`StarSolver.kt` 注释纠正为「内置 8,419 颗星」，`NATIVE_FIRST` 描述纠正为「始终先试 astrometry.net 官方盲解引擎，再内置星表，最后在线」；
+  - **测试与验证**：新增 `TonightSkyTest` 4 项单测全绿；凭据扫描 319 个文件 0 泄露；成功构建 debug APK：`StarCam-v1.5.82-tonight-sky-card-sprint5-debug.apk`（27.1 MB）。
+
+- **2026-10-24（§0.115：MatchContext 无锁并发、AR 视场自适应与现场落盘 Sprint 4，v1.5.81 交付）** — 落实弱点深度分析报告 Sprint 4：
+  - **`MatchContext` 求解上下文去全局锁（§4.3）**：消除 `LocalStarMatcher` 原有的 `solveLock = Any()` 与单体对象状态依赖；将当前求解星等阈值 `mag`、空间网格 `catGrid`、打分表 `scoreTable` 及诊断统计完全收敛进每次求解独立的 `MatchContext`；底层网格与打分表改用 `ConcurrentHashMap` 按星等并发懒加载并持久缓存；彻底解开多线程并发求解的锁互斥，实现完全无锁的并行多路星空识别；
+  - **AR 预览宽高比自适应纯函数化（§3.2 审计 B14）**：在 `CameraMath.kt` 提炼纯函数 `computeFitCenterRect`，消除 `CameraScreen.kt` 内硬编码的 `3f / 4f` 视口比例两处；全面自适应 4:3、16:9 等多种传感器流宽高比，消除 AR 覆盖与黑边错位，新增 `CameraMathTest` 9 项单测高精覆盖；
+  - **失败现场与日志优化（§4.5）**：`SolveLogStore.kt` 写入 `input.gray.gz` 改为 32KB `ByteBuffer` 缓冲块传输，彻底消除逐字节循环 `writeFloat` 造成的数万次 I/O 系统调用及界面短时卡顿；
+  - **全局浮点格式化 Locale.ROOT 规范化（§3.5）**：消除各处 `"%.1f".format(...)` 潜在的系统本地化逗号分隔符隐患，全部收敛为 `String.format(Locale.ROOT, ...)`，杜绝国际化环境下的日志与数据解析崩溃；
+  - **测试与验证**：新增 `CameraMathTest` 9 项、`MatchDiagnosticsTest` 4 项（含多线程并发无锁与快照隔离测试）、真实照片 12/12 真值全量回归（`OfflinePhotosTruthTest` 3 项全绿）、凭据扫描 319 个文件 0 泄露；成功构建 debug APK：`StarCam-v1.5.81-matchcontext-lockfree-b14-sprint4-debug.apk`（27.0 MB）。
+
+- **2026-10-24（§0.114：SolveStep 解耦、ResultViewModel 与双引擎并发竞速 Sprint 3，v1.5.80 准备）** — 落实弱点深度分析报告 Sprint 3：
+  - **`SolveStep` 接口与流水线解耦**：将 `StarSolver.solve` 单体巨石函数解耦，定义统一 `SolveStep` 规范契约（`StepContext`、`StepOutcome`），抽出 `LocalMatcherStep`（自研提取、网格三角匹配与诊断）、`NativeSolveStep`（官方 native 三重盲解与降采样重试）、`OnlineNovaStep`（在线 API 兜底）；
+  - **`ResultViewModel` 解耦 UI 状态与生命周期**：创建 `ResultViewModel`（AndroidViewModel），持管 `state: StateFlow<ResultUiState>`、星点流与 `SolveToken`；在 `onCleared()` 中自动快速触发取消，杜绝离开页面后的线程泄露；Composable `ResultScreen` 精简为纯声明式界面渲染；
+  - **双引擎并发竞速（Parallel Engine Racing）**：非低内存（设备内存 > 3GB、非 LowRAM）、全天盲解（FOV $\ge 15^\circ$）且开启设置项时，并发启动自研与官方引擎，派生子令牌，首个引擎成功立即通知协程通道并在 $<1\text{ms}$ 内取消落败方令牌，总耗时降至 $\min(t_{\text{local}}, t_{\text{native}})$；
+  - **测试与验证**：新增 `SolveStepTest` 2 项、扩充 `StarSolverTest`（`canRace` 准入测试）达 23 项、全量 43 项单测全绿；真实照片 12/12 真值全量回归（`CI-SUMMARY true=12 false=0 miss=0 total=12`）；凭据自检扫描 319 文件 0 泄露；成功构建 debug APK：`StarCam-v1.5.80-solvestep-racing-viewmodel-sprint3-debug.apk`（27.0 MB）。
+
+- **2026-10-24（§0.113：求解取消令牌与全局时间预算 Sprint 2，v1.5.79 准备）** — 落实弱点深度分析报告 Sprint 2：
+  - **`SolveToken` 取消令牌全链路贯穿**：新增原子取消令牌抽象，并在 `LocalStarMatcher` 打分轮与投票轮注入 `token.check()`，毫秒级快速终止并安全释放 `solveLock`；UI 增加显式「取消」按钮，退出页面时即刻熔断后台求解，杜绝后台空转与锁排队；
+  - **全局总时间预算（Global Solve Deadline）**：新增 `solveBudgetSec`（默认 30s，10~120s 可调），各子引擎步骤与分段盲解动态收缩超时时间至剩余预算，杜绝多引擎未命中时的恶性耗时累加；
+  - **`demoPhotoFov` 路径安全隔离**：增加路径白名单，防止普通用户相册中同名照片被错误套用内置 76° 广角先验；
+  - **测试与验证**：新增 `SolveTokenTest` 4 项全绿，单测与真实照片回归 100% 通过；构建 debug APK：`StarCam-v1.5.79-cancel-token-sprint2-debug.apk`。
+
+- **2026-10-24（§0.112：历史记录 WCS 持久化与架构加固 Sprint 1，v1.5.78 准备）** — 落实弱点深度分析报告 Sprint 1：
+  - **历史记录 WCS 持久化与 0ms 即开**：`HistoryStore.Entry` 补充 8 项 WCS 矩阵参数及比例尺、朝向等元数据，新增 `toSolveResult()` 与 `fromSolve(...)`；`Screen.Result` 增加 `cachedSolve` / `cachedEngine`。从历史点击照片直接 0ms 载入坐标系呈现，无需后台重复 Plate Solving，且不重复打点/写入历史；
+  - **历史图片缓存保护与去重**：`HistoryStore.save` 自动将易失性 `cacheDir` 图片转存至私有 `filesDir/history`（清理缓存不再损坏历史照片）；同一图片在历史中去重保存；
+  - **高赤纬大圆角距判定修复**：`StarSolver.crossCheckAccept` 修复未乘 $\cos(\text{Dec})$ 导致极区误拒的问题，引入真实天球球面角距 `angularSepDeg(...) < 3.0°`；
+  - **AR FOV 标定门禁（Audit B3）**：`CameraScreen` 实时解算分支增加置信度门禁（浅域且内点 $\ge 18$，或官方引擎 $\text{logodds} \ge 25$），避免弱解污染用户持久化 `settings.arFovDeg` 与航向偏角；
+  - **测试与验证**：新增 `HistoryStoreTest` 4 项、扩充 `CrossCheckTest` 3 项（高赤纬与球面大圆角距测试）、`StarSolverTest` 21 项全绿、`OfflinePhotosTruthTest` 3 项 12/12 真值全绿；构建 debug APK：`StarCam-v1.5.78-history-wcs-sprint1-debug.apk`（27.0 MB）；`tools/check_secrets.py` 扫描 319 文件 0 凭据安全通过。
 
 - **2026-10-15（§0.103 闸门真值台：45° 跨线双样本 + 四路对照）** — 落实「先做 ①」：
   - **素材**（`testdata/gate-sweep/`，不入库）：`syn40/47/50`（合成渲染，**同中心只差视场**）

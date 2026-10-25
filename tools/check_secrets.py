@@ -20,6 +20,12 @@ import re
 import subprocess
 import sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 WD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GIT = os.environ.get("GIT_EXE", "git")
 
@@ -53,7 +59,9 @@ SKIP_PATH = re.compile(r'''(?i)(^|/)(\.git|build|\.gradle|\.kotlin|__pycache__|a
 def git(*args, text=True):
     # 兼容 Python 3.6（无 capture_output / text 关键字）与 3.7+
     kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
-    kw["text" if sys.version_info >= (3, 7) else "universal_newlines"] = text
+    if text:
+        kw["encoding"] = "utf-8"
+        kw["errors"] = "replace"
     return subprocess.run((GIT,) + args, cwd=WD, **kw).stdout
 
 

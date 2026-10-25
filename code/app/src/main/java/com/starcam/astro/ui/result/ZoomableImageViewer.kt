@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,27 +67,26 @@ fun ZoomableImageViewer(
     onClose: () -> Unit,
     renderAnnotated: ((LayerFlags) -> Bitmap)? = null,
     initialFlags: LayerFlags = LayerFlags.ALL,
+    onFlagsChange: ((LayerFlags) -> Unit)? = null,
     hitTest: ((x: Float, y: Float, screenPxPerBitmapPx: Float) -> SkyObjectRef?)? = null,
 ) {
     var showAnnotated by remember { mutableStateOf(true) }
-    // §0.47：图层开关与当前标注位图（开关变化时经 renderAnnotated 重渲染）
-    var flags by remember { mutableStateOf(initialFlags) }
-    var annotatedBitmap by remember { mutableStateOf(annotated) }
+    // §0.47 / §0.120：图层开关与当前标注位图（绑定 initialFlags 与 annotated，开关变化时与调用方同步）
+    var flags by remember(initialFlags) { mutableStateOf(initialFlags) }
+    var annotatedBitmap by remember(annotated) { mutableStateOf(annotated) }
     val scope = rememberCoroutineScope()
+    val currentFlagsChange by rememberUpdatedState(onFlagsChange)
+    val currentRender by rememberUpdatedState(renderAnnotated)
+    val currentHitTest by rememberUpdatedState(hitTest)
 
     /**
-     * §0.78：图层切换的重渲染统一入口。
-     *
-     * 原实现在 4 个开关回调里**同步**调用 [renderAnnotated]，而它是 2200px 级
-     * 全分辨率位图合成（≈14MB，还要跑一遍全星表投影）—— 放在主线程会明显卡顿；
-     * 而**同一个操作**在「保存到相册」路径里却正确地走了 IO。
-     *
-     * [renderingNew] 是防抖标志：全分辨率合成要几百毫秒，快速连点开关时
-     * 不会同时堆出多张 14MB 位图（原生内存峰值）。
+     * §0.78 / §0.120：图层切换的重渲染统一入口，双向同步图层状态。
      */
     var renderingNew by remember { mutableStateOf(false) }
     val rerender: (LayerFlags) -> Unit = { f ->
-        val render = renderAnnotated
+        flags = f
+        currentFlagsChange?.invoke(f)
+        val render = currentRender
         if (render != null && !renderingNew) {
             renderingNew = true
             scope.launch {
@@ -143,12 +143,12 @@ fun ZoomableImageViewer(
                         translationY = offset.y
                     }
                     .transformable(transformableState)
-                    .pointerInput(Unit) {
+                    .pointerInput(currentHitTest) {
                         detectTapGestures(
                             onTap = { pos ->
                                 // §0.48：轻点天体 → 换算位图坐标做命中测试（graphicsLayer 的
                                 // 视觉缩放/平移不改变本地坐标，pointerInput 收到的即本地坐标）
-                                val ht = hitTest
+                                val ht = currentHitTest
                                 if (ht != null && boxSize.width > 0) {
                                     val bw = original.width.toFloat()
                                     val bh = original.height.toFloat()
@@ -264,20 +264,19 @@ fun ZoomableImageViewer(
                         )
                         Spacer(Modifier.height(4.dp))
                         ViewerLayerToggle(com.starcam.astro.ui.I18n.Layers.lines, flags.lines) {
-                            flags = flags.copy(lines = it)
-                            rerender(flags)
+                            rerender(flags.copy(lines = it))
                         }
                         ViewerLayerToggle(com.starcam.astro.ui.I18n.Layers.starNames, flags.starNames) {
-                            flags = flags.copy(starNames = it)
-                            rerender(flags)
+                            rerender(flags.copy(starNames = it))
                         }
                         ViewerLayerToggle(com.starcam.astro.ui.I18n.Layers.constellationNames, flags.constellationNames) {
-                            flags = flags.copy(constellationNames = it)
-                            rerender(flags)
+                            rerender(flags.copy(constellationNames = it))
                         }
                         ViewerLayerToggle(com.starcam.astro.ui.I18n.Layers.messier, flags.messier) {
-                            flags = flags.copy(messier = it)
-                            rerender(flags)
+                            rerender(flags.copy(messier = it))
+                        }
+                        ViewerLayerToggle(com.starcam.astro.ui.I18n.Layers.planets, flags.planets) {
+                            rerender(flags.copy(planets = it))
                         }
                     }
                 }
