@@ -15,7 +15,7 @@
 
 ## 四条最容易出事的红线（完整版见 `AGENTS.md` §3）
 
-- 唯一工作区 `C:\starword`，**不要创建第二份副本**。
+- 唯一工作区 `C:\starcam`，**不要创建第二份副本**。
 - 日常只构建 debug；**绝不自动跑 `assembleRelease`**，除非开发者明确说「跑 release」。
 - `testdata/`（私拍原图 / `.gray`）**绝不提交、打包、分发**。
 - 提交身份用 `1437nb <1437nb@users.noreply.github.com>`；**不要改写 git 历史**
