@@ -111,4 +111,4 @@ Licensed under the **[GNU General Public License v2.0](LICENSE)**. Special thank
 - **[StellarSolver](https://github.com/rlancaste/stellarsolver)** (LGPL-2.1 / MIT) — Cross-platform wrapper reference
 - **[Stellarium](https://stellarium.org/)** (GPL-2.0) — 88 constellation line definitions and traditional Chinese star culture data
 - **[VizieR V/50 Bright Star Catalogue](https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=V/50)** (Public Domain) — Yale Bright Star Catalogue (BSC5)
-- **[Android Jetpack Compose & CameraX](https://developer.android.com/jetpack)** (Apache-2.0) & **[OkHttp](https://square.github.io/okhttp/)** (Apache-2.0)
+- **[Android Jetpack Compose & CameraX](https://developer.android.com/jetpack)** (Apache-2.0) & **[OkHttp](https://github.com/square/okhttp)** (Apache-2.0)

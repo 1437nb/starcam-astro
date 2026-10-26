@@ -111,4 +111,4 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 - **[StellarSolver](https://github.com/rlancaste/stellarsolver)**（LGPL-2.1 / MIT）— `astrometry.net` 跨平台封装参考
 - **[Stellarium](https://stellarium.org/)**（GPL-2.0）— 88 星座连线与中国传统星官文化数据
 - **[VizieR V/50 Bright Star Catalogue](https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=V/50)**（Public Domain）— 耶鲁亮星星表（BSC5）数据
-- **[Android Jetpack Compose & CameraX](https://developer.android.com/jetpack)**（Apache-2.0）& **[OkHttp](https://square.github.io/okhttp/)**（Apache-2.0）
+- **[Android Jetpack Compose & CameraX](https://developer.android.com/jetpack)**（Apache-2.0）& **[OkHttp](https://github.com/square/okhttp)**（Apache-2.0）
