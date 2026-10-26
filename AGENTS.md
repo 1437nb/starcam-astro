@@ -170,10 +170,11 @@ C:\dev\android-ndk-r26d\        NDK r26d（Windows 原生 clang 17）
 git push ec2-hk:~/starword main
 git push ec2-hk:~/starword <tag>       # 如有新 tag
 
-# 2. 借助 huawei 的 gh 授权，在 ec2-hk 上直推 GitHub（通过标准输入投递凭据，杜绝 URL 与命令行参数泄露）
+# 2. 借助 huawei 的 gh 授权，在 ec2-hk 上直推 GitHub（通过 http.extraHeader 避免将 token 拼入 URL）
 $tok = (ssh huawei "/opt/gh_2.102.0_linux_amd64/bin/gh auth token").Trim()
-$tok | ssh ec2-hk 'cd ~/starword && git -c credential.helper="!f() { echo username=1437nb; echo \"password=\$(cat)\"; }; f" push https://github.com/1437nb/starcam-astro.git main'
-$tok | ssh ec2-hk 'cd ~/starword && git -c credential.helper="!f() { echo username=1437nb; echo \"password=\$(cat)\"; }; f" push https://github.com/1437nb/starcam-astro.git <tag>'
+$b64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("1437nb:$tok"))
+ssh ec2-hk "cd ~/starword && git -c http.extraHeader='Authorization: Basic $b64' push https://github.com/1437nb/starcam-astro.git main"
+ssh ec2-hk "cd ~/starword && git -c http.extraHeader='Authorization: Basic $b64' push https://github.com/1437nb/starcam-astro.git <tag>"
 ```
 
 #### 备用通道：Git Data API 推送
