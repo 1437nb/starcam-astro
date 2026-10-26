@@ -16,8 +16,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.CheckCircle
@@ -37,12 +40,24 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.starcam.astro.ui.AppIcons
 import com.starcam.astro.ui.I18n
+import com.starcam.astro.ui.theme.AppThemeMode
 import com.starcam.astro.ui.theme.StarCamDimens
+import com.starcam.astro.ui.theme.ThemeState
 import com.starcam.astro.ui.theme.onSuccessContainer
 import com.starcam.astro.ui.theme.successContainer
 import com.starcam.astro.util.ImageUtils
@@ -115,9 +130,12 @@ fun HomeScreen(
                 .padding(horizontal = StarCamDimens.screenPadding),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(28.dp))
 
-            // ── 标题区：大标题克制（M3 用 400/500 字重，不靠加粗堆气势）──
+            // ── 品牌图标与标题区（M3 用 400/500 字重，图标随深空蓝/夜视红主题自适应）──
+            StarCamBrandIcon(modifier = Modifier.size(72.dp))
+            Spacer(Modifier.height(StarCamDimens.md))
+
             Text(
                 I18n.appName,
                 style = MaterialTheme.typography.headlineMedium,
@@ -352,5 +370,189 @@ private fun UsageLine(text: String) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,
         )
+    }
+}
+
+/**
+ * 首页顶部品牌徽章图标（与桌面 Adaptive Icon 视觉同源：「镜头取景 + 盲解三角形与星座连线 + 十字星芒」）。
+ * 支持深空蓝（默认）与夜视红（暗适应）双主题自动切换配色。
+ */
+@Composable
+private fun StarCamBrandIcon(modifier: Modifier = Modifier) {
+    val isNightRed = ThemeState.mode == AppThemeMode.NIGHT_RED
+    val shape = RoundedCornerShape(20.dp)
+
+    val bgColors = if (isNightRed) {
+        listOf(Color(0xFF280B0B), Color(0xFF140505), Color(0xFF060202))
+    } else {
+        listOf(Color(0xFF1A2B63), Color(0xFF0E173B), Color(0xFF060A1C))
+    }
+    val lensColors = if (isNightRed) {
+        listOf(Color(0xFF330E0E), Color(0xFF1A0707), Color(0xFF0A0303))
+    } else {
+        listOf(Color(0xFF1E3575), Color(0xFF0E1940), Color(0xFF070C22))
+    }
+    val goldColor = if (isNightRed) Color(0xFFFFB74D) else Color(0xFFE3C567)
+    val skyColor = if (isNightRed) Color(0xFFFF5252) else Color(0xFF7FB3E8)
+    val mintColor = if (isNightRed) Color(0xFFFF8A80) else Color(0xFF9BD4C0)
+    val starCoreColor = if (isNightRed) Color(0xFFFFE0B2) else Color(0xFFFFFDF4)
+    val nodeCoreColor = if (isNightRed) Color(0xFFFFCDD2) else Color(0xFFF0F6FF)
+    val borderColor = if (isNightRed) Color(0x55FF5252) else Color(0x407FB3E8)
+
+    Canvas(
+        modifier = modifier
+            .clip(shape)
+            .border(1.dp, borderColor, shape)
+    ) {
+        val s = size.minDimension / 108f
+        fun pt(x: Float, y: Float) = Offset(x * s, y * s)
+
+        // 1. 深空径向渐变背景
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = bgColors,
+                center = pt(44f, 36f),
+                radius = 80f * s,
+            )
+        )
+
+        // 外围天球赤纬环暗纹
+        drawCircle(
+            color = skyColor.copy(alpha = 0.10f),
+            radius = 40f * s,
+            center = pt(54f, 54f),
+            style = Stroke(width = 0.8f * s),
+        )
+
+        // 2. 相机取景框四角折线
+        val bracketStroke = Stroke(width = 2.6f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        val topBrackets = Path().apply {
+            // 左上
+            moveTo(26f * s, 39f * s)
+            lineTo(26f * s, 32f * s)
+            arcTo(Rect(26f * s, 26f * s, 38f * s, 38f * s), 180f, 90f, false)
+            lineTo(39f * s, 26f * s)
+            // 右上
+            moveTo(69f * s, 26f * s)
+            lineTo(76f * s, 26f * s)
+            arcTo(Rect(70f * s, 26f * s, 82f * s, 38f * s), 270f, 90f, false)
+            lineTo(82f * s, 39f * s)
+        }
+        drawPath(topBrackets, color = goldColor.copy(alpha = 0.80f), style = bracketStroke)
+
+        val bottomBrackets = Path().apply {
+            // 左下
+            moveTo(26f * s, 69f * s)
+            lineTo(26f * s, 76f * s)
+            arcTo(Rect(26f * s, 70f * s, 38f * s, 82f * s), 180f, -90f, false)
+            lineTo(39f * s, 82f * s)
+            // 右下
+            moveTo(69f * s, 82f * s)
+            lineTo(76f * s, 82f * s)
+            arcTo(Rect(70f * s, 70f * s, 82f * s, 82f * s), 90f, -90f, false)
+            lineTo(82f * s, 69f * s)
+        }
+        drawPath(bottomBrackets, color = skyColor.copy(alpha = 0.80f), style = bracketStroke)
+
+        // 3. 光学镜头圆环与镜片
+        val center = pt(54f, 54f)
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = lensColors,
+                center = pt(47f, 45f),
+                radius = 30f * s,
+            ),
+            radius = 24f * s,
+            center = center,
+        )
+        drawCircle(
+            color = skyColor.copy(alpha = 0.88f),
+            radius = 24f * s,
+            center = center,
+            style = Stroke(width = 2.4f * s),
+        )
+        drawCircle(
+            color = goldColor.copy(alpha = 0.35f),
+            radius = 20.6f * s,
+            center = center,
+            style = Stroke(width = 1.0f * s),
+        )
+
+        // 镜片左上反光弧
+        drawArc(
+            color = Color.White.copy(alpha = if (isNightRed) 0.14f else 0.24f),
+            startAngle = 202f,
+            sweepAngle = 48f,
+            useCenter = false,
+            topLeft = pt(35.5f, 35.5f),
+            size = Size(37f * s, 37f * s),
+            style = Stroke(width = 1.8f * s, cap = StrokeCap.Round),
+        )
+
+        // 4. 盲解特征三角形与星座连线
+        val triPath = Path().apply {
+            moveTo(45.5f * s, 52.0f * s)
+            lineTo(61.0f * s, 44.8f * s)
+            lineTo(54.0f * s, 58.0f * s)
+            close()
+        }
+        drawPath(triPath, color = mintColor.copy(alpha = 0.12f))
+        drawPath(
+            triPath,
+            color = mintColor.copy(alpha = 0.32f),
+            style = Stroke(width = 0.9f * s, join = StrokeJoin.Round),
+        )
+
+        val constellationPath = Path().apply {
+            moveTo(38.5f * s, 61.0f * s)
+            lineTo(45.5f * s, 52.0f * s)
+            lineTo(54.0f * s, 58.0f * s)
+            lineTo(61.0f * s, 44.8f * s)
+            lineTo(69.5f * s, 49.0f * s)
+        }
+        drawPath(
+            constellationPath,
+            color = mintColor,
+            style = Stroke(width = 1.85f * s, cap = StrokeCap.Round, join = StrokeJoin.Round),
+        )
+        drawLine(
+            color = skyColor,
+            start = pt(45.5f, 52.0f),
+            end = pt(42.2f, 42.2f),
+            strokeWidth = 1.5f * s,
+            cap = StrokeCap.Round,
+        )
+
+        // 5. 次级星座节点恒星
+        val nodes = listOf(
+            pt(38.5f, 61.0f),
+            pt(45.5f, 52.0f),
+            pt(54.0f, 58.0f),
+            pt(69.5f, 49.0f),
+            pt(42.2f, 42.2f),
+        )
+        for (node in nodes) {
+            drawCircle(color = skyColor.copy(alpha = 0.28f), radius = 3.2f * s, center = node)
+            drawCircle(color = nodeCoreColor, radius = 1.75f * s, center = node)
+        }
+
+        // 6. 主星十字星芒（61.0, 44.8）
+        val mainStar = pt(61.0f, 44.8f)
+        drawCircle(color = goldColor.copy(alpha = 0.18f), radius = 8.0f * s, center = mainStar)
+        drawCircle(color = goldColor.copy(alpha = 0.35f), radius = 4.8f * s, center = mainStar)
+
+        val starSpikes = Path().apply {
+            moveTo(61.0f * s, 34.5f * s)
+            lineTo(62.7f * s, 43.1f * s)
+            lineTo(71.3f * s, 44.8f * s)
+            lineTo(62.7f * s, 46.5f * s)
+            lineTo(61.0f * s, 55.1f * s)
+            lineTo(59.3f * s, 46.5f * s)
+            lineTo(50.7f * s, 44.8f * s)
+            lineTo(59.3f * s, 43.1f * s)
+            close()
+        }
+        drawPath(starSpikes, color = goldColor)
+        drawCircle(color = starCoreColor, radius = 2.2f * s, center = mainStar)
     }
 }

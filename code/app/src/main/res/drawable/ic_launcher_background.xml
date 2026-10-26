@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动图标背景：深空夜蓝径向渐变 + 天球赤纬环暗纹 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 深邃夜空主径向渐变底 -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="44"
+                android:centerY="36"
+                android:gradientRadius="80"
+                android:type="radial">
+                <item
+                    android:color="#1A2B63"
+                    android:offset="0.0" />
+                <item
+                    android:color="#0E173B"
+                    android:offset="0.52" />
+                <item
+                    android:color="#060A1C"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 右上星云微光晕染 -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="64"
+                android:centerY="42"
+                android:gradientRadius="42"
+                android:type="radial">
+                <item
+                    android:color="#247FB3E8"
+                    android:offset="0.0" />
+                <item
+                    android:color="#0D9BD4C0"
+                    android:offset="0.55" />
+                <item
+                    android:color="#00060A1C"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 外围天球坐标赤纬环与星轨暗纹 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,14 A40,40 0 1,1 53.99,14 Z"
+        android:strokeColor="#147FB3E8"
+        android:strokeWidth="0.7" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,8 A46,46 0 1,1 53.99,8 Z"
+        android:strokeColor="#0D9BD4C0"
+        android:strokeWidth="0.6" />
+
+    <!-- 远景微星点缀（安全区外围氛围星） -->
+    <path
+        android:fillColor="#38E8ECF8"
+        android:pathData="M22,28 m-0.9,0 a0.9,0.9 0 1,0 1.8,0 a0.9,0.9 0 1,0 -1.8,0" />
+    <path
+        android:fillColor="#307FB3E8"
+        android:pathData="M85,26 m-1.0,0 a1.0,1.0 0 1,0 2.0,0 a1.0,1.0 0 1,0 -2.0,0" />
+    <path
+        android:fillColor="#28E3C567"
+        android:pathData="M86,78 m-0.9,0 a0.9,0.9 0 1,0 1.8,0 a0.9,0.9 0 1,0 -1.8,0" />
+    <path
+        android:fillColor="#309BD4C0"
+        android:pathData="M21,79 m-0.8,0 a0.8,0.8 0 1,0 1.6,0 a0.8,0.8 0 1,0 -1.6,0" />
+</vector>

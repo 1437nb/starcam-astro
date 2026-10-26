@@ -5,8 +5,8 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-25（§0.120 图层快捷开关与放大查看器图层状态双向同步：识别完成后支持直接开关星星名字与其它图层，导出纯净连线图；修复放大查看器图层与预览图不一致 Bug；彻底解决 M45 与星名重叠、边缘星名越界裁切；v1.5.86 交付）
-**当前基线**：v1.5.86（versionCode 106，**已发版** 2026-10-25，tag `v1.5.86`）
+**最后更新**：2026-10-26（§0.121 全新品牌启动图标与首页双主题徽章设计：「镜头取景 + 盲解三角形与星座连线 + 十字星芒」，升级 Adaptive Icon 背景/前景/Android 13+ 单色层与首页顶部品牌徽章，精简重构中英文 README；v1.5.87 交付）
+**当前基线**：v1.5.87（versionCode 107，**已发版** 2026-10-26，tag `v1.5.87`）
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
 **构建环境**：本机拥有全套高配构建环境，Kotlin 编译、全量单元测试（35 类 / 276 项全绿，约 2.5 分钟）与 APK 打包（约 2 分钟）均在本机高速完成。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
 
@@ -101,6 +101,16 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-10-26（§0.121：全新品牌启动图标与首页双主题徽章设计，v1.5.87 交付）**：
+  - **视觉理念**：「镜头取景 + 盲解三角形与星座连线 + 十字星芒」—— 外围相机四角对焦取景框（星辉金 `#E3C567` 与星空蓝 `#7FB3E8`）环绕深空蓝光学镜头圆环与镜片反光弧，镜片内部绘制代表三角投票算法的特征盲解三角形（星云薄荷 `#9BD4C0`）、经典星座折线及十字衍射星芒主星，直观传递「拍照识星（StarCam）」的核心定位；
+  - **Adaptive Icon 全套矢量层升级**：
+    1. 新增 `res/drawable/ic_launcher_background.xml`：深空夜蓝径向渐变 + 星云微光晕染 + 天球赤纬环暗纹；
+    2. 重绘 `res/drawable/ic_launcher_foreground.xml`：严格收敛于 66dp 安全区（径向 $\le 30.5\text{dp}$），兼容方形/圆角矩形/圆形/水滴形等全部系统桌面掩码；
+    3. 新增 `res/drawable/ic_launcher_monochrome.xml`：适配 Android 13+ Material You 桌面主题单色图标；
+    4. 补齐 `res/mipmap-anydpi-v26/ic_launcher_round.xml` 并在 `AndroidManifest.xml` 声明 `android:roundIcon`；
+  - **首页顶部品牌徽章（`HomeScreen.kt`）**：新增 `StarCamBrandIcon` Canvas 矢量徽章组件置于应用标题上方，与桌面图标视觉同源，且支持「深空蓝（默认）」与「夜视红（暗适应）」双主题自动切换配色；
+  - **构建与验签**：`:app:assembleDebug` 与 `:app:assembleRelease` 一次通过，官方签名验签通过（`CN=StarCam`，SHA-256 `b04a854f...`），归档产物 `apk/StarCam-v1.5.87-new-brand-icon-release.apk`（15.8 MB，SHA-256 `E536F79D28556F2BCF9CC5682915AA6EB0CF63346B3D160BC73E33963B4D5228`）。
 
 - **2026-10-25（§0.120：图层快捷开关与放大查看器图层状态双向同步，v1.5.86 交付）**：
   - **背景与原因**：

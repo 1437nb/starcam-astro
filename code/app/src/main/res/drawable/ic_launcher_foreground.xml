@@ -1,21 +1,203 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 启动图标前景：五角星（星辉金色） -->
+<!-- 启动图标前景：镜头取景框 + 光学镜片 + 盲解三角形与星座连线 + 十字星芒主星 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- ==================== 1. 相机取景框四角对焦折线 ==================== -->
+    <!-- 左上取景角 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M31,41 L31,36 A5,5 0 0,1 36,31 L41,31"
+        android:strokeColor="#BFE3C567"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.2" />
+    <!-- 右上取景角 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M67,31 L72,31 A5,5 0 0,1 77,36 L77,41"
+        android:strokeColor="#BFE3C567"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.2" />
+    <!-- 左下取景角 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M31,67 L31,72 A5,5 0 0,0 36,77 L41,77"
+        android:strokeColor="#BF7FB3E8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.2" />
+    <!-- 右下取景角 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M67,77 L72,77 A5,5 0 0,0 77,72 L77,67"
+        android:strokeColor="#BF7FB3E8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.2" />
+
+    <!-- ==================== 2. 光学镜头主体与镜片镀膜 ==================== -->
+    <!-- 镜头外环底座阴影高光晕 -->
+    <path
+        android:fillColor="#24000000"
+        android:pathData="M54,54 m-23.5,0 a23.5,23.5 0 1,0 47,0 a23.5,23.5 0 1,0 -47,0" />
+
+    <!-- 镜片内部深空光学玻璃填充 -->
+    <path android:pathData="M54,54 m-21.5,0 a21.5,21.5 0 1,0 43,0 a21.5,21.5 0 1,0 -43,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="47"
+                android:centerY="45"
+                android:gradientRadius="26"
+                android:type="radial">
+                <item
+                    android:color="#1E3575"
+                    android:offset="0.0" />
+                <item
+                    android:color="#0E1940"
+                    android:offset="0.58" />
+                <item
+                    android:color="#070C22"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 镜头主金属/蓝宝石外圈 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,54 m-21.5,0 a21.5,21.5 0 1,0 43,0 a21.5,21.5 0 1,0 -43,0"
+        android:strokeWidth="2.2">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:endX="75.5"
+                android:endY="75.5"
+                android:startX="32.5"
+                android:startY="32.5"
+                android:type="linear">
+                <item
+                    android:color="#A8D0FF"
+                    android:offset="0.0" />
+                <item
+                    android:color="#7FB3E8"
+                    android:offset="0.5" />
+                <item
+                    android:color="#4974A8"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 镜头内圈金色光圈刻度环 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,54 m-18.6,0 a18.6,18.6 0 1,0 37.2,0 a18.6,18.6 0 1,0 -37.2,0"
+        android:strokeColor="#4DE3C567"
+        android:strokeWidth="0.85" />
+
+    <!-- 四向天球寻星基准刻度线（N/E/S/W） -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,32.5 L54,35.4 M54,72.6 L54,75.5 M32.5,54 L35.4,54 M72.6,54 L75.5,54"
+        android:strokeColor="#8CE3C567"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.2" />
+
+    <!-- 镜片左上光学镀膜反光弧 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39.2,46.2 A16.8,16.8 0 0,1 48.5,38.1"
+        android:strokeColor="#38FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.7" />
+
+    <!-- ==================== 3. 盲解三角形与星座连线 ==================== -->
+    <!-- 星图盲解特征三角形（薄荷青半透明填充 + 细边，致敬三角投票算法） -->
+    <path
+        android:fillColor="#189BD4C0"
+        android:pathData="M46.2,52.0 L60.2,45.5 L53.8,57.2 Z"
+        android:strokeColor="#4D9BD4C0"
+        android:strokeLineJoin="round"
+        android:strokeWidth="0.8" />
+
+    <!-- 星座主连线（星空蓝折线） -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39.8,60.2 L46.2,52.0 L53.8,57.2 L60.2,45.5 L68.0,49.2"
+        android:strokeColor="#9BD4C0"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.65" />
+
+    <!-- 星座支线（左上延展） -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M46.2,52.0 L43.2,43.0"
+        android:strokeColor="#7FB3E8"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.35" />
+
+    <!-- ==================== 4. 星座节点恒星与主星芒 ==================== -->
+    <!-- 次级星座节点外发光 -->
+    <path
+        android:fillColor="#407FB3E8"
+        android:pathData="
+            M39.8,60.2 m-3.0,0 a3.0,3.0 0 1,0 6.0,0 a3.0,3.0 0 1,0 -6.0,0
+            M46.2,52.0 m-3.2,0 a3.2,3.2 0 1,0 6.4,0 a3.2,3.2 0 1,0 -6.4,0
+            M53.8,57.2 m-3.0,0 a3.0,3.0 0 1,0 6.0,0 a3.0,3.0 0 1,0 -6.0,0
+            M68.0,49.2 m-2.8,0 a2.8,2.8 0 1,0 5.6,0 a2.8,2.8 0 1,0 -5.6,0
+            M43.2,43.0 m-2.8,0 a2.8,2.8 0 1,0 5.6,0 a2.8,2.8 0 1,0 -5.6,0" />
+
+    <!-- 次级星座节点亮核 -->
+    <path
+        android:fillColor="#F0F6FF"
+        android:pathData="
+            M39.8,60.2 m-1.65,0 a1.65,1.65 0 1,0 3.3,0 a1.65,1.65 0 1,0 -3.3,0
+            M46.2,52.0 m-1.85,0 a1.85,1.85 0 1,0 3.7,0 a1.85,1.85 0 1,0 -3.7,0
+            M53.8,57.2 m-1.7,0 a1.7,1.7 0 1,0 3.4,0 a1.7,1.7 0 1,0 -3.4,0
+            M68.0,49.2 m-1.55,0 a1.55,1.55 0 1,0 3.1,0 a1.55,1.55 0 1,0 -3.1,0" />
+
+    <!-- 左上小十字星芒（43.2, 43.0） -->
+    <path
+        android:fillColor="#9BD4C0"
+        android:pathData="M43.2,39.2 L44.1,42.1 L47.0,43.0 L44.1,43.9 L43.2,46.8 L42.3,43.9 L39.4,43.0 L42.3,42.1 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M43.2,43.0 m-1.1,0 a1.1,1.1 0 1,0 2.2,0 a1.1,1.1 0 1,0 -2.2,0" />
+
+    <!-- 主星（60.2, 45.5）双层星辉金光晕 -->
+    <path
+        android:fillColor="#28E3C567"
+        android:pathData="M60.2,45.5 m-7.2,0 a7.2,7.2 0 1,0 14.4,0 a7.2,7.2 0 1,0 -14.4,0" />
+    <path
+        android:fillColor="#4CE3C567"
+        android:pathData="M60.2,45.5 m-4.4,0 a4.4,4.4 0 1,0 8.8,0 a4.4,4.4 0 1,0 -8.8,0" />
+
+    <!-- 主星 45° 斜向辅星芒 -->
+    <path
+        android:fillColor="#D9E3C567"
+        android:pathData="M60.2,45.5 L63.7,42.0 L61.1,45.5 L63.7,49.0 L60.2,46.4 L56.7,49.0 L59.3,45.5 L56.7,42.0 Z" />
+
+    <!-- 主星正交十字主星芒（星辉金 #E3C567 -> #FFE89E） -->
     <path
         android:fillColor="#E3C567"
-        android:pathData="M54,28 L60.9,43.3 L77.6,45.2 L65.5,56.3 L69.4,72.7 L54,63.9 L38.6,72.7 L42.5,56.3 L30.4,45.2 L47.1,43.3 Z" />
-    <!-- 小星星点缀 -->
+        android:pathData="M60.2,36.2 L61.75,43.95 L69.5,45.5 L61.75,47.05 L60.2,54.8 L58.65,47.05 L50.9,45.5 L58.65,43.95 Z" />
+
+    <!-- 主星中心高亮炽白金核 -->
     <path
-        android:fillColor="#7FB3E8"
-        android:pathData="M24,26 L25.8,29.6 L29.6,30 L26.8,32.5 L27.6,36.2 L24,34 L20.4,36.2 L21.2,32.5 L18.4,30 L22.2,29.6 Z" />
+        android:fillColor="#FFFDF4"
+        android:pathData="M60.2,45.5 m-2.1,0 a2.1,2.1 0 1,0 4.2,0 a2.1,2.1 0 1,0 -4.2,0" />
+
+    <!-- 镜头内右下微星点缀 -->
     <path
-        android:fillColor="#7FB3E8"
-        android:pathData="M82,66 L83.6,69.2 L87,69.6 L84.5,71.8 L85.2,75.2 L82,73.1 L78.8,75.2 L79.5,71.8 L77,69.6 L80.4,69.2 Z" />
+        android:fillColor="#807FB3E8"
+        android:pathData="M61.5,63.2 m-1.0,0 a1.0,1.0 0 1,0 2.0,0 a1.0,1.0 0 1,0 -2.0,0" />
     <path
-        android:fillColor="#7FB3E8"
-        android:pathData="M80,22 L81.2,24.4 L83.8,24.7 L81.9,26.4 L82.4,29 L80,27.4 L77.6,29 L78.1,26.4 L76.2,24.7 L78.8,24.4 Z" />
+        android:fillColor="#66E3C567"
+        android:pathData="M48.0,64.8 m-0.8,0 a0.8,0.8 0 1,0 1.6,0 a0.8,0.8 0 1,0 -1.6,0" />
 </vector>

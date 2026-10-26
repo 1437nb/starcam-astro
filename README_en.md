@@ -6,349 +6,109 @@
 [![Android](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com)
 [![CI](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml/badge.svg)](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml)
 
-A pure offline Android application for astrophotography plate-solving and night sky identification. Capture or import night sky photos to perform on-device blind plate-solving (RA, Dec, FOV, orientation, parity), with precise overlays of constellation lines, proper star names, and Messier deep-sky objects.
+An **offline-first** Android app for astrophotography plate-solving and night sky identification. Capture or import night-sky photos to perform on-device blind plate-solving (RA, Dec, FOV, orientation, parity), overlay constellation lines, proper star names, Messier deep-sky objects, and real-time Sun/Moon/planet positions, or explore the sky with the sensor-driven AR live star map.
 
 ---
 
 ## Download
 
-Latest release: **[v1.5.86](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.86)**
+Latest release: **[v1.5.87](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.87)**
 
 | Package | Size | Notes |
-|---|---|---|
-| [StarCam-v1.5.86-fix-viewer-layer-sync-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.86/StarCam-v1.5.86-fix-viewer-layer-sync-release.apk) | 15.8 MB | **Recommended** — R8-minified official signed build |
+| :--- | :--- | :--- |
+| **[StarCam-v1.5.87-new-brand-icon-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.87/StarCam-v1.5.87-new-brand-icon-release.apk)** | 15.8 MB | **Recommended** — R8-minified official signed APK (in-place upgrade) |
 
-All versions: [Releases](https://github.com/1437nb/starcam-astro/releases).
-(The per-version history below is not fully translated; see the
-[Chinese README](README.md) for every release's notes.)
+- **Requirements**: Android 8.0 (API 26) or newer on an **arm64-v8a** device (the bundled native `astrometry.net` engine targets arm64; x86_64 emulators gracefully fall back to the pure-JVM catalog solver).
+- **Recent Highlights (v1.5.82 – v1.5.87)**:
+  - **v1.5.87**: Brand-new "Camera Viewfinder + Constellation" Adaptive Icon (with Android 13+ Material You monochrome layer) and a dual-theme Home brand badge that adapts to Night Red dark-adaptation mode;
+  - **v1.5.86**: Interactive layer FilterChips, one-tap `📐 Lines Only` clean export, 4-quadrant star label de-overlap & boundary clamping, and bidirectional layer state sync with the full-screen zoom viewer;
+  - **v1.5.82 – v1.5.85**: Tonight Sky ephemeris card (moon phase, lunar age, 5 bright planets, and imaging tips), parallel dual-engine racing, lock-free `MatchContext` concurrency, and 0ms instant history loading via persisted WCS parameters.
+- Full version history and release notes: **[GitHub Releases](https://github.com/1437nb/starcam-astro/releases)** & [`docs/`](docs/).
 
-> **v1.5.86 — Layer Quick Toggles, Lines-Only Clean Export, Viewer Sync & De-overlap (§0.120)**:
-> 1. **Interactive Layer FilterChips**: Toggle Star Names, Constellation Lines, Constellation Names, Deep-Sky Messier, and Planets/Moon instantly directly below the photo in Result view;
-> 2. **Clean Constellation Lines Export**: Dedicated `📐 Lines Only` export button saves pure constellation lines + background night sky with zero distracting text clutter;
-> 3. **Full-Screen Zoomable Viewer Sync**: Eliminates stale layer snapshots when tapping into full-screen zoom, with bidirectional layer synchronization;
-> 4. **Label De-overlap & 4-Quadrant Boundary Clamping**: Suppresses star labels duplicate with Messier objects (Alcyone in M45, Hatysa in M42) and automatically places edge star labels into inward quadrants, eliminating text clipping at image edges.
-
-> **v1.5.78~v1.5.85 — Architectural Hardening & Tonight Sky Ephemeris (§0.111–§0.119)**:
-> 1. **Tonight Sky Card**: Pure JVM solar system ephemeris renders moon phases, lunar age, 5 visible planets' windows, and astrophotography recommendations on the home screen;
-> 2. **Parallel Engine Racing**: Runs local and native astrometry solvers in parallel for wide-field blind solving, aborting the loser within 1 ms when the first succeeds;
-> 3. **Lock-Free Concurrency**: Eliminates the global solve lock by encapsulating state in `MatchContext`;
-> 4. **Solve Cancellation Token & Global Deadlines**: Immediate termination when leaving screens, preventing thread pile-ups;
-> 5. **Instant 0ms History Loading**: Persists complete WCS matrix parameters to view solved photos instantly without re-solving;
-> 6. **Truth Bed Dual-Engine Cross-Calibration**: 12 demo photos cross-calibrated against official Astrometry.net truth, achieving 12/12 TRUE-SOLVE regression.
-
-> **v1.5.75 — stability & verifiability hardening.** Five P0 fixes: thread-safety in batch
-> recognition (a shared `SimpleDateFormat` → `DateTimeFormatter`), batch statistics rebuilt
-> as strongly-typed per-photo outcomes (the three counters now match each photo's actual
-> result), per-solve log attribution (`solveId` + file name on every line; failure snapshots
-> no longer overwrite each other), a deep-catalog gate that keeps wide fields above 45° out
-> of the deep retry (they used to burn 60 s and emit scale-collapse false solves), and
-> ownership hand-off for the native engine's timeout so a timed-out worker no longer leaks
-> its thread and the 11 MB index cache. Same release: CI upgraded from "run unit tests" to
-> "really verify a releasable build" (debug+release assembly, zero lint errors, six
-> binary-audit criteria) plus a **public demo-photo truth regression** (12 demo photos
-> decoded on the fly, driven through the production select-then-match path: 12/12 solve,
-> zero false positives).
-
-> **v1.5.63 extends narrow-field support down to a 10° field of view**:
-> fields of 10°–20° (telescope, long lens, cropped wide-angle) previously failed to
-> solve because the catalog was not deep enough — the index used only 514 stars
-> brighter than magnitude 4.0, so a 10° field could not assemble the minimum number
-> of stars matching needs. The fix is a **tiered catalog**: the shallow tier
-> (mag ≤ 4.0) handles wide fields above 30°, and only when the entire shallow path
-> fails does the engine retry with the deep tier (mag ≤ 6.5, 8,415 stars). Both
-> 10° test images now solve (16 / 24 inliers) while wide-field behaviour is
-> **bit-for-bit unchanged**. **The APK size does not change** — the deep tier reuses
-> catalog data already in the package. Bonus: the Vela supernova remnant
-> (8.4° narrow field) went from a wrong answer to a correct one.
-
-> **v1.5.62 makes solving 3.4× faster**: total solve time across the 12-photo
-> wide-field regression set drops from 46.6 s to 13.8 s (fastest single photo
-> 0.36 s, slowest 2.6 s; previously 1.6 s–11.1 s). The causes were that the
-> triangle index wrote every triangle into 9 adjacent buckets — so a 729-bucket
-> query re-visited the same object 9 times (one voting round traversed 59.66 M
-> index entries, nine tenths of them duplicates) — and that candidate merging
-> loaded everything into a hash map before sorting. **Results are bit-identical
-> after the fix**: the 12 photos report the same inlier counts as before, still
-> 12/12 correct with zero false positives.
-
-> **v1.5.61 fixes "the original photo will not solve, but raising the contrast
-> does"** (reported 2026-09-17, **verified on a real device**): the cause was in
-> **star extraction** — a threshold parameter was misused (the caller's "noise
-> multiple" was interpreted as the extractor's "peak significance"), leaving the
-> detection limit *below* the noise itself. 29% of all pixels passed the
-> threshold and merged into one 848,846-pixel blob, which exceeded the
-> extractor's extended-object cap and was discarded wholesale — every real star
-> was lost, leaving only border noise (the 172 "stars" in the user's log:
-> **none** of them sat on a real source). After the fix: over-threshold pixels
-> drop to 0.63%. A new **extraction diagnostic** in the solve log shows whether
-> the failure was "no stars extracted" or "stars extracted but not matched".
-
-> **v1.5.60 fixes "star photos fail to solve"**: four independent defects stacked
-> on top of each other — a brightness-threshold unit mismatch, a hard-coded
-> mirror direction in the scoring round, a tangent-plane origin mismatch between
-> scoring and pair expansion, and an RA=0° seam bug in origin averaging; it also
-> fixes **run-to-run randomness in the solve result**.
-> Both the newly shot and the older photos now solve (25 inliers), all 12 demo
-> photos solve, and all 8 false-positive controls are still correctly rejected.
-> The signing certificate matches previous versions, so it upgrades in place.
-
-> ⚠️ **The v1.5.55 release APK is unsigned** and cannot be installed — use v1.5.56
-> or newer instead. Signing and the release build were fixed in v1.5.57, and the
-> signing certificate matches previous versions, so it installs as an in-place upgrade.
-
-**Requirements**: Android 8.0 (API 26) or newer on an **arm64-v8a** device
-(the bundled native solver ships arm64 libraries only; x86_64 emulators fall
-back gracefully to the JVM catalog matcher).
+---
 
 ## Key Features
 
-- **3-Tier Hybrid Solving Engine**:
-  - Native NDK port of `astrometry.net` 0.97 with 4100-series all-sky index files;
-  - Custom 8,400+ star triangle matcher (triangle voting plus a **wide-field scoring round**, with bright-source masking and multi-candidate weak star rounds). The scoring round (v1.5.51) fixes identification for 60°+ wide-angle photos: each candidate triangle is fitted, stars are matched one-to-one, and the winner is chosen by alignment *rate* instead of per-star voting, which noisy false triangles can swamp;
-- **Solving-time regression fix** (v1.5.52): the v1.5.51 wide-field scoring round
-  cost an extra 15 s whenever solving *failed* (it scored ~70,000 candidate
-  triangles one by one); stacked on the native engine's blind-solve segments the
-  total could exceed a minute. A precomputed unit-vector table, a 3-second time
-  budget and a high-confidence early exit bring the failure-path overhead down to
-  2.5–3 s. The 12 bundled demo photos are back to **1–2 s each**, with no change in
-  accuracy or success rate.
+### 1. 3-Tier Hybrid Plate-Solving Engine
+- **Native `astrometry.net` 0.97 Engine**: Ships with 8 offline 4100-series all-sky FITS indexes for high-precision on-device blind solving;
+- **Custom 8,400+ Tiered Catalog Matcher**: Combines shallow ($\le 4.0$ mag) and deep ($\le 6.5$ mag) star tiers, triangle voting, and a wide-field one-to-one scoring round — covering **10° narrow fields up to 70°+ ultra-wide shots**, with parallel dual-engine racing on wide fields;
+- **Optional Online Fallback**: Supports user-provided `nova.astrometry.net` API keys (stored via `EncryptedSharedPreferences`).
 
-  - Optional online fallback via `nova.astrometry.net` API (requires user-provided API key).
-- **Overlay alignment fix** (v1.5.53): fixed constellation lines drifting away from the
-  stars they should connect. The matcher models pixel-to-tangent-plane as a similarity
-  transform, but a photograph is a gnomonic projection **about the image centre** —
-  the model only holds exactly when the tangent-plane origin sits at that centre.
-  It previously used the mean position of the catalog stars, which can be several
-  degrees off on wide fields, imprinting a distortion no similarity transform can
-  absorb (measured: 6.0 px mean error, 23 px at the edges, 0.92 % scale error).
-  The origin is now iterated onto the image centre: error drops to **1.7 px**,
-  inliers rise from 15 to 25, and the lines land on their stars.
+### 2. Rich Celestial Overlays & Clean Export
+- **Complete Sky Layers**: Official 88 modern constellations (aligned with Stellarium v23.4), 3,800+ traditional Chinese and Western proper star names, 44 Messier deep-sky objects, and **real-time Sun, Moon, and planet positions** computed from EXIF timestamp + GPS (with topocentric parallax correction);
+- **Smart De-overlap & Interactive Cards**: Automatically suppresses overlapping star labels inside Messier objects (e.g., Alcyone in M45, Hatysa in M42) and clamps edge labels inside safe inward quadrants; tap any object for a bilingual info card;
+- **Flexible Export & Batch Mode**: Toggle individual layers via FilterChips, compare with the original photo in the full-screen zoomable viewer, export either `📐 Lines Only` or custom-annotated images, and batch-solve up to 9 photos concurrently.
 
-- **Real-Time Viewfinder Recognition & AR Live Star Map**: CameraX analysis pipeline performs periodic blind solving, and a sensor-driven AR live star map projects the sky onto the viewfinder with zero latency as you move the phone (adjustable FOV, calibratable). Includes an all-sky mode that keeps rendering the lower hemisphere even when the phone points down (with a horizon line and 8-point compass), attitude smoothing with gyro extrapolation plus a complementary filter so the map neither jitters nor drifts, and target-finding navigation with a direction arrow and pulsing ring.
-- **Layer Controls & Object Info Cards**: Independently toggle constellation lines, star names, constellation labels, and Messier overlays; press-and-hold to compare against the original photo; tap any object in the picture for a bilingual info card (type / magnitude / distance / background).
-- **Rich Astronomical Overlays**:
-  - Official 88 modern constellation stick figures aligned with Stellarium v23.4 constellation line data (672 segments) and names;
-  - 3,800+ traditional Chinese and Western proper star names (Sirius, Vega, Betelgeuse, Arcturus, Polaris, etc.);
-  - 44 prominent Messier deep-sky objects (Andromeda Galaxy M31, Orion Nebula M42, Pleiades M45, etc.) color-coded by astrophysical object type;
-  - **Realtime Moon and planet labels** (v1.5.48): the Sun, Moon and planets are computed for the moment encoded in the photo's EXIF timestamp + GPS (JPL approximate Keplerian elements plus a Meeus lunar series, with topocentric parallax correction); the Sun and Moon are drawn at their true apparent diameter, and tapping them shows magnitude, elongation, illuminated fraction and apparent size.
-- **Weak-EXIF fallback** (v1.5.49): when a photo carries no GPS, the device's current location is used to estimate the imaged sky region, so the native solver no longer has to start from a full-sky blind search; the Sun/Moon/planet labels and batch export benefit as well. Three hard boundaries: **EXIF GPS always wins and is never overridden**, no fallback without a capture timestamp, and a half-populated GPS pair is treated as missing and completed as a pair. The location source (EXIF vs. current fix) is stated on the solving progress and result screen, together with a "may be inaccurate" note.
-- **Portrait photo solving fix** (v1.5.50): corrected the field-of-view estimate for portrait shots (EXIF Orientation=6/8). The estimator previously used the short side of the 35 mm-equivalent frame when computing the long-edge FOV, which shrank the solver's pixel-scale prior and made **portrait photos fail to solve**. The long-edge FOV is now always computed from the 36 mm long side, identical for portrait and landscape.
-- **Native star extraction fix** (v1.5.55, **critical**): the native engine extracted **zero stars on every device**. Three compounding C-level defects had been misdiagnosed as "a data race on some ARM64 models" — they reproduce 100 % of the time on x86_64 as well: (1) `simplexy_set_defaults()` memsets the whole struct, but the bridge filled `image/nx/ny` *before* calling it, so those three fields were zeroed; (2) `simplexy_free_contents()` calls `free(s->image)`, yet that pointer comes from JNI `GetFloatArrayElements` (an ART heap pointer that only `Release...Elements` may hand back) — defect (1) nulled the pointer and conveniently masked (2); (3) the success test read `if (rc != 0 || npeaks <= 0)`, inverting the real semantics (`rc=0` means no pixel rose above threshold, i.e. failure), so the branch was always taken, the SEP path never succeeded, and the "SEP-first" three-tier fallback on the Kotlin side never ran. The same release also fixed `maxStars` truncating by scan order (now takes the top k by flux), a silently ignored `thresholdBgMultiple`, a JNI array-length leak, a three-state timeout misjudgement, `pthread_create` failure being reported as a timeout, and an unbounded `join` (now a 5 s grace period plus detach protection).
-- **Engineering hardening** (v1.5.56): user-supplied astrometry.net API keys are now stored with `EncryptedSharedPreferences` (previously plaintext; existing values migrate automatically on read); build scripts no longer hard-code local paths (`STARCAM_KEYSTORE` env var → `-PkeystoreProps` → `~/.starcam/`); a **GitHub Actions CI** workflow runs the unit tests plus a gitleaks credential scan; the camera analysis stream switched to `YUV_420_888` reading only the Y plane (eliminating 1.9 M `ByteBuffer.get()` calls per frame); the online client is hardened (HTTPS enforced, exponential backoff, upload de-duplication); debug switches were narrowed to `internal`.
-- **Reclaimable index memory** (v1.5.57): the ~11 MB catalog index cache is now handed back under memory pressure, reducing the chance of the app being killed in the background. Solver thread state moved from a **process-wide singleton** to **one instance per solve** (fixing a use-after-free latent in v1.5.55: if an earlier solve leaked a thread on timeout and the current one finished cleanly, the caller would `solver_free` memory still being read); a new `releaseIndexes()` JNI entry point plus an `Application.onTrimMemory` hook frees the indexes on `TRIM_MEMORY_RUNNING_LOW` — deliberately not a more aggressive threshold, so that back-to-back solves do not drop the cache and end up slower. Release is refused while a detached timeout thread may still be running: **rather hold 11 MB than crash**.
-- **Narrow fields down to a 10° field of view** (v1.5.63): a tiered catalog — the
-  shallow tier (mag ≤ 4.0) handles wide fields above 30°, and only when the whole
-  shallow path fails does the engine retry with the deep tier (mag ≤ 6.5, 8,415
-  stars). Measured: 10° fields go from unsolvable to solvable, the 12-photo
-  wide-field regression is bit-for-bit unchanged, and **the APK size does not
-  change** (the deep tier reuses catalog data already in the package). Why not
-  deepen globally: measured to make 30° wide fields go from solvable to
-  unsolvable and to introduce scale-collapse false positives. The deep tier also
-  enforces a 90° FOV ceiling to reject those artefacts.
-- **Solving is 3.4× faster** (v1.5.62): total solve time across the 12-photo
-  wide-field regression set drops from 46.6 s to 13.8 s (fastest single photo
-  0.36 s, slowest 2.6 s). The causes were that the triangle index wrote every
-  triangle into 9 adjacent buckets, so a 729-bucket query re-visited the same
-  object 9 times (one voting round traversed 59.66 M index entries, nine tenths
-  of them duplicates), and that candidate merging loaded everything into a hash
-  map before sorting it. **Results are bit-identical after the fix**: the 12
-  photos report the same inlier counts as before, still 12/12 correct with zero
-  false positives.
-- **Star-extraction threshold fix** (v1.5.61, **critical**): fixes "the original photo
-  will not solve, but raising the contrast in a gallery app does". The cause was in
-  **star extraction**: a threshold parameter was misused — the caller's "background
-  noise multiple" was written straight into the extractor's "peak significance" field.
-  At the value in use the detection limit worked out to 0.56× the noise, i.e. *below*
-  the noise floor. 29% of all pixels passed, merged into a single 848,846-pixel blob,
-  exceeded the extractor's extended-object cap and was discarded entirely — every real
-  star was lost, leaving only border artifacts (all 172 "stars" in the user's log sat
-  on empty sky). After the fix over-threshold pixels drop to 0.63% and the largest
-  connected region returns to 55 pixels (a normal star). A new **extraction diagnostic**
-  in the solve log records star count, border ratio, brightness range and overlap with
-  the built-in detector, so a future failure immediately shows whether no stars were
-  extracted or they were extracted but not matched.
+### 3. AR Live Star Map & Target Navigation
+- **Zero-Latency Sensor Fusion**: Driven by rotation vector + gyroscope complementary filtering for jitter-free panning, including an **All-Sky Mode** (renders the lower hemisphere and an 8-point horizon compass when pointing downward);
+- **🎯 Target Finder**: Select any bright star, constellation, or Messier object for directional arrow guidance and pulsing target rings.
 
-- **Solve-failure fix + deterministic results** (v1.5.60, **critical**): fixes the
-  "star photo will not solve" report of 2026-09-17 and a regression in the older photo
-  that surfaced while fixing it. Four independent defects were stacked: (1) vote
-  brightness thresholds were calibrated for a different detector's units, leaving the
-  voting round idle; (2) the wide-field scoring round hard-coded one mirror direction,
-  but real photos come in both parities, so it was guaranteed to fail one of them;
-  (3) the scoring round's winning model used a different tangent-plane origin than the
-  subsequent pair expansion, discarding a 24-inlier solution; (4) origin averaging
-  across the RA = 0° seam produced a 120°-off direction and every projection failed.
-  It also removes **run-to-run randomness in the solve result** (index keys were not
-  canonicalised, so ties were cut in HashMap order). Measured: both the new and older
-  photos solve (25 inliers), all 12 demo photos solve, all 8 false-positive controls
-  are still rejected, and four consecutive full runs agree exactly.
-
-- **Solve logs** (v1.5.59): a failed solve now leaves a **reproducible scene** behind.
-  Instead of guessing from a screenshot, the log records each engine tier's outcome and
-  timing, a failure attribution (star extraction failed / too few stars / plenty of stars
-  but no catalog match), the custom matcher's voting- and scoring-round statistics, and the
-  **exact pixels the matcher consumed** (gzip, lossless) so the developer can replay your
-  photo locally. The failure screen copies the technical detail in one tap; Settings can
-  view, clear, or disable it. Local-only, never uploaded; paths keep filenames only.
-  Pixel scenes compress to 14.5% (13.8 MB → 2.0 MB), capped at 10 scenes.
-
-- **Wide-field recognition fix** (v1.5.58, **critical**): fixes "the original photo
-  will not solve, but raising the contrast in a gallery app makes it work". The cause
-  was the built-in native engine's **star-source priority**: it preferred 40 stars from
-  the app's own detector and never ran the engine's bundled `simplexy` extractor, yet on
-  wide, underexposed photos those 40 are almost all mag ~4 or brighter while the index
-  reaches considerably fainter. Controlled test on one photo: `simplexy` with all
-  **4,478** sources **solves** with 141 matches, while "brightest 40 only" **fails**.
-  Now the engine extractor runs first (app stars remain a fallback, limit raised
-  40 → 200); `simplexy` extracts **3,225** stars and wide-field photos solve again.
-
-- **Release build fix** (v1.5.57): v1.5.56 and v1.5.57 could not produce a release package at all (daily work only builds debug, so it went unnoticed). After v1.5.56 introduced encrypted storage, the Tink library referenced `com.google.errorprone.annotations.*` — compile-time annotations not shipped with the runtime dependency — and R8's "Missing classes" check treated them as fatal. Fixed with `-dontwarn` rules; also corrected a silent failure where a missing signing key on the build server produced an **unsigned** APK.
-- **Bilingual UI**: One-tap switching between Simplified Chinese and English across the entire app, including constellation, star, and deep-sky object names.
-- **Professional Astrophotography Tools**:
-  - Camera Pro manual exposure (ISO / shutter control for light pollution and faint star fields) with a bubble level;
-  - Automatic field-of-view (FOV) calibration;
-  - Direct raw image gallery loading (bypasses OS downsampling to preserve genuine faint star centroids);
-  - Dual-layer zoomable viewer (smooth comparison between original photo and annotated overlay);
-  - Visual failure diagnostics (star detection density heatmap and shooting guidance; since v1.5.49 the annotated diagnostic image matches the original resolution, so it stays sharp when zoomed);
-  - Deep space blue and night-vision red themes (protects dark adaptation in the field).
-- **Privacy First**: Fully offline by default, so photos never leave the phone. A photo is uploaded to `nova.astrometry.net` (and the local cache copy deleted right after the request) only when the user explicitly enters an API key and selects online mode. The optional location permission is used solely for on-device sensor-assisted calibration in the camera screen — never for background tracking, and never attached to an uploaded JPEG. App data is excluded from system backup. No telemetry, trackers, or ads.
+### 4. Astrophotography Tools & Dark Adaptation
+- **Tonight Sky Card**: Pure-JVM solar system ephemeris displaying moon illumination, lunar age, visibility windows for Mercury/Venus/Mars/Jupiter/Saturn, and observing advice;
+- **Native FITS & Camera RAW Support**: Built-in Kotlin FITS decoder (BITPIX 8/16/32/±32/±64 with automatic WCS/date/location priors) and camera RAW preview extractor (CR2/NEF/ARW/DNG/etc.), plus direct original-file gallery loading;
+- **Dual Themes & Bilingual UI**: Instant switching between **Deep Sky Blue** and **Night Vision Red** (preserves dark adaptation in the field), as well as Simplified Chinese and English.
 
 ---
 
 ## Project Structure
 
-```
+```text
 .
-├── code/                   # Android application source code
-│   ├── app/                # Main module (Kotlin + Jetpack Compose)
-│   │   ├── src/main/assets/indexes/         # astrometry.net offline FITS indexes
-│   │   ├── src/main/assets/offline_photos/  # Benchmark test photos (12 real night sky shots)
-│   │   └── src/main/jniLibs/arm64-v8a/      # Prebuilt libstellar_solver.so native engine
-│   ├── build.gradle.kts
-│   └── settings.gradle.kts
-├── docs/                   # Engineering architecture and 71 validation reports (§0.11 ~ §0.97)
-├── tools/                  # Python catalog generators and offline test utilities
-├── LICENSE                 # GNU General Public License v2.0
-├── README.md               # Chinese documentation
-├── README_en.md            # English documentation
-└── .gitignore
+├── code/                   # Android project source (Kotlin + Jetpack Compose Material 3)
+│   └── app/src/
+│       ├── main/java/com/starcam/astro/     # Astronomical math, solvers, and Compose UI
+│       ├── main/assets/indexes/             # Bundled astrometry.net offline FITS indexes
+│       ├── main/assets/offline_photos/      # 12 public night-sky demo photos
+│       ├── main/jniLibs/arm64-v8a/          # Prebuilt libstellar_solver.so native solver
+│       ├── main/cpp/astro_bridge.c          # JNI bridge source
+│       └── test/java/com/starcam/astro/     # 35 unit test classes & truth regression suite
+├── docs/                   # Architecture & 100+ validation reports (§0.00 – §0.121)
+├── tools/                  # Catalog generators, truth calibration & release scripts
+└── LICENSE                 # GNU General Public License v2.0
 ```
 
 ---
 
-## Building Locally
+## Building & Contributing
 
-### Prerequisites
-
-- **JDK**: OpenJDK 17
-- **Android SDK**: API 34 (Compile & Target SDK), minimum supported Android 8.0 (API 26)
-- **Gradle**: 8.12+
-- **Architecture**: The native solver engine is compiled for `arm64-v8a`. Real 64-bit devices are recommended (x86_64 emulators support the JVM star catalog engine, with native solver gracefully disabled).
-
-### Command Line Build
-
-```bash
-cd code
-
-# Assemble Debug APK
-./gradlew :app:assembleDebug
-
-# Run full unit tests (astronomical math, catalog integrity, solar-system
-# ephemerides, cross-engine checks — 269/269 passing)
-./gradlew :app:testDebugUnitTest
-
-# Output path
-# app/build/outputs/apk/debug/StarCam-v*-debug.apk
-
-# Release APK (R8-minified; add -x lintVitalRelease to skip lint on offline machines)
-./gradlew :app:assembleRelease -x lintVitalRelease
-# app/build/outputs/apk/release/StarCam-v*-release.apk
-```
-
-> CI (GitHub Actions) runs 248 of these — it passes `-PskipPhotoTests=true` to skip
-> 8 test classes that need locally-built material (`RealPhotoMatchTest` /
-> `Photo12RegressionTest` / `NarrowFieldRegressionTest` / `PhaseTimingBench` /
-> `TieredCatalogTest` / `SyntheticMidFieldTest` / `ScoredRoundBudgetTest` /
-> `FallbackStarListTest` — 15 tests in total). With the
-> material present locally the count is **269**.
-> CI additionally runs a real-photo truth regression that needs no private material:
-> `OfflinePhotosTruthTest` decodes the 12 public demo photos shipped in the repo
-> through the production selection/matching path — 12/12 must solve, zero false
-> positives (see [docs/91](docs/91-公开照片真值回归上CI-20261011.md), Chinese).
-
-### Real-Photo Regression (optional)
-
-`RealPhotoMatchTest` and `Photo12RegressionTest` read `.gray` captures
-(`int32 width + int32 height + float32 grayscale`). The material is not stored in
-the repository (privacy and size) — point the tests at your local copy:
-
-```bash
-PHOTO_DIR=/path/to/realphotos ./gradlew :app:testDebugUnitTest
-```
-
-The suite pins ground-truth assertions: `apod4` (Big Dipper, 34° narrow field)
-and `user-nanning-20260912` (a user capture, 74° wide field, ground truth from an
-independent astrometry.net solve) must solve; `apod1/2/3/5`, `pleiades`, and two
-`m44` frames must stay UNSOLVED as false-positive controls.
-
----
-
-## Contributing
-
-What you need depends on what you want to do — the bar differs a lot between the three:
-
-| What you want to do | What you need |
-|---|---|
-| Read code, change Kotlin/JVM logic, write docs or translations, run tests, build a debug APK | **JDK 17 + Android SDK 34** (no external dependencies) |
-| Change the native bridge `app/src/main/cpp/astro_bridge.c` | Also NDK r26d + astrometry.net 0.97 static libs + cfitsio 3.47 cross-build |
-| Build a release APK | Also the signing keystore `.jks` — **maintainer only** |
-
-The solver engine `.so` is committed to this repo, and `build.gradle.kts` performs no
-native build. So apart from those last two rows, you can clone, build and test right away:
+The prebuilt `libstellar_solver.so` is tracked in the repository. Building the app, editing Kotlin/UI code, and running unit tests require **only JDK 17 and Android SDK 34**:
 
 ```bash
 git clone https://github.com/1437nb/starcam-astro.git
 cd starcam-astro/code
-echo "sdk.dir=$ANDROID_HOME" > local.properties    # machine-specific, not tracked
+echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+# 1. Assemble Debug APK
 ./gradlew :app:assembleDebug
+
+# 2. Run unit tests & 12-photo public truth regression
+./gradlew :app:testDebugUnitTest --rerun-tasks -PskipPhotoTests=true
+
+# 3. Assemble Release APK (R8-minified)
+./gradlew :app:assembleRelease -x lintVitalRelease
 ```
 
-Full details — dependency list, cross-platform `.so` rebuild commands, contribution
-ideas, and submission rules — are in
-**[docs/75-外部贡献者指南与工程外依赖说明.md](docs/75-外部贡献者指南与工程外依赖说明.md)**
-(Chinese).
-
-> **Known gap in test coverage**: CI runs **248** of the 269 tests. Ten truth-regression
-> classes depend on real-photo fixtures that are **not** in the repo (privacy and size) and
-> are skipped via `-PskipPhotoTests=true`. Two layers narrow that gap, neither a substitute
-> for the private-fixture guards: ① `OfflinePhotosTruthTest` (2026-10-11) runs a truth
-> regression on the **12 public demo photos shipped in the repo**, decoded on the fly and
-> driven through the production selection/matching path (12/12 solves, zero false
-> positives); ② `SyntheticRegressionTest` renders the star catalog through a known WCS.
-> Narrow fields, faint stars and sensor artefacts still live in the local fixtures only.
-
-## License & Acknowledgements
-
-This project is licensed under the **[GNU General Public License v2.0](LICENSE)**.
-
-We gratefully acknowledge the following open-source projects and scientific catalogs:
-
-1. **[astrometry.net](https://astrometry.net/)** (GPL-2.0)
-   - Core blind plate-solving algorithms and FITS index structure.
-2. **[StellarSolver](https://github.com/rlancaste/stellarsolver)** (LGPL-2.1 / MIT)
-   - Cross-platform C++ wrapper for the astrometry.net solver.
-3. **[Stellarium](https://stellarium.org/)** (GPL-2.0)
-   - Traditional star names and celestial culture data.
-4. **[VizieR V/50 Bright Star Catalogue](https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=V/50)** (Public Domain)
-   - Bright star astrometric data (Yale BSC5).
-5. **[Android Jetpack & CameraX](https://developer.android.com/jetpack)** (Apache-2.0)
-   - Modern Android UI and camera streaming architecture.
-6. **[OkHttp](https://square.github.io/okhttp/)** (Apache-2.0)
-   - Network layer for optional online fallback API.
+| Contribution Area | Prerequisites |
+| :--- | :--- |
+| Kotlin / astronomical math / Compose UI / docs & i18n | **JDK 17 + Android SDK 34** (ready out of the box) |
+| Native JNI bridge (`app/src/main/cpp/astro_bridge.c`) | Also requires NDK r26d + `astrometry.net` 0.97 static libs + `cfitsio` 3.47 (see [`docs/75`](docs/75-外部贡献者指南与工程外依赖说明.md)) |
 
 ---
 
 ## Privacy Policy
 
-1. **Offline by Default**: Local engines and offline indexes handle solving on-device, so photos stay on the device by default.
-2. **Explicit Online Mode**: A photo is uploaded to `nova.astrometry.net` only after you enter an API key in Settings and select online mode. The local upload copy is deleted after the request finishes.
-3. **Minimal Permissions and Local Processing**: The app requests camera, photo-read, and optional location permissions for sensor-assisted calibration. Location is used only while the camera screen is open for on-device calculations; it is neither tracked in the background nor included in the uploaded JPEG. App data is excluded from system backups.
+1. **Offline by Default**: Plate-solving, ephemeris calculations, and overlay rendering run entirely on-device by default. Photos never leave your phone, with zero ads, telemetry, or third-party trackers.
+2. **Explicit Online Mode**: A photo is uploaded to `nova.astrometry.net` only when you explicitly configure an API key in Settings and enable online fallback; the temporary upload cache is deleted immediately after the request completes.
+3. **Minimal Permissions**: Camera and media permissions are used strictly for capturing and reading sky images; optional location access is used locally on-device for sensor calibration and topocentric ephemeris math, never tracked in the background or attached to uploads.
+
+---
+
+## License & Acknowledgements
+
+Licensed under the **[GNU General Public License v2.0](LICENSE)**. Special thanks to:
+
+- **[astrometry.net](https://astrometry.net/)** (GPL-2.0) — Core blind plate-solving algorithms and FITS index system
+- **[StellarSolver](https://github.com/rlancaste/stellarsolver)** (LGPL-2.1 / MIT) — Cross-platform wrapper reference
+- **[Stellarium](https://stellarium.org/)** (GPL-2.0) — 88 constellation line definitions and traditional Chinese star culture data
+- **[VizieR V/50 Bright Star Catalogue](https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=V/50)** (Public Domain) — Yale Bright Star Catalogue (BSC5)
+- **[Android Jetpack Compose & CameraX](https://developer.android.com/jetpack)** (Apache-2.0) & **[OkHttp](https://square.github.io/okhttp/)** (Apache-2.0)
