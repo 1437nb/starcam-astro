@@ -17,11 +17,18 @@ name: CI
 # 12 张公开演示图现场解码灰度，走生产的「选表 → 匹配」路径，硬线是 12/12 真解、
 # 假阳性为零（docs/91）。它不读 testdata/，因此**不在**下面的排除清单里。
 
+# 顶层最小权限锁定（只读仓库代码）
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # 每周一 04:00 UTC 定期触发全量安全与回归扫描
+    - cron: '0 4 * * 1'
   workflow_dispatch:
 
 jobs:

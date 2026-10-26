@@ -63,8 +63,6 @@ tags = ["credential", "ssh"]
 # 全局白名单：这些路径不算泄露
 [allowlist]
 paths = [
-  # 测试夹具与示例
-  '''.*(test|spec|fixture|example|sample).*''',
   # gitleaks 自身配置（规则里必然出现这些关键字）
   '''\.gitleaks\.toml$''',
 ]

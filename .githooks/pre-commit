@@ -6,7 +6,7 @@ PY=""
 for cand in \
   "python3" \
   "python" \
-  "/c/Users/byldylr/AppData/Local/Programs/DeepSeek Harness/resources/runtime/primary-runtime/dependencies/python/python.exe" \
+  "${LOCALAPPDATA}/Programs/DeepSeek Harness/resources/runtime/primary-runtime/dependencies/python/python.exe" \
   "/c/Program Files/Python311/python.exe" \
   "/c/Program Files/Python312/python.exe" \
   "/c/Program Files/Python310/python.exe"; do

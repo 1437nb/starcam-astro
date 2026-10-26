@@ -1038,7 +1038,7 @@
   - 详见 `docs/67-验证报告增补-§0.69-官方引擎星点来源优先级修复v1.5.58.md`。
 
 - **2026-09-17（v1.5.57 发版）** — **修复 R8 缺注解类导致 release 构建失败**（§0.68，发版时发现）：
-  - **现象**：v1.5.57 代码早已推送（`e63894f`），但一直**没发版** —— `apk/` 与
+  - **现象**：v1.5.57 代码早已推送，但一直**没发版** —— `apk/` 与
     GitHub Releases 最新都停在 v1.5.55。
   - **根因**：§0.66 引入 `EncryptedSharedPreferences`（androidx.security → Tink），
     Tink 的字节码引用 `com.google.errorprone.annotations.*` —— 这些是 **annotations-only
