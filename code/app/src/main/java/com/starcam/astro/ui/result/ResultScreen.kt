@@ -8,6 +8,22 @@ import android.graphics.Typeface
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -301,6 +317,26 @@ private fun LoadingContent(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "solvingMotion")
+    val sweepProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "sweepProgress",
+    )
+    val starGlowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.40f,
+        targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1100, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "starGlowAlpha",
+    )
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -322,13 +358,44 @@ private fun LoadingContent(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit,
                 )
-                if (stars.isNotEmpty()) {
-                    Canvas(Modifier.fillMaxSize()) {
+                Canvas(Modifier.fillMaxSize()) {
+                    // 1. Radar scanning beam across night sky photo
+                    val scanY = sweepProgress * size.height
+                    val bandH = 50.dp.toPx()
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0x227FB3E8),
+                                Color(0x667FB3E8),
+                            ),
+                            startY = (scanY - bandH).coerceAtLeast(0f),
+                            endY = scanY,
+                        ),
+                        topLeft = Offset(0f, (scanY - bandH).coerceAtLeast(0f)),
+                        size = Size(size.width, bandH.coerceAtMost(scanY)),
+                    )
+                    drawLine(
+                        color = Color(0xFFB5D8FF).copy(alpha = 0.75f),
+                        start = Offset(0f, scanY),
+                        end = Offset(size.width, scanY),
+                        strokeWidth = 1.5.dp.toPx(),
+                    )
+
+                    // 2. Detected candidate stars with celestial breathing glow
+                    if (stars.isNotEmpty()) {
                         for (s in stars) {
+                            val center = Offset(s.x * size.width, s.y * size.height)
+                            val baseR = (3.dp.toPx() + 6.dp.toPx() * s.brightness01).coerceAtLeast(3.dp.toPx())
                             drawCircle(
-                                color = Color(0xFFFFC24B).copy(alpha = 0.8f),
-                                radius = (3.dp.toPx() + 6.dp.toPx() * s.brightness01).coerceAtLeast(3.dp.toPx()),
-                                center = Offset(s.x * size.width, s.y * size.height),
+                                color = Color(0xFFFFC24B).copy(alpha = starGlowAlpha * 0.35f),
+                                radius = baseR * 1.6f,
+                                center = center,
+                            )
+                            drawCircle(
+                                color = Color(0xFFFFD580).copy(alpha = starGlowAlpha),
+                                radius = baseR,
+                                center = center,
                                 style = Stroke(width = 1.4.dp.toPx()),
                             )
                         }
@@ -910,13 +977,17 @@ private fun StarPhotoOverlay(
                 .clickable { showPanel = !showPanel }
                 .padding(horizontal = 10.dp, vertical = 2.dp),
         )
-        if (showPanel) {
+        AnimatedVisibility(
+            visible = showPanel,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 48.dp, end = 10.dp),
+        ) {
             LayerPanel(
                 flags = flags,
                 onChange = onFlagsChange,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 48.dp, end = 10.dp),
             )
         }
         // 按住看原图提示（§0.47）
@@ -943,15 +1014,21 @@ private fun StarPhotoOverlay(
         )
 
         // §0.47：天体科普卡片（照片底部滑出的浮层，直接可见）
-        cardObject?.let { ref ->
-            ObjectInfoCard(
-                ref = ref,
-                onDismiss = { cardObject = null },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-            )
+        AnimatedVisibility(
+            visible = cardObject != null,
+            enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+        ) {
+            cardObject?.let { ref ->
+                ObjectInfoCard(
+                    ref = ref,
+                    onDismiss = { cardObject = null },
+                )
+            }
         }
     }
 }

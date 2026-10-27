@@ -15,6 +15,15 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -49,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -160,6 +170,7 @@ fun CameraScreen(
     // §0.41：点击对焦点（相对预览的归一化坐标，null=未对焦）
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
     var focusHint by remember { mutableStateOf(true) }
+    var isCapturing by remember { mutableStateOf(false) }
     // §0.42：实时预览认星 MVP——分析流按间隔本地匹配，把星座线叠加到预览
     var livePreview by remember { mutableStateOf(true) }
     val livePreviewFlag = remember { java.util.concurrent.atomic.AtomicBoolean(true) }
@@ -622,11 +633,13 @@ fun CameraScreen(
     }
 
     fun takePhoto() {
+        if (isCapturing) return
         val capture = imageCapture
         if (capture == null) {
             message = com.starcam.astro.ui.I18n.Camera.notReady
             return
         }
+        isCapturing = true
         val file = File(context.cacheDir, "capture_${System.currentTimeMillis()}.jpg")
         val options = ImageCapture.OutputFileOptions.Builder(file).build()
 
@@ -639,6 +652,7 @@ fun CameraScreen(
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    isCapturing = false
                     if (hint != null) {
                         PointingHintStore.put(file.absolutePath, hint)
                         try {
@@ -661,6 +675,7 @@ fun CameraScreen(
                 }
 
                 override fun onError(exception: ImageCaptureException) {
+                    isCapturing = false
                     message = "${com.starcam.astro.ui.I18n.Camera.captureFailed}：${exception.message}"
                 }
             },
@@ -1062,9 +1077,17 @@ fun CameraScreen(
                     },
             ) {
                 focusPoint?.let { p ->
+                    val focusScale by animateFloatAsState(
+                        targetValue = 1.0f,
+                        animationSpec = spring(
+                            stiffness = Spring.StiffnessMediumLow,
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                        ),
+                        label = "focusAnimScale",
+                    )
                     Canvas(Modifier.fillMaxSize()) {
-                        // 对焦框：以点击点为中心的小方框（金色，四角）
-                        val w = 56.dp.toPx()
+                        // 对焦框：以点击点为中心的小方框（金色，四角收缩合焦动效）
+                        val w = 56.dp.toPx() * focusScale
                         val cx = p.x * size.width
                         val cy = p.y * size.height
                         val l = w / 2
@@ -1454,22 +1477,51 @@ fun CameraScreen(
                 }
             }
 
-            // 底部拍照按钮
+            // 底部拍照按钮（带按压回弹与曝光呼吸动效）
+            val shutterScale by animateFloatAsState(
+                targetValue = if (isCapturing) 0.86f else 1.0f,
+                animationSpec = spring(
+                    stiffness = Spring.StiffnessMedium,
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                ),
+                label = "shutterScale",
+            )
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 48.dp),
+                contentAlignment = Alignment.Center,
             ) {
+                if (isCapturing) {
+                    val infinitePulse = rememberInfiniteTransition(label = "shutterRing")
+                    val ringAlpha by infinitePulse.animateFloat(
+                        initialValue = 0.35f,
+                        targetValue = 0.90f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(700, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse,
+                        ),
+                        label = "ringAlpha",
+                    )
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Transparent,
+                        modifier = Modifier.size(86.dp),
+                        border = BorderStroke(2.dp, Color(0xFFFFC24B).copy(alpha = ringAlpha)),
+                    ) {}
+                }
                 Surface(
-                    onClick = { takePhoto() },
+                    onClick = { if (!isCapturing) takePhoto() },
                     shape = CircleShape,
                     color = Color.White,
-                    modifier = Modifier.size(72.dp),
+                    modifier = Modifier
+                        .size(72.dp)
+                        .scale(shutterScale),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Surface(
                             shape = CircleShape,
-                            color = Color.Transparent,
+                            color = if (isCapturing) Color(0xFFFFC24B).copy(alpha = 0.65f) else Color.Transparent,
                             modifier = Modifier.size(58.dp),
                             border = BorderStroke(4.dp, Color.Black.copy(alpha = 0.3f)),
                         ) {}

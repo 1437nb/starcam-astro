@@ -2,9 +2,13 @@ package com.starcam.astro.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -37,12 +41,35 @@ fun StarCamApp(viewModel: AppViewModel = viewModel()) {
         viewModel.goBack()
     }
 
-    // 页面转场（§0.40）：滑动 + 淡入淡出；返回手势/按钮沿用 BackHandler
+    // 页面转场（§0.40 / 动效升级）：依页面类型自适应沉浸式动效；返回手势沿用 BackHandler
     AnimatedContent(
         targetState = viewModel.screen,
         transitionSpec = {
-            (slideInHorizontally(tween(260)) { it / 5 } + fadeIn(tween(260))) togetherWith
-                (slideOutHorizontally(tween(200)) { -it / 5 } + fadeOut(tween(200)))
+            if (targetState is Screen.Camera || initialState is Screen.Camera) {
+                // 相机进入/退出：使用沉浸式渐隐渐入与微缩放，消除硬件取景画面横向撕裂
+                (fadeIn(animationSpec = tween(280, easing = FastOutSlowInEasing)) +
+                    scaleIn(initialScale = 0.94f, animationSpec = tween(280, easing = FastOutSlowInEasing))) togetherWith
+                    (fadeOut(animationSpec = tween(220, easing = FastOutLinearInEasing)) +
+                        scaleOut(targetScale = 1.04f, animationSpec = tween(220, easing = FastOutLinearInEasing)))
+            } else {
+                // 常规页面层级导航：流畅的 Material 3 弹性水平滑动与微缩放
+                val isForward = when {
+                    initialState is Screen.Home -> true
+                    targetState is Screen.Home -> false
+                    else -> true
+                }
+                if (isForward) {
+                    (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
+                        fadeIn(tween(260, easing = FastOutSlowInEasing))) togetherWith
+                        (slideOutHorizontally(tween(240, easing = FastOutLinearInEasing)) { -it / 4 } +
+                            fadeOut(tween(200, easing = FastOutLinearInEasing)))
+                } else {
+                    (slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { -it / 4 } +
+                        fadeIn(tween(240, easing = FastOutSlowInEasing))) togetherWith
+                        (slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeOut(tween(200, easing = FastOutLinearInEasing)))
+                }
+            }
         },
         label = "screen",
     ) { s ->

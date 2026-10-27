@@ -3,6 +3,13 @@ package com.starcam.astro.ui.home
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +45,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,8 +58,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.starcam.astro.ui.AppIcons
 import com.starcam.astro.ui.I18n
@@ -63,7 +74,7 @@ import com.starcam.astro.ui.theme.successContainer
 import com.starcam.astro.util.ImageUtils
 
 /**
- * 主页（§0.85 Material 3 重构）：拍照认星 / 相册选图 / 离线演示 / 设置。
+ * 主页（§0.85 Material 3 重构 + 品牌动效升级）：拍照认星 / 相册选图 / 离线演示 / 设置。
  *
  * Google 风格的要点：
  *  - 主操作**只有这一个** filled 药丸按钮（M3 默认 shape，不再 16dp 方圆角）；
@@ -149,7 +160,7 @@ fun HomeScreen(
             )
             Spacer(Modifier.height(StarCamDimens.xxl))
 
-            // ── 主操作：拍照认星（M3 默认药丸形）──
+            // ── 主操作：拍照认星（M3 默认药丸形 + 柔和阴影触控）──
             Button(
                 onClick = onCapture,
                 modifier = Modifier
@@ -159,6 +170,10 @@ fun HomeScreen(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
+                elevation = ButtonDefaults.buttonElevation(
+                    defaultElevation = 2.dp,
+                    pressedElevation = 6.dp,
+                ),
             ) {
                 Icon(
                     AppIcons.Camera,
@@ -166,7 +181,7 @@ fun HomeScreen(
                     modifier = Modifier.size(StarCamDimens.iconSize),
                 )
                 Spacer(Modifier.size(StarCamDimens.sm))
-                Text(I18n.Home.takePhoto, style = MaterialTheme.typography.titleMedium)
+                Text(I18n.Home.takePhoto, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(StarCamDimens.md))
 
@@ -211,7 +226,7 @@ fun HomeScreen(
 
             Spacer(Modifier.height(StarCamDimens.sectionGap))
 
-            // ── 今日天象卡片（Material 3 风格）──
+            // ── 今日天象卡片（Material 3 风格 + 弹性微动效）──
             TonightSkyCard()
 
             Spacer(Modifier.height(StarCamDimens.sectionGap))
@@ -375,12 +390,42 @@ private fun UsageLine(text: String) {
 
 /**
  * 首页顶部品牌徽章图标（与桌面 Adaptive Icon 视觉同源：「镜头取景 + 盲解三角形与星座连线 + 十字星芒」）。
- * 支持深空蓝（默认）与夜视红（暗适应）双主题自动切换配色。
+ * 支持深空蓝（默认）与夜视红（暗适应）双主题自动切换配色，带有微光宇宙呼吸动效。
  */
 @Composable
 private fun StarCamBrandIcon(modifier: Modifier = Modifier) {
     val isNightRed = ThemeState.mode == AppThemeMode.NIGHT_RED
     val shape = RoundedCornerShape(20.dp)
+
+    // 宇宙微光呼吸动效（平滑纯 GPU 渲染，零每帧分配）
+    val infiniteTransition = rememberInfiniteTransition(label = "brandPulse")
+    val starGlowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.72f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "starGlowAlpha",
+    )
+    val starScale by infiniteTransition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "starScale",
+    )
+    val ringRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(90000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "ringRotation",
+    )
 
     val bgColors = if (isNightRed) {
         listOf(Color(0xFF280B0B), Color(0xFF140505), Color(0xFF060202))
@@ -416,13 +461,15 @@ private fun StarCamBrandIcon(modifier: Modifier = Modifier) {
             )
         )
 
-        // 外围天球赤纬环暗纹
-        drawCircle(
-            color = skyColor.copy(alpha = 0.10f),
-            radius = 40f * s,
-            center = pt(54f, 54f),
-            style = Stroke(width = 0.8f * s),
-        )
+        // 外围天球赤纬环暗纹（缓慢旋转微动）
+        rotate(ringRotation, pivot = pt(54f, 54f)) {
+            drawCircle(
+                color = skyColor.copy(alpha = 0.12f),
+                radius = 40f * s,
+                center = pt(54f, 54f),
+                style = Stroke(width = 0.8f * s),
+            )
+        }
 
         // 2. 相机取景框四角折线
         val bracketStroke = Stroke(width = 2.6f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
@@ -536,10 +583,10 @@ private fun StarCamBrandIcon(modifier: Modifier = Modifier) {
             drawCircle(color = nodeCoreColor, radius = 1.75f * s, center = node)
         }
 
-        // 6. 主星十字星芒（61.0, 44.8）
+        // 6. 主星十字星芒（61.0, 44.8）（伴随微光呼吸）
         val mainStar = pt(61.0f, 44.8f)
-        drawCircle(color = goldColor.copy(alpha = 0.18f), radius = 8.0f * s, center = mainStar)
-        drawCircle(color = goldColor.copy(alpha = 0.35f), radius = 4.8f * s, center = mainStar)
+        drawCircle(color = goldColor.copy(alpha = 0.20f * starGlowAlpha), radius = 8.0f * s * starScale, center = mainStar)
+        drawCircle(color = goldColor.copy(alpha = 0.40f * starGlowAlpha), radius = 4.8f * s * starScale, center = mainStar)
 
         val starSpikes = Path().apply {
             moveTo(61.0f * s, 34.5f * s)
@@ -552,7 +599,9 @@ private fun StarCamBrandIcon(modifier: Modifier = Modifier) {
             lineTo(59.3f * s, 43.1f * s)
             close()
         }
-        drawPath(starSpikes, color = goldColor)
+        scale(starScale, pivot = mainStar) {
+            drawPath(starSpikes, color = goldColor.copy(alpha = 0.88f + 0.12f * starGlowAlpha))
+        }
         drawCircle(color = starCoreColor, radius = 2.2f * s, center = mainStar)
     }
 }

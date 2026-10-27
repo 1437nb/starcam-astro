@@ -1,6 +1,17 @@
 package com.starcam.astro.ui.home
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -16,7 +27,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -37,7 +48,7 @@ import com.starcam.astro.ui.I18n
 import java.util.Locale
 
 /**
- * 今日天象概览卡片（Material 3 风格）：展示当晚月相、照度、观测建议与主要行星视窗。
+ * 今日天象概览卡片（Material 3 风格 + 弹性微动效）：展示当晚月相、照度、观测建议与主要行星视窗。
  */
 @Composable
 fun TonightSkyCard(
@@ -47,18 +58,30 @@ fun TonightSkyCard(
     var expanded by remember { mutableStateOf(false) }
     val isEn = I18n.isEn
 
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        label = "chevronRotation",
+    )
+
+    val elevation by animateDpAsState(
+        targetValue = if (expanded) 3.dp else 1.dp,
+        animationSpec = tween(250),
+        label = "elevation",
+    )
+
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .clickable { expanded = !expanded },
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 1.dp,
+        tonalElevation = elevation,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
         ) {
-            // 顶栏：标题 + 月相速览
+            // 顶栏：标题 + 月相速览 + 旋转箭头
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -79,9 +102,11 @@ fun TonightSkyCard(
                     )
                     Spacer(Modifier.width(4.dp))
                     Icon(
-                        imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                        imageVector = Icons.Filled.KeyboardArrowDown,
                         contentDescription = null,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier
+                            .size(20.dp)
+                            .rotate(chevronRotation),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -123,8 +148,19 @@ fun TonightSkyCard(
                 }
             }
 
-            // 展开详情：月龄参数与各行星观测视窗
-            AnimatedVisibility(visible = expanded) {
+            // 展开详情：月龄参数与各行星观测视窗（平滑弹性展开/收起）
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(
+                    animationSpec = spring(
+                        stiffness = Spring.StiffnessMediumLow,
+                        dampingRatio = Spring.DampingRatioLowBouncy,
+                    ),
+                ) + fadeIn(tween(250, easing = FastOutSlowInEasing)),
+                exit = shrinkVertically(
+                    animationSpec = tween(220, easing = FastOutLinearInEasing),
+                ) + fadeOut(tween(180)),
+            ) {
                 Column(modifier = Modifier.padding(top = 14.dp)) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     Spacer(Modifier.height(12.dp))
