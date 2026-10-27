@@ -146,6 +146,7 @@ C:\dev\android-ndk-r26d\        NDK r26d（Windows 原生 clang 17）
    它们不属于本工程，不要因探索而翻动。
 6. **AR / 相机改动**：`ui/camera/CameraScreen.kt` 是超大文件，内部按 `§0.xx` 注释分区；
    须保持**零每帧分配**（Paint / 数组在 `remember` 里一次性创建）。
+7. **禁止未授权推送（重要）**：未经开发者明确要求，**绝不自动向远程仓库（GitHub / 镜像机等）执行 `git push`**。日常工作仅在本地完成修改、测试与 commit，只有在开发者明确发出「推送」、「push」或「发版」指令时，方可执行推送。
 
 ---
 
