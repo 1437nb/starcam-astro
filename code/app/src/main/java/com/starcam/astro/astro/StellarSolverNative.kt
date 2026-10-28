@@ -462,24 +462,41 @@ object StellarSolverNative {
     }
 
     /**
+     * 校验 FITS 索引文件完整性（§0.123 修复 P2-1）。
+     * FITS 标准强制规范：
+     * 1. 文件长度必须 ≥2880 字节且严格为 2880 字节的整数倍；
+     * 2. 首个 Header 卡片（80 字节 ASCII）必须以 "SIMPLE  =" 起始。
+     */
+    internal fun isValidFitsIndex(file: File): Boolean = FitsIndexValidator.isValidFitsIndex(file)
+
+    /**
      * 确保索引文件在 filesDir（首次从 assets 解压）。返回完整路径列表，
      * 缺失的索引自动跳过（如窄场索引用户未下载时）。
+     * §0.123 修复 P2-1：临时文件解压 + 原子替换 + FITS 完整性自愈。
      */
     private fun ensureIndexes(context: Context): Array<String> {
         val dir = File(context.filesDir, "indexes").apply { mkdirs() }
         val result = ArrayList<String>()
         for (name in BUNDLED_INDEX_NAMES) {
             val f = File(dir, name)
-            if (!f.exists() || f.length() == 0L) {
+            if (!isValidFitsIndex(f)) {
+                val tmp = File(dir, "$name.tmp")
                 try {
                     context.assets.open("indexes/$name").use { input ->
-                        f.outputStream().use { output -> input.copyTo(output) }
+                        tmp.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    if (isValidFitsIndex(tmp)) {
+                        if (f.exists()) f.delete()
+                        tmp.renameTo(f)
+                    } else {
+                        tmp.delete()
                     }
                 } catch (e: Exception) {
+                    tmp.delete()
                     continue // 未打包该索引：跳过
                 }
             }
-            if (f.length() > 0L) result.add(f.absolutePath)
+            if (isValidFitsIndex(f)) result.add(f.absolutePath)
         }
         return result.toTypedArray()
     }
@@ -564,6 +581,33 @@ object NativeEngineProbe {
             System.loadLibrary("stellar_solver")
             true
         } catch (e: Throwable) {
+            false
+        }
+    }
+}
+
+/**
+ * §0.123 修复 P2-1：FITS 索引完整性校验器（纯 JVM，不触发 System.loadLibrary）。
+ */
+object FitsIndexValidator {
+    /**
+     * 校验 FITS 索引文件完整性。
+     * FITS 标准强制规范：
+     * 1. 文件长度必须 ≥2880 字节且严格为 2880 字节的整数倍；
+     * 2. 首个 Header 卡片（80 字节 ASCII）必须以 "SIMPLE  =" 起始。
+     */
+    fun isValidFitsIndex(file: File): Boolean {
+        if (!file.exists() || !file.isFile) return false
+        val len = file.length()
+        if (len < 2880L || len % 2880L != 0L) return false
+        return try {
+            file.inputStream().use { input ->
+                val header = ByteArray(80)
+                val read = input.read(header)
+                if (read < 80) false
+                else String(header, 0, 80, Charsets.US_ASCII).startsWith("SIMPLE  =")
+            }
+        } catch (_: Exception) {
             false
         }
     }

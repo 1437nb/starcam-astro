@@ -27,6 +27,11 @@ class NativeSolveStep : SolveStep {
         coroutineContext.ensureActive()
         ctx.token.check()
 
+        if (!com.starcam.astro.astro.NativeEngineProbe.available) {
+            ctx.log.line(ctx.context, "官方引擎：当前设备架构不支持原生引擎库，跳过")
+            return StepOutcome.Skipped("当前架构不支持原生引擎")
+        }
+
         if (ctx.isBudgetDepleted) {
             ctx.log.line(ctx.context, "官方引擎：全局时间预算耗尽，跳过")
             return StepOutcome.Skipped("全局时间预算耗尽")

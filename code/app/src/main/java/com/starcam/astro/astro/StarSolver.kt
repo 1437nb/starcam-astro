@@ -250,18 +250,23 @@ object StarSolver {
      * - OFFLINE_ONLY：AUTO 的本地部分（星表 + 官方），无在线。
      * - ONLINE_ONLY：仅在线（无 Key 时返回空列表，调用方给引导）。
      */
-    fun planSteps(fovDeg: Double?, mode: EngineMode, hasApiKey: Boolean): List<SolveEngine> {
+    fun planSteps(
+        fovDeg: Double?,
+        mode: EngineMode,
+        hasApiKey: Boolean,
+        nativeAvailable: Boolean = true,
+    ): List<SolveEngine> {
         val steps = ArrayList<SolveEngine>()
         fun localSteps() {
             val fov = fovDeg
             when {
                 fov == null -> {
                     steps += SolveEngine.LOCAL_MATCHER
-                    steps += SolveEngine.ASTROMETRY_NATIVE
+                    if (nativeAvailable) steps += SolveEngine.ASTROMETRY_NATIVE
                 }
                 fov in NATIVE_FOV_MIN_DEG..NATIVE_FOV_MAX_DEG -> {
-                    if (fov >= LOCAL_FOV_MIN_DEG) steps += SolveEngine.LOCAL_MATCHER
-                    steps += SolveEngine.ASTROMETRY_NATIVE
+                    if (fov >= LOCAL_FOV_MIN_DEG || !nativeAvailable) steps += SolveEngine.LOCAL_MATCHER
+                    if (nativeAvailable) steps += SolveEngine.ASTROMETRY_NATIVE
                 }
                 else -> steps += SolveEngine.LOCAL_MATCHER
             }
@@ -270,7 +275,7 @@ object StarSolver {
             EngineMode.ONLINE_ONLY -> if (hasApiKey) steps += SolveEngine.ONLINE_NOVA
             EngineMode.OFFLINE_ONLY -> localSteps()
             EngineMode.NATIVE_FIRST -> {
-                steps += SolveEngine.ASTROMETRY_NATIVE
+                if (nativeAvailable) steps += SolveEngine.ASTROMETRY_NATIVE
                 steps += SolveEngine.LOCAL_MATCHER
                 if (hasApiKey) steps += SolveEngine.ONLINE_NOVA
             }
@@ -535,7 +540,12 @@ object StarSolver {
         token.check()
 
         val fov = readFovDeg(imagePath)
-        val steps = planSteps(fov, settings.engineMode, settings.hasApiKey)
+        val steps = planSteps(
+            fovDeg = fov,
+            mode = settings.engineMode,
+            hasApiKey = settings.hasApiKey,
+            nativeAvailable = NativeEngineProbe.available,
+        )
         if (steps.isEmpty()) return@withContext null
 
         val budgetSec = settings.solveBudgetSec.toDouble()
@@ -601,7 +611,13 @@ object StarSolver {
             enginesTried.add("内置星表")
             enginesTried.add("官方引擎")
 
-            val raceOutcome = raceSteps(ctx, localStep, nativeStep)
+            val raceTimeout = (deadlineMs - System.currentTimeMillis()).coerceAtLeast(1000L)
+            val raceOutcome = kotlinx.coroutines.withTimeoutOrNull(raceTimeout) {
+                raceSteps(ctx, localStep, nativeStep)
+            } ?: run {
+                log.line(context, "双引擎并发竞速超时（耗尽剩余预算 ${raceTimeout}ms）")
+                StepOutcome.Failure(reason = "竞速超时")
+            }
             when (raceOutcome) {
                 is StepOutcome.Success -> return@withContext raceOutcome.result
                 is StepOutcome.Failure -> {
@@ -622,7 +638,13 @@ object StarSolver {
                 token.check()
                 if (!ctx.isBudgetDepleted) {
                     enginesTried.add("在线识别")
-                    val onlineOutcome = onlineStep.execute(ctx.copy(fovOverride = fovOverride))
+                    val onlineTimeout = (deadlineMs - System.currentTimeMillis()).coerceAtLeast(1000L)
+                    val onlineOutcome = kotlinx.coroutines.withTimeoutOrNull(onlineTimeout) {
+                        onlineStep.execute(ctx.copy(fovOverride = fovOverride))
+                    } ?: run {
+                        log.line(context, "在线识别超时（耗尽剩余预算 ${onlineTimeout}ms）")
+                        StepOutcome.Failure(reason = "在线识别超时")
+                    }
                     if (onlineOutcome is StepOutcome.Success) {
                         return@withContext onlineOutcome.result
                     }
@@ -641,7 +663,13 @@ object StarSolver {
                 val step = stepMap[engine] ?: continue
                 enginesTried.add(engine.labelZh)
 
-                val outcome = step.execute(ctx.copy(fovOverride = fovOverride))
+                val stepTimeout = (deadlineMs - System.currentTimeMillis()).coerceAtLeast(1000L)
+                val outcome = kotlinx.coroutines.withTimeoutOrNull(stepTimeout) {
+                    step.execute(ctx.copy(fovOverride = fovOverride))
+                } ?: run {
+                    log.line(context, "${engine.labelZh}：单步执行超时（耗尽剩余预算 ${stepTimeout}ms），跳过")
+                    StepOutcome.Failure(reason = "单步超过预算")
+                }
                 when (outcome) {
                     is StepOutcome.Success -> return@withContext outcome.result
                     is StepOutcome.Failure -> {

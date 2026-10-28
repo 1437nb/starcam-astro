@@ -129,9 +129,27 @@ object HistoryStore {
         }
     }
 
+    /** 计算文件内容指纹（SHA-256 前 16 位，异常时回退大小与修改时间） */
+    internal fun computeFileFingerprint(file: File): String {
+        return try {
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buf = ByteArray(16384)
+                var n: Int
+                while (input.read(buf).also { n = it } > 0) {
+                    md.update(buf, 0, n)
+                }
+            }
+            md.digest().joinToString("") { String.format(java.util.Locale.ROOT, "%02x", it) }.take(16)
+        } catch (_: Exception) {
+            "${file.length()}_${file.lastModified()}"
+        }
+    }
+
     /**
      * 将图片文件持久化复制到应用私有目录 `filesDir/history`。
      * 防止系统或用户清理缓存目录 `cacheDir` 导致历史条目图片失效。
+     * §0.123 修复 P1-4：按内容指纹命名，若已转存过直接复用，杜绝重复拷贝。
      */
     private fun persistImageForHistory(context: Context, originalPath: String): String {
         return try {
@@ -141,9 +159,13 @@ object HistoryStore {
             if (src.parentFile?.canonicalPath == historyDir.canonicalPath) {
                 return src.absolutePath
             }
-            val targetName = "${System.currentTimeMillis()}_${src.name}"
+            val fp = computeFileFingerprint(src)
+            val ext = src.extension.ifEmpty { "jpg" }
+            val targetName = "hist_${fp}_${src.length()}.$ext"
             val targetFile = File(historyDir, targetName)
-            src.copyTo(targetFile, overwrite = true)
+            if (!targetFile.exists() || targetFile.length() != src.length()) {
+                src.copyTo(targetFile, overwrite = true)
+            }
             targetFile.absolutePath
         } catch (_: Exception) {
             originalPath
@@ -178,6 +200,26 @@ object HistoryStore {
             newList.add(e)
         }
         write(context, newList)
+
+        // §0.123 修复 P1-4：淘汰或不在列表中的历史图片文件同步清理，防止私有存储无界增长
+        try {
+            val historyDir = File(context.filesDir, "history")
+            if (historyDir.exists() && historyDir.isDirectory) {
+                val activePaths = newList.mapNotNull {
+                    runCatching { File(it.imagePath).canonicalPath }.getOrNull()
+                }.toSet()
+                historyDir.listFiles()?.forEach { file ->
+                    if (file.isFile) {
+                        val canonical = runCatching { file.canonicalPath }.getOrNull()
+                        if (canonical != null && canonical !in activePaths) {
+                            runCatching { file.delete() }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+
         return persistentEntry
     }
 

@@ -183,4 +183,71 @@ class CameraMathTest {
         assertEquals(1920f, rect169.width, 1e-4f)
         assertEquals(1080f, rect169.height, 1e-4f)
     }
+
+    @Test
+    fun computeFitCenterRectByContentDimensions() {
+        // §0.123 修复 P1-1：按实际帧像素尺寸精确居中
+        // 1) 竖屏容器 1080x2400，竖屏帧 600x800（3:4）：贴合宽 1080，高 1440，垂直上下各留 480px
+        val rectPortrait = CameraMath.computeFitCenterRect(1080f, 2400f, 600, 800)
+        assertEquals(0f, rectPortrait.left, 1e-4f)
+        assertEquals(480f, rectPortrait.top, 1e-4f)
+        assertEquals(1080f, rectPortrait.width, 1e-4f)
+        assertEquals(1440f, rectPortrait.height, 1e-4f)
+
+        // 2) 横屏容器 2400x1080，横屏帧 800x600（4:3）：贴合高 1080，宽 1440，水平左右各留 480px
+        val rectLandscape = CameraMath.computeFitCenterRect(2400f, 1080f, 800, 600)
+        assertEquals(480f, rectLandscape.left, 1e-4f)
+        assertEquals(0f, rectLandscape.top, 1e-4f)
+        assertEquals(1440f, rectLandscape.width, 1e-4f)
+        assertEquals(1080f, rectLandscape.height, 1e-4f)
+
+        // 3) 非法尺寸回退全屏
+        val rectInvalid = CameraMath.computeFitCenterRect(1080f, 2400f, 0, 0)
+        assertEquals(0f, rectInvalid.left, 1e-4f)
+        assertEquals(0f, rectInvalid.top, 1e-4f)
+        assertEquals(1080f, rectInvalid.width, 1e-4f)
+        assertEquals(2400f, rectInvalid.height, 1e-4f)
+    }
+
+    @Test
+    fun computeCameraHorizontalFovDegOrientationSwitch() {
+        // §0.123 修复 P1-2：横竖屏切换时即时按新几何重算视场角
+        // 典型手机传感器：宽 6.4mm，高 4.8mm，焦距 5.0mm，传感器朝向 90°（rotated=true）
+        val focals = floatArrayOf(5.0f)
+        val sw = 6.4
+        val sh = 4.8
+
+        val fovPortrait = CameraMath.computeCameraHorizontalFovDeg(
+            focals = focals,
+            sensorWidthMm = sw,
+            sensorHeightMm = sh,
+            isPortrait = true,
+            sensorOrientationDeg = 90,
+        )
+        // 竖屏时水平方向对应传感器 height (4.8mm)：2 * atan(4.8 / 10.0) ≈ 51.28°
+        org.junit.Assert.assertNotNull(fovPortrait)
+        assertEquals(51.28, fovPortrait!!.toDouble(), 0.5)
+
+        val fovLandscape = CameraMath.computeCameraHorizontalFovDeg(
+            focals = focals,
+            sensorWidthMm = sw,
+            sensorHeightMm = sh,
+            isPortrait = false,
+            sensorOrientationDeg = 90,
+        )
+        // 横屏时水平方向对应传感器 width (6.4mm)：2 * atan(6.4 / 10.0) ≈ 65.23°
+        org.junit.Assert.assertNotNull(fovLandscape)
+        assertEquals(65.23, fovLandscape!!.toDouble(), 0.5)
+        assertTrue("横屏水平视场必须大于竖屏水平视场", fovLandscape > fovPortrait)
+
+        // 空焦距返回 null
+        val nullFov = CameraMath.computeCameraHorizontalFovDeg(
+            focals = null,
+            sensorWidthMm = sw,
+            sensorHeightMm = sh,
+            isPortrait = true,
+            sensorOrientationDeg = 90,
+        )
+        org.junit.Assert.assertNull(nullFov)
+    }
 }

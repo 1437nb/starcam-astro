@@ -5,7 +5,7 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-27（§0.122 全流程动效与UI微交互升级：相机专属转场、首页浑天仪星环与呼吸、今日天象弹性展开、快门手感/对焦弹性框、盲解雷达扫描与天体弹出动效；35类/276项单测全绿；v1.5.87）
+**最后更新**：2026-10-28（§0.123 缺点汇总报告全量整改：闭环 P1×5、P2×5、P3×4 共 14 项缺点；相机预览与叠加 FIT_CENTER 严格对齐与零帧拷贝、横竖屏旋转 AR FOV 即时重算、退出取消与位图释放、历史内容指纹去重与存储收敛、非 arm64 架构平滑回退、索引损坏自愈、全链路时间预算硬超时、图层切换 Last-Write-Wins 调度、.so 与源码哈希绑定、深域构建取消与 OOM 冷却；37 类 / 288 项单测全绿；docs/104）
 **当前基线**：v1.5.87（versionCode 107，**已发版** 2026-10-26，tag `v1.5.87`）
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
 **构建环境**：本机拥有全套高配构建环境，Kotlin 编译、全量单元测试（35 类 / 276 项全绿，约 2.5 分钟）与 APK 打包（约 2 分钟）均在本机高速完成。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
@@ -101,6 +101,32 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-10-28（§0.123：缺点汇总报告 14 项全量整改与工程加固）**：
+  - **相机几何与叠加对齐（P1-1 / P1-2 / P3-4）**：
+    1. 在 `CameraMath.kt` 扩充 `computeFitCenterRect(containerW, containerH, contentW, contentH)`，在 `CameraScreen.kt` 采用 Compose `Canvas` 将透明标注位图像素级绘制到 `fitRect` 内部，彻底消除拉伸错位；
+    2. 提炼 `CameraMath.computeCameraHorizontalFovDeg` 纯函数，`CameraScreen` 缓存物理传感器参数，`LaunchedEffect(isPortrait, sensorParams)` 毫秒级重算，横竖屏旋转无需解绑相机，星图与罗盘地平线尺度严密自适应；
+    3. `renderLiveOverlay` 改为直接创建透明底位图绘制星座线与星名，0 帧拷贝，高清透出底层相机流；叠加位图在替换与退出时显式 `recycle()` 回收。
+  - **生命周期与内存泄漏根治（P1-3）**：
+    1. `ResultScreen.kt` 拦截系统 `BackHandler` 显式调用 `viewModel.cancel()`；
+    2. 挂载 `DisposableEffect.onDispose` 触发 `viewModel.onLeaveScreen()`：即刻熔断在途求解任务与令牌，重置 `state` 释放 2200px 级大图引用，彻底杜绝跨页面内存滞留与离场耗电。
+  - **历史存储指纹去重与存储收敛（P1-4）**：
+    1. `HistoryStore.kt` 引入流式 SHA-256 内容指纹命名 `hist_${sha16}_${len}`，已存照片 0 拷贝复用，杜绝重复插入副本；
+    2. `save()` 写入后遍历 `filesDir/history/` 目录，清理不在当前 50 条活跃列表中的孤儿图片文件，私有存储容量严格收敛。
+  - **机型覆盖与引擎平滑降级（P1-5）**：
+    1. `StarSolver.planSteps` 增加 `nativeAvailable` 参数，非 arm64 / x86 模拟器上剔除 `ASTROMETRY_NATIVE`；
+    2. 窄场（<8°）在 native 缺失时自动平滑回退 `LOCAL_MATCHER`（若有 Key 仍在线兜底），杜绝特定机型必败与无可用引擎。
+  - **索引损坏自愈与时间预算硬超时（P2-1 / P2-2）**：
+    1. 提炼 `FitsIndexValidator.isValidFitsIndex` 纯 JVM 静态校验器（长度 ≥2880 且为 2880 整数倍、Header 开头为 `SIMPLE  =`）；解压写入 `.tmp` 临时文件并原子替换，损坏自动重解压修复；
+    2. `PlateSolveClient.solve` 注入 `timeoutMs` 并联动轮询 deadline；`StarSolver.solve` 与 `OnlineNovaStep` 全链路施加 `withTimeoutOrNull` / `withTimeout` 协程级硬超时。
+  - **图层切换调度与源码二进制绑定（P2-3 / P2-4 / P3-3）**：
+    1. `ZoomableImageViewer.kt` 改造为 Conflated / Last-Write-Wins 循环状态机，保证最终渲染位图 100% 对应最后一次勾选；
+    2. `build_so.bat` 编译时计算 `astro_bridge.c` 的 LF 归一化 SHA-256 并生成 `.src_sha256` 清单；`release.py` 在 preflight 前置检查中严格校验源码 SHA 与 `.so` 绑定一致性；
+    3. `.github/workflows/ci.yml` 在 `TEST-*.xml` 缺失时改为 `sys.exit(1)` 显式使 CI 失败。
+  - **深域构建分段取消与全局去重（P3-1 / P3-2）**：
+    1. `LocalStarMatcher.buildIndex` 内插 `token?.check()` 分段取消检查；捕获 OOM 后设置 60s 冷却期，避免每次求解反复卡顿 9s；
+    2. `PlateSolveClient` 将 `globalUploadLock` 与 `globalInFlightKeys` 提升至 `companion object`，按文件指纹全局跨实例严格去重互斥。
+  - **测试与验证**：新增 `StellarSolverIndexVerifyTest`（6项）、`PlateSolveClientTest`（2项）、扩充 `CameraMathTest`（2项）、`HistoryStoreTest`（1项）、`StarSolverTest`（1项）；全量 **37 类 / 288 项单元测试全绿**（2m 20s）；凭据自检 350 文件 0 泄露；debug APK 组装构建成功（7s）。详见 `docs/104-验证报告增补-§0.123-缺点汇总报告全量整改.md`。
 
 - **2026-10-27（§0.122：全流程动效与 UI 微交互升级）**：
   - **页面转场**：区分相机与标准界面，`StarCamApp.kt` 对相机界面引入专属 `fadeIn + scaleIn` / `fadeOut + scaleOut`，杜绝 SurfaceView 取景撕裂；其他界面采用流畅的 M3 水平层次滑入；

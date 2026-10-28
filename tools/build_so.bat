@@ -41,8 +41,12 @@ if not exist "%CROSS%\lib\libcfitsio.a" ( echo [错误] cfitsio 缺失 & exit /b
 set "WORK=%TEMP%\sobuild_%RANDOM%"
 mkdir "%WORK%" 2>nul
 
-echo [1/2] 编译 astro_bridge.c (arm64-v8a, API 21)...
+for /f "tokens=*" %%H in ('python -c "import hashlib; print(hashlib.sha256(open(r'%SRC%', 'rb').read().replace(b'\r\n', b'\n')).hexdigest())"') do set "SRCHASH=%%H"
+if "%SRCHASH%"=="" set "SRCHASH=manual"
+
+echo [1/2] 编译 astro_bridge.c (arm64-v8a, API 21, SHA: %SRCHASH:~0,16%)...
 call "%CC%" -O2 -fPIC -DANDROID -pthread ^
+  -DASTRO_BRIDGE_SRC_SHA256="\"%SRCHASH%\"" ^
   -I"%AN%\src\include" -I"%CROSS%\include" ^
   -c "%SRC%" -o "%WORK%\astro_bridge.o"
 if errorlevel 1 ( echo [错误] 编译失败 & rmdir /s /q "%WORK%" & exit /b 1 )
@@ -65,6 +69,7 @@ call "%CC%" -shared -o "%OUT%" "%WORK%\astro_bridge.o" ^
 if errorlevel 1 ( echo [错误] 链接失败 & rmdir /s /q "%WORK%" & exit /b 1 )
 
 rmdir /s /q "%WORK%" 2>nul
+echo %SRCHASH% > "%OUT%.src_sha256"
 echo.
 echo 产物: %OUT%
 for %%F in ("%OUT%") do echo 大小: %%~zF 字节

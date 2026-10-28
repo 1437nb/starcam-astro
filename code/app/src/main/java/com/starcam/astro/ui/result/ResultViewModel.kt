@@ -295,6 +295,18 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         solveJob?.cancel()
     }
 
+    /**
+     * 离开界面时清理（§0.123 修复 P1-3）：
+     * 取消后台求解任务、释放大尺寸位图引用，消除跨页面内存滞留与后台耗电。
+     */
+    fun onLeaveScreen() {
+        cancel()
+        lastInitiatedKey = null
+        state = ResultUiState.Loading(null, "")
+        detectedStars = emptyList()
+        detectedStarTotal = 0
+    }
+
     /** 重试求解 */
     fun retry(imagePath: String, demoRegion: SkyRegion?, settings: SettingsRepository) {
         startSolve(

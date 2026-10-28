@@ -201,6 +201,18 @@ fun ResultScreen(
         factory = ResultViewModel.factory(LocalContext.current.applicationContext as android.app.Application),
     ),
 ) {
+    // §0.123 修复 P1-3：系统返回拦截并取消在途任务，离开界面时释放位图与清理后台
+    androidx.activity.compose.BackHandler {
+        viewModel.cancel()
+        onBack()
+    }
+
+    androidx.compose.runtime.DisposableEffect(imagePath, demoRegion, cachedSolve) {
+        onDispose {
+            viewModel.onLeaveScreen()
+        }
+    }
+
     LaunchedEffect(imagePath, demoRegion, cachedSolve) {
         viewModel.initiateSolve(
             imagePath = imagePath,

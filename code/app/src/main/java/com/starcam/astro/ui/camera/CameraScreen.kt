@@ -206,6 +206,7 @@ fun CameraScreen(
     val arFlag = remember { java.util.concurrent.atomic.AtomicBoolean(settings.arLiveStarMap) }
     var arFovDeg by remember { mutableStateOf(settings.arFovDeg) }
     var fovAutoCalibrated by remember { mutableStateOf(false) }
+    var sensorParams by remember { mutableStateOf<CameraSensorParams?>(null) }
     // §0.50：Pro 手动曝光（会话级，与 EV/闪光灯一致不持久化）
     var proMode by remember { mutableStateOf(false) }
     var proIso by remember { mutableStateOf(1600) }
@@ -326,6 +327,11 @@ fun CameraScreen(
             orientationTracker.stopTracking()
             locationHelper.stopListening()
             analysisExecutor.shutdown()
+            val oldOverlay = previewOverlay
+            previewOverlay = null
+            if (oldOverlay != null && !oldOverlay.isRecycled) {
+                oldOverlay.recycle()
+            }
         }
     }
 
@@ -486,18 +492,29 @@ fun CameraScreen(
                                 }
                             }
                         } else {
-                            // §0.81：renderLiveOverlay 在合成失败时返回 null（见其说明）。
-                            // 此时跳过本次叠加即可 —— 绝不能把即将回收的帧交出去。
-                            val overlay = renderLiveOverlay(frame, res.solve.wcs!!)
+                            // §0.81 / §0.123：renderLiveOverlay 在合成失败时返回 null（见其说明）。
+                            // 传入宽高绘制透明底位图，杜绝复制整帧（P3-4）；旧位图显式回收
+                            val overlay = renderLiveOverlay(frame.width, frame.height, res.solve.wcs!!)
                             if (overlay != null) {
                                 mainHandler.post {
+                                    val old = previewOverlay
                                     previewOverlay = overlay
                                     previewLabel = label
+                                    if (old != null && old !== overlay && !old.isRecycled) {
+                                        old.recycle()
+                                    }
                                 }
                             }
                         }
                     } else {
-                        mainHandler.post { previewOverlay = null; previewLabel = "" }
+                        mainHandler.post {
+                            val old = previewOverlay
+                            previewOverlay = null
+                            previewLabel = ""
+                            if (old != null && !old.isRecycled) {
+                                old.recycle()
+                            }
+                        }
                     }
                 } catch (t: Throwable) {
                     // §0.81：改成 Throwable —— OOM 等 Error 不是 Exception，原写法会漏掉
@@ -544,30 +561,11 @@ fun CameraScreen(
                     val sensorRot = info2.getCameraCharacteristic(
                         android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION,
                     ) ?: 90
-                    val rotated = sensorRot % 180 != 0
-                    val focal = com.starcam.astro.astro.CameraMath.selectMainCameraFocal(
-                        focals, phys.width.toDouble(), phys.height.toDouble(), isPortrait, rotated,
+                    sensorParams = CameraSensorParams(
+                        focals, phys.width.toDouble(), phys.height.toDouble(), sensorRot,
                     )
-                    if (focal != null && focal > 0f) {
-                        val fovPortrait = com.starcam.astro.astro.CameraMath.horizontalFovDeg(
-                            focal.toDouble(), phys.height.toDouble(),
-                        )
-                        val fovLandscape = com.starcam.astro.astro.CameraMath.horizontalFovDeg(
-                            focal.toDouble(), phys.width.toDouble(),
-                        )
-                        val fov = if (rotated) {
-                            if (isPortrait) fovPortrait else fovLandscape
-                        } else {
-                            if (isPortrait) fovLandscape else fovPortrait
-                        }
-                        if (fov in 30.0..100.0) {
-                            arFovDeg = fov.toFloat().coerceIn(40f, 90f)
-                            fovAutoCalibrated = true
-                        }
-                    } else {
-                        fovAutoCalibrated = false
-                    }
                 } else {
+                    sensorParams = null
                     fovAutoCalibrated = false
                 }
                 isoRangeState = info2.getCameraCharacteristic(
@@ -582,6 +580,20 @@ fun CameraScreen(
             message = null
         } catch (e: Exception) {
             message = "${com.starcam.astro.ui.I18n.Camera.launchFailed}：${e.message}"
+        }
+    }
+
+    // §0.123 修复 P1-2：横竖屏旋转时，按新方向动态重算 AR FOV，无需解绑相机，消除星图错位
+    LaunchedEffect(isPortrait, sensorParams) {
+        val params = sensorParams ?: return@LaunchedEffect
+        val fov = com.starcam.astro.astro.CameraMath.computeCameraHorizontalFovDeg(
+            params.focals, params.physWidth, params.physHeight, isPortrait, params.sensorRot,
+        )
+        if (fov != null) {
+            arFovDeg = fov
+            fovAutoCalibrated = true
+        } else {
+            fovAutoCalibrated = false
         }
     }
 
@@ -1018,14 +1030,28 @@ fun CameraScreen(
                 )
             }
 
-            // §0.42：实时认星叠加层（星座线标注帧 + 识别标签）
+            // §0.42 / §0.123：实时认星叠加层（FIT_CENTER 几何对齐 + 透明底，修复 P1-1 与 P3-4）
             if (livePreview && previewOverlay != null) {
-                Image(
-                    bitmap = previewOverlay!!.asImageBitmap(),
-                    contentDescription = com.starcam.astro.ui.I18n.Camera.liveOverlayDesc,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.FillBounds,
-                )
+                val overlay = previewOverlay!!
+                val imgBmp = remember(overlay) { overlay.asImageBitmap() }
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val fitRect = com.starcam.astro.astro.CameraMath.computeFitCenterRect(
+                        size.width, size.height, overlay.width, overlay.height,
+                    )
+                    drawImage(
+                        image = imgBmp,
+                        srcOffset = androidx.compose.ui.unit.IntOffset.Zero,
+                        srcSize = androidx.compose.ui.unit.IntSize(overlay.width, overlay.height),
+                        dstOffset = androidx.compose.ui.unit.IntOffset(
+                            kotlin.math.round(fitRect.left).toInt(),
+                            kotlin.math.round(fitRect.top).toInt(),
+                        ),
+                        dstSize = androidx.compose.ui.unit.IntSize(
+                            kotlin.math.round(fitRect.width).toInt(),
+                            kotlin.math.round(fitRect.height).toInt(),
+                        ),
+                    )
+                }
                 if (previewLabel.isNotEmpty()) {
                     Surface(
                         color = Color(0xCC1A237E),
@@ -1552,6 +1578,16 @@ private class NavPaints(
 )
 
 /**
+ * §0.123 修复 P1-2：主摄物理传感器参数缓存，用于横竖屏切换时动态重算水平视场角。
+ */
+private data class CameraSensorParams(
+    val focals: FloatArray,
+    val physWidth: Double,
+    val physHeight: Double,
+    val sensorRot: Int,
+)
+
+/**
  * §0.58：AR 太阳系天体列表的帧内缓存。
  *
  * 历表侧 [SolarSystemEphemeris.cachedTopocentric] 已按 30 秒窗口复用同一实例，
@@ -1565,18 +1601,18 @@ private class SolarFrameCache {
 
 
 /**
- * §0.42：实时预览认星叠加层——把星座连线和星座名画到取景帧上。
+ * §0.42 / §0.123：实时预览认星叠加层——把星座连线和星座名画到透明背景上（P3-4 零帧拷贝）。
  * 运行在 ImageAnalysis 后台线程，返回值经 mainHandler.post 赋给 previewOverlay。
  * 使用全限定类名，避免改动 import 区。
  *
- * §0.81：合成失败（`copy` 遇 native OOM 返回 null）时返回 **null**，调用方跳过本次叠加。
- * 曾在此处 `?: return frame` —— 返回入参本身，而调用方的 `finally` 随即会
- * `recycle()` 它，Compose 拿到废位图后触发 "trying to use a recycled bitmap" 崩溃。
+ * §0.81：合成失败（遇 native OOM 返回 null）时返回 **null**，调用方跳过本次叠加。
  */
-private fun renderLiveOverlay(frame: Bitmap, wcs: WcsTransform): Bitmap? {
-    val out = frame.copy(Bitmap.Config.ARGB_8888, true) ?: return null
-    val w = out.width
-    val h = out.height
+private fun renderLiveOverlay(w: Int, h: Int, wcs: WcsTransform): Bitmap? {
+    val out = try {
+        Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    } catch (_: Throwable) {
+        return null
+    }
     val canvas = AndroidCanvas(out)
     val linePaint = Paint().apply {
         color = 0xCCFFC24B.toInt()

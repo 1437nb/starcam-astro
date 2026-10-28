@@ -166,4 +166,18 @@ class HistoryStoreTest {
         val d = HistoryStore.angSep(0.0, 0.0, 0.0, 45.0)
         assertEquals(45.0, d, 1e-4)
     }
+
+    @Test
+    fun computeFileFingerprint_stableAndDeterministic() {
+        val temp = java.io.File.createTempFile("test_hist", ".jpg")
+        try {
+            temp.writeBytes("Hello StarCam Astronomy Photo Data".toByteArray(Charsets.UTF_8))
+            val fp1 = HistoryStore.computeFileFingerprint(temp)
+            val fp2 = HistoryStore.computeFileFingerprint(temp)
+            assertEquals("相同内容的文件指纹必须绝对确定一致", fp1, fp2)
+            assertEquals(16, fp1.length)
+        } finally {
+            temp.delete()
+        }
+    }
 }

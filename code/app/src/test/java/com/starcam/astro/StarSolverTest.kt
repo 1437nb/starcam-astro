@@ -369,4 +369,40 @@ class StarSolverTest {
         val singleStep = listOf(SolveEngine.LOCAL_MATCHER)
         assertTrue(!StarSolver.canRace(false, 512L * 1024 * 1024, true, null, singleStep))
     }
+
+    @Test
+    fun planSteps_whenNativeUnavailable_skipsNativeAndFallsBackLocal() {
+        // §0.123 修复 P1-5：非 arm64 机型（x86 / 32 位）原生库缺失时，窄场回退 LOCAL_MATCHER，杜绝无可用引擎
+        val narrowNoKey = StarSolver.planSteps(
+            fovDeg = 2.0,
+            mode = EngineMode.AUTO,
+            hasApiKey = false,
+            nativeAvailable = false,
+        )
+        assertEquals(listOf(SolveEngine.LOCAL_MATCHER), narrowNoKey)
+
+        val narrowWithKey = StarSolver.planSteps(
+            fovDeg = 2.0,
+            mode = EngineMode.AUTO,
+            hasApiKey = true,
+            nativeAvailable = false,
+        )
+        assertEquals(listOf(SolveEngine.LOCAL_MATCHER, SolveEngine.ONLINE_NOVA), narrowWithKey)
+
+        val wideNoKey = StarSolver.planSteps(
+            fovDeg = 60.0,
+            mode = EngineMode.AUTO,
+            hasApiKey = false,
+            nativeAvailable = false,
+        )
+        assertEquals(listOf(SolveEngine.LOCAL_MATCHER), wideNoKey)
+
+        val nativeFirstNoKey = StarSolver.planSteps(
+            fovDeg = null,
+            mode = EngineMode.NATIVE_FIRST,
+            hasApiKey = false,
+            nativeAvailable = false,
+        )
+        assertEquals(listOf(SolveEngine.LOCAL_MATCHER), nativeFirstNoKey)
+    }
 }

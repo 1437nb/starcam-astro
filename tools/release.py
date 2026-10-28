@@ -165,6 +165,23 @@ def preflight() -> None:
         )
     else:
         print(f"  [ok] native 引擎（{JNI_SO.stat().st_size / 1024 / 1024:.1f} MB）")
+        # §0.123 修复 P2-4：校验 astro_bridge.c 源码与 .so 二进制一致性
+        bridge_src = ROOT / "code" / "app" / "src" / "main" / "cpp" / "astro_bridge.c"
+        if bridge_src.exists():
+            import hashlib
+            src_sha = hashlib.sha256(bridge_src.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+            so_bytes = JNI_SO.read_bytes()
+            sig = f"STARCAM_BRIDGE_SRC_SHA256:{src_sha}".encode("ascii")
+            sha_file = JNI_SO.parent / (JNI_SO.name + ".src_sha256")
+            file_sha = sha_file.read_text("utf-8").strip() if sha_file.exists() else ""
+            if sig not in so_bytes and file_sha != src_sha:
+                problems.append(
+                    f"native 引擎 {JNI_SO.name} 与当前 astro_bridge.c 源码哈希不一致！\n"
+                    f"    源码哈希: {src_sha}\n"
+                    f"    请先运行 tools\\build_so.bat 重建原生库后再发版。"
+                )
+            else:
+                print(f"  [ok] native 源码哈希绑定一致（{src_sha[:16]}...）")
 
     if problems:
         print()

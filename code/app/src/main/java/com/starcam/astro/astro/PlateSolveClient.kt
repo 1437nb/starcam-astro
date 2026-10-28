@@ -49,41 +49,36 @@ class PlateSolveClient(
         }
     }
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(90, TimeUnit.SECONDS)
-        .writeTimeout(180, TimeUnit.SECONDS)
-        .build()
-
-    /** 上传去重：同一张图（路径+大小+修改时间）只允许一次在途请求，避免连点浪费配额。 */
-    private val uploadLock = Mutex()
-    private var inFlightKey: String? = null
+    private val client = sharedClient
 
     /** 上传并求解；onProgress 回调进度文案。返回与 [image] 像素尺寸一致的定标结果。 */
     suspend fun solve(
         image: File,
         apiKey: String,
+        timeoutMs: Long = SOLVE_TIMEOUT_MS,
         onProgress: (String) -> Unit,
     ): SolveResult = withContext(Dispatchers.IO) {
-        val key = "${image.absolutePath}|${image.length()}|${image.lastModified()}"
-        uploadLock.withLock {
-            if (inFlightKey == key) {
+        val key = computeFileKey(image)
+        globalUploadLock.withLock {
+            if (globalInFlightKeys.contains(key)) {
                 throw PlateSolveException("该照片正在识别中，请勿重复提交。", PlateSolveException.Kind.OTHER)
             }
-            inFlightKey = key
+            globalInFlightKeys.add(key)
         }
         try {
-            solveInner(image, apiKey, onProgress)
+            solveInner(image, apiKey, timeoutMs, onProgress)
         } finally {
-            uploadLock.withLock { if (inFlightKey == key) inFlightKey = null }
+            globalUploadLock.withLock { globalInFlightKeys.remove(key) }
         }
     }
 
     private suspend fun solveInner(
         image: File,
         apiKey: String,
+        timeoutMs: Long,
         onProgress: (String) -> Unit,
     ): SolveResult {
+        val overallDeadline = System.currentTimeMillis() + timeoutMs
         onProgress("正在登录识别服务…")
         val session = login(apiKey)
 
@@ -91,15 +86,17 @@ class PlateSolveClient(
         val subId = upload(session, image)
 
         onProgress("排队等待解算…")
-        val jobId = waitForJob(subId)
+        val waitBudget = (overallDeadline - System.currentTimeMillis()).coerceAtLeast(1000L)
+        val jobId = waitForJob(subId, minOf(WAIT_FOR_JOB_TIMEOUT_MS, waitBudget))
 
-        val deadline = System.currentTimeMillis() + SOLVE_TIMEOUT_MS
+        val remainingBudget = (overallDeadline - System.currentTimeMillis()).coerceAtLeast(1000L)
+        val deadline = System.currentTimeMillis() + minOf(SOLVE_TIMEOUT_MS, remainingBudget)
         var lastStatus = ""
         var interval = POLL_INTERVAL_INITIAL_MS
         while (true) {
             if (System.currentTimeMillis() > deadline) {
                 throw PlateSolveException(
-                    "识别超时（${SOLVE_TIMEOUT_MS / 1000} 秒）。排队较久可稍后重试。",
+                    "解算超时（已达预算限制），可能天区恒星较少或服务正忙",
                     PlateSolveException.Kind.TIMEOUT,
                 )
             }
@@ -227,13 +224,13 @@ class PlateSolveClient(
     private fun emptyBody(): RequestBody = "".toRequestBody(null)
 
     /** 轮询 submissions/{id} 直到拿到第一个非空 job id */
-    private suspend fun waitForJob(subId: Long): Long {
-        val deadline = System.currentTimeMillis() + WAIT_FOR_JOB_TIMEOUT_MS
+    private suspend fun waitForJob(subId: Long, maxWaitMs: Long = WAIT_FOR_JOB_TIMEOUT_MS): Long {
+        val deadline = System.currentTimeMillis() + maxWaitMs
         var interval = POLL_INTERVAL_INITIAL_MS
         while (true) {
             if (System.currentTimeMillis() > deadline) {
                 throw PlateSolveException(
-                    "任务未进入解算队列（等待 ${WAIT_FOR_JOB_TIMEOUT_MS / 1000} 秒），请稍后重试",
+                    "任务未进入解算队列（等待 ${maxWaitMs / 1000} 秒），请稍后重试",
                     PlateSolveException.Kind.TIMEOUT,
                 )
             }
@@ -290,11 +287,35 @@ class PlateSolveClient(
     }
 
     companion object {
-        private const val SOLVE_TIMEOUT_MS = 240_000L
-        private const val WAIT_FOR_JOB_TIMEOUT_MS = 120_000L
+        const val SOLVE_TIMEOUT_MS = 240_000L
+        const val WAIT_FOR_JOB_TIMEOUT_MS = 120_000L
         private const val POLL_INTERVAL_INITIAL_MS = 2_000L
         private const val POLL_INTERVAL_MAX_MS = 15_000L
         private const val MAX_NETWORK_RETRIES = 2
+
+        private val sharedClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(90, TimeUnit.SECONDS)
+            .writeTimeout(180, TimeUnit.SECONDS)
+            .build()
+
+        private val globalUploadLock = Mutex()
+        private val globalInFlightKeys = mutableSetOf<String>()
+
+        /** 计算文件去重指纹（§0.123 修复 P3-2：全局跨实例去重） */
+        fun computeFileKey(file: File): String {
+            return try {
+                val md = java.security.MessageDigest.getInstance("SHA-256")
+                file.inputStream().use { input ->
+                    val buf = ByteArray(16384)
+                    val read = input.read(buf)
+                    if (read > 0) md.update(buf, 0, read)
+                }
+                "${file.length()}_" + md.digest().joinToString("") { String.format(java.util.Locale.ROOT, "%02x", it) }.take(16)
+            } catch (_: Exception) {
+                "${file.length()}_${file.lastModified()}"
+            }
+        }
 
         /** 只接受 HTTPS（本地回环调试地址除外，便于自建服务联调）。 */
         fun isSecureServerUrl(url: String): Boolean {

@@ -48,12 +48,18 @@ class OnlineNovaStep : SolveStep {
             val onlineDisplay = ImageUtils.decodeSampledBitmap(upload.absolutePath, 2200)
                 ?: return StepOutcome.Failure("无法解码上传图片副本")
 
+            val remainingMs = (ctx.remainingSec * 1000).toLong().coerceAtLeast(1000L)
             val solve = try {
-                val client = PlateSolveClient(ctx.settings.serverUrl)
-                client.solve(upload, key) { msg ->
-                    ctx.token.check()
-                    ctx.onProgress(msg)
+                kotlinx.coroutines.withTimeout(remainingMs) {
+                    val client = PlateSolveClient(ctx.settings.serverUrl)
+                    client.solve(upload, key, remainingMs) { msg ->
+                        ctx.token.check()
+                        ctx.onProgress(msg)
+                    }
                 }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                ctx.onProgress(if (isEn) "Online solve timed out" else "在线识别超时")
+                return StepOutcome.Failure("在线识别超过全局时间预算")
             } catch (e: PlateSolveException) {
                 ctx.onProgress(e.message ?: if (isEn) "Online solve unavailable" else "在线识别不可用")
                 return StepOutcome.Failure(e.message ?: "在线求解失败")

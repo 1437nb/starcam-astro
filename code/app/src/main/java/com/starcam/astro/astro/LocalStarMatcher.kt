@@ -15,6 +15,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 import java.util.concurrent.Callable
+import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -831,13 +832,27 @@ object LocalStarMatcher {
         return idx.triMap.values.sumOf { it.size } to ms
     }
 
-    private fun index(mag: Float = catalogMag()): StarIndex {
+    @Volatile
+    private var lastOomTimeMs = 0L
+
+    private fun index(mag: Float = catalogMag(), token: SolveToken? = null): StarIndex {
         indexCache[mag]?.let { return it }
+        // §0.123 修复 P3-1：深域构建 OOM 后设置 60s 冷却期，避免每次求解反复卡顿 9s
+        if (mag > PROD_CATALOG_MAG && System.currentTimeMillis() - lastOomTimeMs < 60_000L) {
+            return StarIndex(HashMap())
+        }
+        token?.check()
         synchronized(this) {
             indexCache[mag]?.let { return it }
+            token?.check()
             return try {
-                buildIndex(mag).also { indexCache[mag] = it }
+                buildIndex(mag, token).also { indexCache[mag] = it }
+            } catch (c: CancellationException) {
+                throw c
             } catch (t: Throwable) {
+                if (t is OutOfMemoryError) {
+                    lastOomTimeMs = System.currentTimeMillis()
+                }
                 // §0.81：索引构建可能 OOM —— 深域（mag≤6.5）是 55.6 万三角形，
                 // 项目自己记录过它「在 512MB 堆里连求解阶段都跑不完」。
                 //
@@ -1056,7 +1071,7 @@ object LocalStarMatcher {
      * 4.0~4.5 的不可匹配星，同样会稀释亮星近邻列表（仙后座回归实测）——
      * 投票工作集与索引的 mag≤4.0 域必须保持一致。
      */
-    private fun buildIndex(magLimit: Float = PROD_CATALOG_MAG): StarIndex {
+    private fun buildIndex(magLimit: Float = PROD_CATALOG_MAG, token: SolveToken? = null): StarIndex {
         val bright = StarCatalogData.stars.filter { it.mag <= magLimit }
         val triMap = HashMap<Int, MutableList<TriEntry>>()
         // §0.75 邻居搜索的空间网格。原实现对每颗星遍历整个亮星集算角距 ——
@@ -1083,7 +1098,11 @@ object LocalStarMatcher {
             }
             g
         } else null
+        var starCheck = 0
         for (a in bright) {
+            if (++starCheck % 32 == 0) {
+                token?.check()
+            }
             val neighbors: List<Triple<Int, StarEntry, Double>> = if (useGrid) {
                 neighborsWithin(a, grid!!)
                     .sortedWith(compareBy({ it.third }, { it.first }))
@@ -1580,7 +1599,7 @@ object LocalStarMatcher {
         height: Int,
         pointingHint: PointingHint?,
     ): LocalMatchResult? {
-        val idx = index(ctx.catalogMag)
+        val idx = index(ctx.catalogMag, ctx.token)
         val tbl = scoreTable(ctx.catalogMag)
         val (t1, _) = voteThresholds(detected.map { it.brightness })
         val workIdx = detected.indices.filter { detected[it].brightness >= t1 * 0.5f }.take(45)
@@ -1928,7 +1947,7 @@ object LocalStarMatcher {
         pointingHint: PointingHint? = null,
     ): List<Pair<Int, StarEntry>> {
         ctx.token?.check()
-        val idx = index(ctx.catalogMag)
+        val idx = index(ctx.catalogMag, ctx.token)
         val grid = catGrid(ctx.catalogMag)
 
         // 1) 照片局部三角形：只用亮度足以进入星表索引的亮星（阈值由调用方

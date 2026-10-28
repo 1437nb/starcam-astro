@@ -79,6 +79,31 @@ object CameraMath {
         return FitRect(rectL, rectT, rectW, rectH)
     }
 
+    /**
+     * PreviewView FIT_CENTER 显示矩形计算（按实际内容像素尺寸，§0.123 修复 P1-1）。
+     *
+     * @param containerWidth 渲染容器宽度
+     * @param containerHeight 渲染容器高度
+     * @param contentWidth 实际帧/位图内容宽度
+     * @param contentHeight 实际帧/位图内容高度
+     */
+    fun computeFitCenterRect(
+        containerWidth: Float,
+        containerHeight: Float,
+        contentWidth: Int,
+        contentHeight: Int,
+    ): FitRect {
+        if (contentWidth <= 0 || contentHeight <= 0) {
+            return FitRect(0f, 0f, containerWidth, containerHeight)
+        }
+        val aspect = contentWidth.toFloat() / contentHeight.toFloat()
+        val rectH = minOf(containerHeight, containerWidth / aspect)
+        val rectW = rectH * aspect
+        val rectL = (containerWidth - rectW) / 2f
+        val rectT = (containerHeight - rectH) / 2f
+        return FitRect(rectL, rectT, rectW, rectH)
+    }
+
     /** 档位秒 → 曝光纳秒（Camera2 SENSOR_EXPOSURE_TIME 单位） */
     fun secToNanos(sec: Double): Long = Math.round(sec * 1_000_000_000.0)
 
@@ -165,5 +190,40 @@ object CameraMath {
             }
         }
         return bestFocal
+    }
+
+    /**
+     * 根据相机物理传感器参数与当前屏幕方向，计算对应的水平 FOV 角度（§0.123 修复 P1-2）。
+     *
+     * @param focals 镜头可用实际焦距列表
+     * @param sensorWidthMm 传感器物理宽度（毫米）
+     * @param sensorHeightMm 传感器物理高度（毫米）
+     * @param isPortrait 当前屏幕是否为竖屏
+     * @param sensorOrientationDeg 传感器硬件朝向（典型为 90 或 270）
+     * @param targetFovDeg 目标主摄基准视场（默认 62°）
+     * @return 对应的水平视场（度，收敛在 40°~90° 内），不可用或异常返回 null
+     */
+    fun computeCameraHorizontalFovDeg(
+        focals: FloatArray?,
+        sensorWidthMm: Double,
+        sensorHeightMm: Double,
+        isPortrait: Boolean,
+        sensorOrientationDeg: Int,
+        targetFovDeg: Double = 62.0,
+    ): Float? {
+        if (focals == null || focals.isEmpty() || sensorWidthMm <= 0.0 || sensorHeightMm <= 0.0) return null
+        val rotated = sensorOrientationDeg % 180 != 0
+        val focal = selectMainCameraFocal(
+            focals, sensorWidthMm, sensorHeightMm, isPortrait, rotated, targetFovDeg,
+        ) ?: return null
+        if (focal <= 0f) return null
+        val fovPortrait = horizontalFovDeg(focal.toDouble(), sensorHeightMm)
+        val fovLandscape = horizontalFovDeg(focal.toDouble(), sensorWidthMm)
+        val fov = if (rotated) {
+            if (isPortrait) fovPortrait else fovLandscape
+        } else {
+            if (isPortrait) fovLandscape else fovPortrait
+        }
+        return if (fov in 30.0..100.0) fov.toFloat().coerceIn(40f, 90f) else null
     }
 }

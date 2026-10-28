@@ -80,20 +80,28 @@ fun ZoomableImageViewer(
     val currentHitTest by rememberUpdatedState(hitTest)
 
     /**
-     * §0.78 / §0.120：图层切换的重渲染统一入口，双向同步图层状态。
+     * §0.78 / §0.120 / §0.123：图层切换的重渲染统一入口，双向同步图层状态。
+     * 采用 Conflated / Last-Write-Wins 调度循环（修复 P2-3），杜绝快速切换时渲染丢失与画面勾选不一致。
      */
-    var renderingNew by remember { mutableStateOf(false) }
+    var isRendering by remember { mutableStateOf(false) }
+    var pendingFlags by remember { mutableStateOf<LayerFlags?>(null) }
     val rerender: (LayerFlags) -> Unit = { f ->
         flags = f
         currentFlagsChange?.invoke(f)
+        pendingFlags = f
         val render = currentRender
-        if (render != null && !renderingNew) {
-            renderingNew = true
+        if (render != null && !isRendering) {
+            isRendering = true
             scope.launch {
                 try {
-                    annotatedBitmap = withContext(Dispatchers.IO) { render.invoke(f) }
+                    while (true) {
+                        val targetFlags = pendingFlags ?: break
+                        pendingFlags = null
+                        val newBmp = withContext(Dispatchers.IO) { render.invoke(targetFlags) }
+                        annotatedBitmap = newBmp
+                    }
                 } finally {
-                    renderingNew = false
+                    isRendering = false
                 }
             }
         }
