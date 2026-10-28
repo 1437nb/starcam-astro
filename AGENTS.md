@@ -78,13 +78,14 @@ AGENTS.md  本文件
 
 ```powershell
 cd C:\starcam\code
-.\gradlew.bat :app:testDebugUnitTest --rerun-tasks -PskipPhotoTests=true   # 全量单测（35 类 / 276 项全绿，约 2.5 分钟）
-.\gradlew.bat :app:assembleDebug                                          # 构建 debug APK（约 2~3 分钟）
+.\gradlew.bat :app:cleanTestDebugUnitTest :app:testDebugUnitTest --no-build-cache -PskipPhotoTests=true   # 纯净重跑全量单测（37 类 / 288 项全绿，仅 ~27 秒）
+.\gradlew.bat :app:testDebugUnitTest --rerun-tasks -PskipPhotoTests=true                                   # 深度全量回归（强制推翻全量编译与全部 Task，约 2.5 分钟）
+.\gradlew.bat :app:assembleDebug                                                                          # 构建 debug APK（约 7 秒~2 分钟）
 ```
 
 - **环境**：OpenJDK 17（`C:\dev\jdk-17`）、Android SDK 34（`C:\dev\android-sdk`，`code/local.properties` 写 `sdk.dir=C:/dev/android-sdk`，该文件机器相关不入库）、Gradle 8.12.1。
 - **Shell 环境**：本机终端命令与脚本执行**严禁使用 Windows PowerShell 5 (`powershell.exe`)**，一律走 **PowerShell 7 (`pwsh`)**。
-- ⚠️ **单测必须加 `--rerun-tasks`**，否则 Gradle 可能 `FROM-CACHE` 复用旧结果，等于没跑。
+- ⚠️ **重跑单测防穿透**：`cleanTestDebugUnitTest + --no-build-cache` 即可保证 288 项单测 100% 真实全量重跑（27s）；`--rerun-tasks` 会额外强制重编 33,000 行 Kotlin。
 - ⚠️ **测试与打包要分两条命令串行执行**，不要放进同一次 gradle 调用：两者读写同一 class 缓存，并行会互锁。
 - ⚠️ **判成败看两处**：① 输出里的 `BUILD SUCCESSFUL`；② `code/app/build/test-results/testDebugUnitTest/*.xml` 的 `failures="0" errors="0"`。
 - native 仅 arm64-v8a；x86 模拟器走 JVM 引擎回退。

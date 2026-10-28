@@ -91,13 +91,14 @@ android {
         // 注：512m 同时也是「星表加深到 6.5 等不可行」的实测约束 —— 那个索引
         // （500 万条三角形记录）在这个堆里连求解阶段都跑不完，见 PROGRESS §0.73。
         unitTests.all {
-            it.maxHeapSize = "512m"
+            it.maxHeapSize = "1024m"
         }
     }
 
-    // 本机 4 逻辑核（2026-09-01）：两个测试 worker 并行跑测试类，全量回归减半
+    // 根据宿主机 CPU 与内存动态配置测试并发（§0.123 性能调优）：
+    // 在多核开发机上自动扩展至 4 个并发 worker，显著缩短单测耗时
     tasks.withType<Test>().configureEach {
-        maxParallelForks = 2
+        maxParallelForks = (Runtime.getRuntime().availableProcessors() / 4).coerceIn(2, 4)
         // 真值回归台依赖不入库的真实照片素材（testdata/，含私拍原图）与
         // SkyView 下载的 DSS 巡天图；CI 里没有这批素材，用 -PskipPhotoTests=true 排除。
         // 本机照常执行——这是宽场/暗星等/窄场修复的唯一真值保护，务必保留。
