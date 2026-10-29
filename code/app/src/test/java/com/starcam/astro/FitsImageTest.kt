@@ -230,5 +230,78 @@ class FitsImageTest {
         assertFalse(FitsImage.isFitsPath("noext"))
     }
 
+    @Test
+    fun `readMeta 流式读取文件头部元数据与视场换算`() {
+        val bytes = fitsFloat32(
+            10, 5, List(5) { FloatArray(10) { it.toFloat() } },
+            extra = listOf(
+                card("CRVAL1", 130.274), card("CRVAL2", -43.878),
+                card("CDELT1", 1.5e-3), card("CDELT2", 1.5e-3),
+                card("DATE-OBS", "2024-01-01T12:00:00"),
+                card("SITELAT", -31.0), card("SITELONG", -70.0),
+                card("OBJECT", "Vela SNR"),
+            ),
+        )
+        val tmp = java.io.File.createTempFile("fits_meta_test", ".fits")
+        try {
+            tmp.writeBytes(bytes)
+            val m = FitsImage.readMeta(tmp.absolutePath)
+            assertNotNull(m)
+            assertEquals(130.274, m!!.crval1!!, 1e-9)
+            assertEquals(-43.878, m.crval2!!, 1e-9)
+            assertEquals(-31.0, m.siteLat!!, 1e-9)
+            assertEquals("2024-01-01T12:00:00", m.dateObs)
+            assertEquals("Vela SNR", m.objectName)
+            assertEquals(0.015, m.fovDeg!!, 1e-9)
+            assertEquals(10, m.naxis1)
+            assertEquals(5, m.naxis2)
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    @Test
+    fun `readMeta 流式跳过无数据主 HDU 读取扩展 HDU 元数据`() {
+        val primary = headerBlock(
+            card("SIMPLE", "T"), card("BITPIX", 8), card("NAXIS", 0),
+        )
+        val ext = headerBlock(
+            card("XTENSION", "IMAGE"), card("BITPIX", -32), card("NAXIS", 2),
+            card("NAXIS1", 20), card("NAXIS2", 10),
+            card("CRVAL1", 45.0), card("CRVAL2", 60.0),
+        )
+        val data = ByteBuffer.allocate(20 * 10 * 4).order(ByteOrder.BIG_ENDIAN)
+        for (i in 0 until 200) data.putFloat(i.toFloat())
+        val out = ByteArrayOutputStream()
+        out.write(primary); out.write(ext); out.write(data.array())
+        val pad = (2880 - (data.array().size % 2880)) % 2880
+        out.write(ByteArray(pad))
+
+        val tmp = java.io.File.createTempFile("fits_mef_test", ".fits")
+        try {
+            tmp.writeBytes(out.toByteArray())
+            val m = FitsImage.readMeta(tmp.absolutePath)
+            assertNotNull(m)
+            assertEquals(20, m!!.naxis1)
+            assertEquals(10, m.naxis2)
+            assertEquals(45.0, m.crval1!!, 1e-9)
+            assertEquals(60.0, m.crval2!!, 1e-9)
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    @Test
+    fun `readMeta 异常路径安全返回 null`() {
+        assertNull(FitsImage.readMeta("/non/existent/file.fits"))
+        val tmp = java.io.File.createTempFile("invalid_fits", ".fits")
+        try {
+            tmp.writeBytes(byteArrayOf(0x01, 0x02, 0x03))
+            assertNull(FitsImage.readMeta(tmp.absolutePath))
+        } finally {
+            tmp.delete()
+        }
+    }
+
     private fun assertFalse(b: Boolean) = assertTrue("应为 false", !b)
 }

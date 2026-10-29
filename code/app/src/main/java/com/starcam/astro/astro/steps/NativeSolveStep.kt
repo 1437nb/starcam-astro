@@ -60,6 +60,7 @@ class NativeSolveStep : SolveStep {
         var nativeSolve: SolveResult? = null
         var nativeDetail = ""
         val effFov = ctx.fovOverride ?: ctx.fovDeg
+        val grayBuffer = StellarSolverNative.bitmapToGray(ctx.display)
 
         // 1) 传感器先验
         val sensorHint = if (ctx.settings.sensorAssistedPointing) {
@@ -80,6 +81,7 @@ class NativeSolveStep : SolveStep {
                         ctx.context, ctx.display, lo, hi,
                         sensorHint.raDeg, sensorHint.decDeg, sensorHint.radiusDeg,
                         effectiveTimeLimit,
+                        gray = grayBuffer,
                     )
                 } catch (e: Throwable) {
                     if (e is CancellationException) throw e
@@ -112,6 +114,7 @@ class NativeSolveStep : SolveStep {
                         ctx.context, ctx.display, lo, hi,
                         zenithRa, zenithDec, radius,
                         effectiveTimeLimit,
+                        gray = grayBuffer,
                     )
                 } catch (e: Throwable) {
                     if (e is CancellationException) throw e
@@ -148,7 +151,10 @@ class NativeSolveStep : SolveStep {
                         .format(lo, hi, index + 1, nativePlan.size, effectiveTimeLimit),
                 )
                 nativeSolve = try {
-                    StellarSolverNative.solveBitmap(ctx.context, ctx.display, lo, hi, effectiveTimeLimit)
+                    StellarSolverNative.solveBitmap(
+                        ctx.context, ctx.display, lo, hi, effectiveTimeLimit,
+                        gray = grayBuffer,
+                    )
                 } catch (e: Throwable) {
                     if (e is CancellationException) throw e
                     null

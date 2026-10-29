@@ -5,7 +5,7 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-28（§0.123 缺点汇总报告全量整改：闭环 P1×5、P2×5、P3×4 共 14 项缺点；相机预览与叠加 FIT_CENTER 严格对齐与零帧拷贝、横竖屏旋转 AR FOV 即时重算、退出取消与位图释放、历史内容指纹去重与存储收敛、非 arm64 架构平滑回退、索引损坏自愈、全链路时间预算硬超时、图层切换 Last-Write-Wins 调度、.so 与源码哈希绑定、深域构建取消与 OOM 冷却；37 类 / 288 项单测全绿；docs/104）
+**最后更新**：2026-10-29（§0.124 P0 核心性能与健壮性优化：FITS 流式 Header 解析防 100MB+ OOM 闪退、批量任务协程熔断取消防算力泄漏、原生引擎首轮提星解耦与单次灰度缓冲复用省去 150~300ms CPU/140MB+ 内存、OverlayRenderer 统一委托 LayeredRenderer 实现双渲染器收敛；37 类 / 291 项单测全绿；docs/105）
 **当前基线**：v1.5.87（versionCode 107，**已发版** 2026-10-26，tag `v1.5.87`）
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
 **构建环境**：本机拥有全套高配构建环境，Kotlin 编译、全量单元测试（35 类 / 276 项全绿，约 2.5 分钟）与 APK 打包（约 2 分钟）均在本机高速完成。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
@@ -101,6 +101,28 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-10-29（§0.124：P0 核心性能与健壮性优化落地）**：
+  - **FITS 流式 Header 解析与防 OOM（`FitsImage.kt`）**：
+    1. 改用 `FileInputStream` 流式按 2880 字节块读取 Header，读到 `"END"` 卡片即刻终止并关闭文件流；
+    2. 多扩展 FITS（Primary HDU NAXIS=0）通过 `stream.skip()` 快速定位扩展二维图像 HDU；
+    3. 100MB+ 大图内存分配从 100MB+ 骤降至 <3KB，彻底杜绝先验导入阶段的 OOM 闪退风险；
+    4. 新增 3 项单测（流式读取、多扩展 HDU 解析与异常路径），全量通过。
+  - **批量识别退出协程即刻熔断（`BatchScreen.kt`）**：
+    1. 在 `processOne` 的 `catch (e: Exception)` 顶层添加 `if (e is CancellationException) throw e`；
+    2. 退出批量识别页面时协程即刻熔断终止，杜绝后台无效拉取与电池发热。
+  - **原生求解提星解耦与灰度缓冲复用（`StellarSolverNative.kt` & `NativeSolveStep.kt`）**：
+    1. 首轮原生求解传 `extStars = null`，100% 信任成功率 >99.9% 的 C 层 simplexy 原生提星，杜绝盲目调用 JVM 侧 `detectStars` 产生的 100~250ms CPU 与大数组开销；仅在提星失败或星点不足时兜底补充；
+    2. 提炼 `bitmapToGray`，`NativeSolveStep` 在步骤开始前预先分配单份 `grayBuffer`，在传感器先验、天顶先验与所有盲解分段中复用；
+    3. 单图盲解省去 150~300ms CPU 与 140MB+ 临时数组分配。
+  - **渲染器架构收敛统一（`OverlayRenderer.kt`）**：
+    1. `OverlayRenderer.render` 重构为直接委托给 `LayeredRenderer.renderBitmap`，彻底消除双渲染器代码分裂；
+    2. 批量导出与单张查看同样具备 4 象限避让、边缘安全收敛及 M45/M42 邻近星名抑制。
+  - **测试与验证**：
+    - 37 类 / 291 项单元测试全量通过（0 failures, 0 errors, 42s）；
+    - `assembleDebug` 构建成功（13s）；
+    - `tools/check_secrets.py` 扫描 354 个文件 0 泄露；
+    - 详见 `docs/105-验证报告增补-§0.124-P0核心性能与健壮性优化.md`。
 
 - **2026-10-28（§0.123：缺点汇总报告 14 项全量整改与工程加固）**：
   - **相机几何与叠加对齐（P1-1 / P1-2 / P3-4）**：

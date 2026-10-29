@@ -84,9 +84,19 @@ object FitsImage {
         null
     }
 
-    /** 只读头部（先验用；不读像素，代价极小）。 */
+    /** 只读头部（先验用；按 2880 字节块流式读取，读到 END 即刻终止并关闭流，杜绝 100MB+ 大图 OOM）。 */
     fun readMeta(path: String): FitsMeta? = try {
-        readMetaBytes(java.io.File(path).readBytes())
+        java.io.FileInputStream(path).use { stream ->
+            readMetaStream(stream)
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    internal fun readMetaBytes(bytes: ByteArray): FitsMeta? = try {
+        java.io.ByteArrayInputStream(bytes).use { stream ->
+            readMetaStream(stream)
+        }
     } catch (e: Exception) {
         null
     }
@@ -189,9 +199,85 @@ object FitsImage {
         return noComment.trim()
     }
 
-    private fun readMetaBytes(bytes: ByteArray): FitsMeta? {
-        val hdu = firstImageHdu(bytes) ?: return null
-        return metaOf(hdu)
+    private fun readMetaStream(stream: java.io.InputStream): FitsMeta? {
+        val blockBuf = ByteArray(BLOCK)
+        var guard = 0
+        while (guard++ < 64) {
+            val cards = LinkedHashMap<String, String>()
+            var blocks = 0
+            var sawEnd = false
+            while (!sawEnd) {
+                if (!readFully(stream, blockBuf)) return null
+                blocks++
+                for (i in 0 until BLOCK / CARD) {
+                    val cardStart = i * CARD
+                    val key = String(blockBuf, cardStart, 8, Charsets.US_ASCII).trim()
+                    if (key == "END") {
+                        sawEnd = true
+                        break
+                    }
+                    if (key.isEmpty() || key == "COMMENT" || key == "HISTORY" || key.startsWith("'")) {
+                        continue
+                    }
+                    val eq = String(blockBuf, cardStart + 8, 2, Charsets.US_ASCII)
+                    if (eq != "= ") continue
+                    val rest = String(blockBuf, cardStart + 10, CARD - 10, Charsets.ISO_8859_1)
+                    cards[key] = parseValue(rest)
+                }
+            }
+            if (cards.isEmpty()) return null
+            val bitpix = cards["BITPIX"]?.trim()?.toIntOrNull() ?: return null
+            val naxis = cards["NAXIS"]?.trim()?.toIntOrNull() ?: 0
+            val naxis1 = cards["NAXIS1"]?.trim()?.toIntOrNull() ?: 0
+            val naxis2 = cards["NAXIS2"]?.trim()?.toIntOrNull() ?: 0
+            val headerBytes = blocks * BLOCK
+            val gcount = cards["GCOUNT"]?.trim()?.toIntOrNull() ?: 1
+            val pcount = cards["PCOUNT"]?.trim()?.toIntOrNull() ?: 0
+            var dataLen = 0L
+            if (naxis > 0) {
+                var n = 1L
+                for (k in 1..naxis) {
+                    n *= (cards["NAXIS$k"]?.trim()?.toLongOrNull() ?: 0L)
+                }
+                dataLen = (kotlin.math.abs(bitpix) / 8L) * gcount * (n + pcount)
+                dataLen = ((dataLen + BLOCK - 1) / BLOCK) * BLOCK
+            }
+            val hdu = Hdu(cards, headerBytes, dataLen)
+            if (naxis == 2 && naxis1 > 0 && naxis2 > 0) {
+                return metaOf(hdu)
+            }
+            if (dataLen <= 0L && naxis == 0 && guard > 1) return null
+            if (dataLen > 0L) {
+                skipFully(stream, dataLen)
+            }
+        }
+        return null
+    }
+
+    private fun readFully(stream: java.io.InputStream, buf: ByteArray): Boolean {
+        var offset = 0
+        while (offset < buf.size) {
+            val count = stream.read(buf, offset, buf.size - offset)
+            if (count < 0) return false
+            offset += count
+        }
+        return true
+    }
+
+    private fun skipFully(stream: java.io.InputStream, bytesToSkip: Long) {
+        var remaining = bytesToSkip
+        val discard = ByteArray(minOf(remaining, 8192L).toInt())
+        while (remaining > 0L) {
+            val skipped = stream.skip(remaining)
+            if (skipped <= 0L) {
+                val toRead = minOf(remaining, discard.size.toLong()).toInt()
+                val read = stream.read(discard, 0, toRead)
+                if (read < 0) break
+                remaining -= read
+            } else {
+                remaining -= skipped
+            }
+        }
     }
 
     private fun metaOf(hdu: Hdu): FitsMeta = FitsMeta(

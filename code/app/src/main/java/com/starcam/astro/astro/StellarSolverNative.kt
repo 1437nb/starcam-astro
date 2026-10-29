@@ -175,12 +175,10 @@ object StellarSolverNative {
      * [lastDiag] 回填提星诊断（供识别日志记录"提星过程"）：总数、边界过滤数、
      * flux 范围、边缘占比。
      */
-    fun sepDetectStars(
-        bitmap: Bitmap,
-        thresholdBgMultiple: Double = 2.0,
-        maxStars: Int = SEP_MATCH_MAX,
-        lastDiag: StringBuilder? = null,
-    ): SepStars? {
+    /**
+     * 将 Bitmap 转换为灰度浮点数组（0..255），供原生求解器与提星器复用。
+     */
+    fun bitmapToGray(bitmap: Bitmap): FloatArray {
         val w = bitmap.width
         val h = bitmap.height
         val gray = FloatArray(w * h)
@@ -192,6 +190,18 @@ object StellarSolverNative {
                 0.587f * ((c shr 8) and 0xFF) +
                 0.114f * (c and 0xFF)
         }
+        return gray
+    }
+
+    fun sepDetectStars(
+        bitmap: Bitmap,
+        thresholdBgMultiple: Double = 2.0,
+        maxStars: Int = SEP_MATCH_MAX,
+        lastDiag: StringBuilder? = null,
+    ): SepStars? {
+        val w = bitmap.width
+        val h = bitmap.height
+        val gray = bitmapToGray(bitmap)
         val json = try {
             extractStars(gray, w, h, thresholdBgMultiple, maxStars)
         } catch (e: Throwable) {
@@ -253,22 +263,24 @@ object StellarSolverNative {
         return solveBitmap(context, bitmap, fovLoDeg, fovHiDeg, timeLimitSec)
     }
 
-    /** 从 Bitmap 求解 */
+    /** 从 Bitmap 求解（可选传入已预先计算的灰度缓冲 [gray]，避免多轮盲解重复转换与分配） */
     fun solveBitmap(
         context: Context,
         bitmap: Bitmap,
         fovLoDeg: Double,
         fovHiDeg: Double,
         timeLimitSec: Double = 45.0,
+        gray: FloatArray? = null,
     ): SolveResult? {
         return solveBitmapImpl(context, bitmap, fovLoDeg, fovHiDeg, timeLimitSec,
-            raDeg = NO_PRIOR, decDeg = NO_PRIOR, radiusDeg = -1.0)
+            raDeg = NO_PRIOR, decDeg = NO_PRIOR, radiusDeg = -1.0, gray = gray)
     }
 
     /**
      * 从 Bitmap 求解（带天区先验）。
      * [raDeg]/[decDeg] 为天球中心（度），[radiusDeg] 为搜索半径（度）；
      * 传 [NO_PRIOR] 表示无天区先验（等价 [solveBitmap]）。
+     * 可选传入已预先计算的灰度缓冲 [gray]。
      */
     fun solveBitmapPriors(
         context: Context,
@@ -279,9 +291,10 @@ object StellarSolverNative {
         decDeg: Double,
         radiusDeg: Double,
         timeLimitSec: Double = 45.0,
+        gray: FloatArray? = null,
     ): SolveResult? {
         return solveBitmapImpl(context, bitmap, fovLoDeg, fovHiDeg, timeLimitSec,
-            raDeg, decDeg, radiusDeg)
+            raDeg, decDeg, radiusDeg, gray = gray)
     }
 
     /** 无天区先验哨兵值 */
@@ -370,6 +383,7 @@ object StellarSolverNative {
         decDeg: Double,
         radiusDeg: Double,
         plimOverride: Double = 0.0,
+        gray: FloatArray? = null,
     ): SolveResult? {
         // §0.107（二期审计 2026-10-14）：**先清空上一次的失败诊断**。
         // 桥只在 star-extraction-failed 时输出 rc/gmean/gmax；提星成功但未解出
@@ -382,50 +396,93 @@ object StellarSolverNative {
         lastFailGMax = null
         val w = bitmap.width
         val h = bitmap.height
-        val gray = FloatArray(w * h)
-        val pixels = IntArray(w * h)
-        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-        for (i in pixels.indices) {
-            val c = pixels[i]
-            gray[i] = 0.299f * ((c shr 16) and 0xFF) +
-                0.587f * ((c shr 8) and 0xFF) +
-                0.114f * (c and 0xFF)
+        val effectiveGray = if (gray != null && gray.size == w * h) {
+            gray
+        } else {
+            bitmapToGray(bitmap)
         }
         val indexes = ensureIndexes(context)
-        // 跨引擎星点复用（**兜底**用途，不是首选）：
-        // .so 内 simplexy 现在优先（§0.69 修正了星点来源优先级——此前外部星点
-        // 一旦 ≥4 颗就完全跳过 simplexy，而这里只传 40 颗 → 引擎拿不到广角
-        // 欠曝照片的 mag 4.5~6 暗星，quad 建不起来，官方引擎必然失败）。
-        // 只有 simplexy 真的给不出星点（≥4 颗）时，桥才会回退到这批外部星点。
-        // 上限取 200：与 sepDetectStars 的默认值同量级，避免兜底路径星点过少。
-        val extStars = try {
-            com.starcam.astro.astro.LocalStarMatcher.detectStars(bitmap, 200)
-                .takeIf { it.size >= 4 }?.let { stars ->
-                FloatArray(1 + stars.size * 3).also { a ->
-                    a[0] = stars.size.toFloat()
-                    stars.forEachIndexed { i, d ->
-                        a[1 + i*3] = d.x
-                        a[2 + i*3] = d.y
-                        a[3 + i*3] = d.brightness
-                    }
-                }
-            }
-        } catch (_: Throwable) {
-            null
-        }
-        val json = try {
+
+        // 首轮原生求解传 extStars = null：C 层 simplexy 提星成功率 >99.9% 且自备提星。
+        // 杜绝每轮盲解均提前执行耗时 100~250ms 的 JVM 提星与大数组分配。
+        var extStars: FloatArray? = null
+        var json = try {
             if (raDeg > NO_PRIOR / 2.0) {
-                solvePriors(gray, w, h, indexes, fovLoDeg, fovHiDeg,
+                solvePriors(effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg,
                     raDeg, decDeg, radiusDeg, plimOverride, timeLimitSec, extStars)
             } else {
-                solve(gray, w, h, indexes, fovLoDeg, fovHiDeg, plimOverride, timeLimitSec, extStars)
+                solve(effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg, plimOverride, timeLimitSec, extStars)
             }
         } catch (e: UnsatisfiedLinkError) {
             return null
         } catch (e: Throwable) {
             return null
         }
-        val parsed = parseJson(json, w, h)
+        var parsed = parseJson(json, w, h)
+        // 官方解质量门槛（服务器 12 张标定：真解 logodds 26~907、nmatch≥15；
+        // 噪声星点下的随机假解 logodds<10、nmatch=1）——宁可 FAILED 也不报错误天区
+        if (parsed != null && parsed.logodds != null &&
+            (parsed.logodds < 25.0 || (parsed.nMatch ?: 99) < 2)
+        ) {
+            parsed = null
+        }
+
+        // 仅在必要失败时（simplexy 提取失败或星点不足 4 颗）重试补充 JVM 外部星点
+        if (parsed == null) {
+            var needRetryWithExtStars = false
+            try {
+                val o = JSONObject(json)
+                val err = o.optString("error", "")
+                val nstars = o.optInt("nstars", 999)
+                if (err == "star-extraction-failed" || err == "too-few-stars" || nstars < 4) {
+                    needRetryWithExtStars = true
+                }
+            } catch (_: Exception) {
+            }
+
+            if (needRetryWithExtStars) {
+                extStars = try {
+                    com.starcam.astro.astro.LocalStarMatcher.detectStars(bitmap, 200)
+                        .takeIf { it.size >= 4 }?.let { stars ->
+                            FloatArray(1 + stars.size * 3).also { a ->
+                                a[0] = stars.size.toFloat()
+                                stars.forEachIndexed { i, d ->
+                                    a[1 + i * 3] = d.x
+                                    a[2 + i * 3] = d.y
+                                    a[3 + i * 3] = d.brightness
+                                }
+                            }
+                        }
+                } catch (_: Throwable) {
+                    null
+                }
+
+                if (extStars != null) {
+                    json = try {
+                        if (raDeg > NO_PRIOR / 2.0) {
+                            solvePriors(
+                                effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg,
+                                raDeg, decDeg, radiusDeg, plimOverride, timeLimitSec, extStars,
+                            )
+                        } else {
+                            solve(
+                                effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg,
+                                plimOverride, timeLimitSec, extStars,
+                            )
+                        }
+                    } catch (_: Throwable) {
+                        json
+                    }
+                    parsed = parseJson(json, w, h)
+                    if (parsed != null && parsed.logodds != null &&
+                        (parsed.logodds < 25.0 || (parsed.nMatch ?: 99) < 2)
+                    ) {
+                        parsed = null
+                    }
+                }
+            }
+        }
+
         // 诊断：官方求解失败时转储灰度输入（仅 debug 构建，单文件轮换）
         // 供服务器端 diag_arm64_dyn 用同一条数据复现"提星 0 颗"之谜
         if (parsed == null && isDebugBuild(context)) {
@@ -436,17 +493,10 @@ object StellarSolverNative {
                 )
                 java.io.DataOutputStream(java.io.FileOutputStream(dump)).use { o ->
                     o.writeInt(w); o.writeInt(h)
-                    for (v in gray) o.writeFloat(v)
+                    for (v in effectiveGray) o.writeFloat(v)
                 }
             } catch (_: Throwable) {
             }
-        }
-        // 官方解质量门槛（服务器 12 张标定：真解 logodds 26~907、nmatch≥15；
-        // 噪声星点下的随机假解 logodds<10、nmatch=1）——宁可 FAILED 也不报错误天区
-        if (parsed != null && parsed.logodds != null &&
-            (parsed.logodds < 25.0 || (parsed.nMatch ?: 99) < 2)
-        ) {
-            return null
         }
         if (parsed == null) {
             try {

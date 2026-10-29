@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import com.starcam.astro.astro.OverlayRenderer
@@ -142,6 +143,7 @@ fun BatchScreen(
                     }
                 }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             BatchOutcome.ProcessingFailed("处理异常：${e.message ?: "未知错误"}")
         }
 
