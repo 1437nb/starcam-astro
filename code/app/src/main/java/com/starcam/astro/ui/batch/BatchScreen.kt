@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.starcam.astro.astro.OverlayRenderer
 import com.starcam.astro.data.HistoryStore
@@ -161,7 +162,7 @@ fun BatchScreen(
         coroutineScope {
             repeat(workers) {
                 launch(Dispatchers.IO) {
-                    while (true) {
+                    while (isActive) {
                         val next = synchronized(lock) {
                             if (queue.isEmpty()) null else queue.removeAt(0)
                         } ?: break

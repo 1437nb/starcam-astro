@@ -26,48 +26,54 @@ object OverlayRenderer {
         solve: SolveResult,
         isEnglish: Boolean = false,
         solarPositions: List<SolarSystemEphemeris.SolarPosition> = emptyList(),
-    ): Bitmap? {
-        val rawWcs = solve.wcs ?: return null
+    ): Bitmap? = try {
+        val rawWcs = solve.wcs ?: null
         val w = bitmap.width
         val h = bitmap.height
-        val wcs = if (solve.imageWidth == w && solve.imageHeight == h) {
-            rawWcs
-        } else {
-            scaleWcs(rawWcs, solve.imageWidth, solve.imageHeight, w, h)
-        }
-        val stars = StarChartOverlay.projectStars(wcs, w, h)
-        val lines = StarChartOverlay.projectLines(stars)
-        val labels = StarChartOverlay.constellationLabels(stars, isEnglish)
-        val messier = StarChartOverlay.projectMessier(wcs, w, h)
-        val solar = if (solarPositions.isNotEmpty()) {
-            StarChartOverlay.projectSolarSystem(wcs, w, h, solarPositions)
-        } else {
-            emptyList()
-        }
-
-        val scene = LayeredRenderer.OverlayScene(
-            width = w,
-            height = h,
-            stars = stars,
-            lines = lines,
-            labels = labels,
-            messier = messier,
-            solar = solar,
-        )
-
-        val degPerPx = if (solve.fieldWidthDeg > 0.0 && w > 0 && solve.fieldWidthDeg.isFinite()) {
-            (solve.fieldWidthDeg / w).toFloat()
-        } else {
+        if (rawWcs == null || w <= 0 || h <= 0 || bitmap.isRecycled) {
             null
-        }
+        } else {
+            val wcs = if (solve.imageWidth == w && solve.imageHeight == h) {
+                rawWcs
+            } else {
+                scaleWcs(rawWcs, solve.imageWidth, solve.imageHeight, w, h)
+            }
+            val stars = StarChartOverlay.projectStars(wcs, w, h)
+            val lines = StarChartOverlay.projectLines(stars)
+            val labels = StarChartOverlay.constellationLabels(stars, isEnglish)
+            val messier = StarChartOverlay.projectMessier(wcs, w, h)
+            val solar = if (solarPositions.isNotEmpty()) {
+                StarChartOverlay.projectSolarSystem(wcs, w, h, solarPositions)
+            } else {
+                emptyList()
+            }
 
-        return LayeredRenderer.renderBitmap(
-            src = bitmap,
-            scene = scene,
-            flags = LayerFlags.ALL,
-            isEnglish = isEnglish,
-            degPerPx = degPerPx,
-        )
+            val scene = LayeredRenderer.OverlayScene(
+                width = w,
+                height = h,
+                stars = stars,
+                lines = lines,
+                labels = labels,
+                messier = messier,
+                solar = solar,
+            )
+
+            val degPerPx = if (solve.fieldWidthDeg > 0.0 && w > 0 && solve.fieldWidthDeg.isFinite()) {
+                (solve.fieldWidthDeg / w).toFloat()
+            } else {
+                null
+            }
+
+            LayeredRenderer.renderBitmap(
+                src = bitmap,
+                scene = scene,
+                flags = LayerFlags.ALL,
+                isEnglish = isEnglish,
+                degPerPx = degPerPx,
+            )
+        }
+    } catch (_: Throwable) {
+        null
     }
 
     /** 线段两端按星等收缩（bitmap 像素）：越亮的星空隙越大（委托给 LayeredRenderer） */

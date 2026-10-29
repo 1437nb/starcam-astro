@@ -178,20 +178,7 @@ object StellarSolverNative {
     /**
      * 将 Bitmap 转换为灰度浮点数组（0..255），供原生求解器与提星器复用。
      */
-    fun bitmapToGray(bitmap: Bitmap): FloatArray {
-        val w = bitmap.width
-        val h = bitmap.height
-        val gray = FloatArray(w * h)
-        val pixels = IntArray(w * h)
-        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-        for (i in pixels.indices) {
-            val c = pixels[i]
-            gray[i] = 0.299f * ((c shr 16) and 0xFF) +
-                0.587f * ((c shr 8) and 0xFF) +
-                0.114f * (c and 0xFF)
-        }
-        return gray
-    }
+    fun bitmapToGray(bitmap: Bitmap): FloatArray = LocalStarMatcher.bitmapToGray(bitmap)
 
     fun sepDetectStars(
         bitmap: Bitmap,
@@ -442,7 +429,7 @@ object StellarSolverNative {
 
             if (needRetryWithExtStars) {
                 extStars = try {
-                    com.starcam.astro.astro.LocalStarMatcher.detectStars(bitmap, 200)
+                    com.starcam.astro.astro.LocalStarMatcher.detectStarsGray(w, h, effectiveGray, 200)
                         .takeIf { it.size >= 4 }?.let { stars ->
                             FloatArray(1 + stars.size * 3).also { a ->
                                 a[0] = stars.size.toFloat()

@@ -189,6 +189,7 @@ class NativeSolveStep : SolveStep {
                     null
                 }
                 if (scaled != null) {
+                    val scaledGray = StellarSolverNative.bitmapToGray(scaled)
                     ctx.onProgress(
                         if (isEn) "Astrometry downsample retry (${scaled.width}px)…"
                         else "官方引擎降采样重试（${scaled.width}px 长边）…",
@@ -200,7 +201,10 @@ class NativeSolveStep : SolveStep {
                         if (remSec <= 0.5) break
                         val effectiveTimeLimit = minOf(StarSolver.NATIVE_DOWNSAMPLE_RETRY_TIME, remSec * 0.9)
                         nativeSolve = try {
-                            StellarSolverNative.solveBitmap(ctx.context, scaled, lo, hi, effectiveTimeLimit)
+                            StellarSolverNative.solveBitmap(
+                                ctx.context, scaled, lo, hi, effectiveTimeLimit,
+                                gray = scaledGray,
+                            )
                         } catch (e: Throwable) {
                             if (e is CancellationException) throw e
                             null

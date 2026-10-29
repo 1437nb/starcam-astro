@@ -303,5 +303,69 @@ class FitsImageTest {
         }
     }
 
+    @Test
+    fun `readMeta 跳过 BINTABLE 扩展并继承主 HDU 元数据`() {
+        val primary = headerBlock(
+            card("SIMPLE", "T"), card("BITPIX", 8), card("NAXIS", 0),
+            card("DATE-OBS", "2025-05-01T20:00:00"),
+            card("SITELAT", 30.5), card("OBJECT", "Test Nebula"),
+        )
+        // 扩展 1：BINTABLE 二进制表格（应当被安全跳过）
+        val tableExt = headerBlock(
+            card("XTENSION", "BINTABLE"), card("BITPIX", 8), card("NAXIS", 2),
+            card("NAXIS1", 64), card("NAXIS2", 10), card("PCOUNT", 0), card("GCOUNT", 1),
+        )
+        val tableData = ByteArray(64 * 10)
+        val pad1 = (2880 - (tableData.size % 2880)) % 2880
+
+        // 扩展 2：真正的二维图像 HDU
+        val imageExt = headerBlock(
+            card("XTENSION", "IMAGE"), card("BITPIX", 16), card("NAXIS", 2),
+            card("NAXIS1", 100), card("NAXIS2", 80),
+            card("CRVAL1", 180.0), card("CRVAL2", -15.0),
+        )
+        val imageData = ByteArray(100 * 80 * 2)
+        val pad2 = (2880 - (imageData.size % 2880)) % 2880
+
+        val out = ByteArrayOutputStream()
+        out.write(primary)
+        out.write(tableExt); out.write(tableData); out.write(ByteArray(pad1))
+        out.write(imageExt); out.write(imageData); out.write(ByteArray(pad2))
+
+        val tmp = java.io.File.createTempFile("fits_bintable_skip", ".fits")
+        try {
+            tmp.writeBytes(out.toByteArray())
+            val m = FitsImage.readMeta(tmp.absolutePath)
+            assertNotNull("应当成功读取到扩展 2 的图像 HDU", m)
+            assertEquals("应跳过表格读取图像宽度", 100, m!!.naxis1)
+            assertEquals("应跳过表格读取图像高度", 80, m.naxis2)
+            assertEquals(180.0, m.crval1!!, 1e-9)
+            assertEquals(-15.0, m.crval2!!, 1e-9)
+            assertEquals("应当成功继承主 HDU 拍摄时刻", "2025-05-01T20:00:00", m.dateObs)
+            assertEquals("应当成功继承主 HDU 测站纬度", 30.5, m.siteLat!!, 1e-9)
+            assertEquals("应当成功继承主 HDU 天体名称", "Test Nebula", m.objectName)
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    @Test
+    fun `readMeta 头部超出 200 块时安全终止防失控`() {
+        val nonEndCard = "COMMENT " + "X".repeat(72)
+        val block = nonEndCard.repeat(36).toByteArray(Charsets.US_ASCII)
+        val out = ByteArrayOutputStream()
+        repeat(202) {
+            out.write(block)
+        }
+        val tmp = java.io.File.createTempFile("fits_runaway_test", ".fits")
+        try {
+            tmp.writeBytes(out.toByteArray())
+            val m = FitsImage.readMeta(tmp.absolutePath)
+            assertNull("超过 200 块无 END 卡片应触发安全熔断返回 null", m)
+        } finally {
+            tmp.delete()
+        }
+    }
+
     private fun assertFalse(b: Boolean) = assertTrue("应为 false", !b)
 }

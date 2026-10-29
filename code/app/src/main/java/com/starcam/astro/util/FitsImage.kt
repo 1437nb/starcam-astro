@@ -202,11 +202,13 @@ object FitsImage {
     private fun readMetaStream(stream: java.io.InputStream): FitsMeta? {
         val blockBuf = ByteArray(BLOCK)
         var guard = 0
+        var primaryHdu: Hdu? = null
         while (guard++ < 64) {
             val cards = LinkedHashMap<String, String>()
             var blocks = 0
             var sawEnd = false
             while (!sawEnd) {
+                if (blocks >= 200) return null
                 if (!readFully(stream, blockBuf)) return null
                 blocks++
                 for (i in 0 until BLOCK / CARD) {
@@ -243,8 +245,13 @@ object FitsImage {
                 dataLen = ((dataLen + BLOCK - 1) / BLOCK) * BLOCK
             }
             val hdu = Hdu(cards, headerBytes, dataLen)
-            if (naxis == 2 && naxis1 > 0 && naxis2 > 0) {
-                return metaOf(hdu)
+            if (guard == 1 && naxis == 0) {
+                primaryHdu = hdu
+            }
+            val xtension = cards["XTENSION"]
+            val isImageHdu = (xtension == null || xtension == "IMAGE")
+            if (isImageHdu && naxis == 2 && naxis1 > 0 && naxis2 > 0) {
+                return metaOf(hdu, primaryHdu)
             }
             if (dataLen <= 0L && naxis == 0 && guard > 1) return null
             if (dataLen > 0L) {
@@ -280,50 +287,41 @@ object FitsImage {
         }
     }
 
-    private fun metaOf(hdu: Hdu): FitsMeta = FitsMeta(
+    private fun metaOf(hdu: Hdu, primaryHdu: Hdu? = null): FitsMeta = FitsMeta(
         bitpix = hdu.int("BITPIX"),
-        bscale = hdu.dbl("BSCALE") ?: 1.0,
-        bzero = hdu.dbl("BZERO") ?: 0.0,
+        bscale = hdu.dbl("BSCALE") ?: primaryHdu?.dbl("BSCALE") ?: 1.0,
+        bzero = hdu.dbl("BZERO") ?: primaryHdu?.dbl("BZERO") ?: 0.0,
         naxis1 = hdu.int("NAXIS1"),
         naxis2 = hdu.int("NAXIS2"),
-        crval1 = hdu.dbl("CRVAL1"),
-        crval2 = hdu.dbl("CRVAL2"),
-        cdelt1 = hdu.dbl("CDELT1"),
-        cdelt2 = hdu.dbl("CDELT2"),
-        dateObs = hdu.str("DATE-OBS"),
-        siteLat = hdu.dbl("SITELAT") ?: hdu.dbl("LATITUDE"),
-        siteLon = hdu.dbl("SITELONG") ?: hdu.dbl("LONGITUD"),
-        objectName = hdu.str("OBJECT"),
+        crval1 = hdu.dbl("CRVAL1") ?: primaryHdu?.dbl("CRVAL1"),
+        crval2 = hdu.dbl("CRVAL2") ?: primaryHdu?.dbl("CRVAL2"),
+        cdelt1 = hdu.dbl("CDELT1") ?: primaryHdu?.dbl("CDELT1"),
+        cdelt2 = hdu.dbl("CDELT2") ?: primaryHdu?.dbl("CDELT2"),
+        dateObs = hdu.str("DATE-OBS") ?: primaryHdu?.str("DATE-OBS"),
+        siteLat = hdu.dbl("SITELAT") ?: hdu.dbl("LATITUDE") ?: primaryHdu?.dbl("SITELAT") ?: primaryHdu?.dbl("LATITUDE"),
+        siteLon = hdu.dbl("SITELONG") ?: hdu.dbl("LONGITUD") ?: primaryHdu?.dbl("SITELONG") ?: primaryHdu?.dbl("LONGITUD"),
+        objectName = hdu.str("OBJECT") ?: primaryHdu?.str("OBJECT"),
     )
 
     // ------------------------------------------------------------------ 数据
 
-    /** 找到第一个含二维图像的 HDU（主 HDU 无数据时向后扫描扩展 HDU）。 */
-    private fun firstImageHdu(bytes: ByteArray): Hdu? {
-        var offset = 0
-        var guard = 0
-        while (offset + BLOCK <= bytes.size && guard++ < 64) {
-            val hdu = parseHdu(bytes, offset) ?: return null
-            if (hdu.int("NAXIS") == 2 && hdu.int("NAXIS1") > 0 && hdu.int("NAXIS2") > 0) {
-                return hdu
-            }
-            if (hdu.dataBytes <= 0 && hdu.int("NAXIS") == 0 && guard > 1) return null
-            offset += hdu.headerBytes + hdu.dataBytes.toInt()
-        }
-        return null
-    }
-
     internal fun decodeBytes(bytes: ByteArray, maxDim: Int = 2200): Decoded? {
         var offset = 0
         var guard = 0
+        var primaryHdu: Hdu? = null
         while (offset + BLOCK <= bytes.size && guard++ < 64) {
             val hdu = parseHdu(bytes, offset) ?: return null
             val naxis = hdu.int("NAXIS")
             val w = hdu.int("NAXIS1")
             val h = hdu.int("NAXIS2")
-            if (naxis == 2 && w > 0 && h > 0) {
+            if (guard == 1 && naxis == 0) {
+                primaryHdu = hdu
+            }
+            val xtension = hdu.str("XTENSION")
+            val isImageHdu = (xtension == null || xtension == "IMAGE")
+            if (isImageHdu && naxis == 2 && w > 0 && h > 0) {
                 val gray = readGray(bytes, offset + hdu.headerBytes, hdu, w, h) ?: return null
-                val meta = metaOf(hdu)
+                val meta = metaOf(hdu, primaryHdu)
                 return finish(gray, w, h, meta, maxDim)
             }
             offset += hdu.headerBytes + hdu.dataBytes.toInt()
