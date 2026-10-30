@@ -70,8 +70,8 @@ object LayeredRenderer {
 
     /** 已投影的叠加场景数据（结果页 Success 状态持有，复用避免重复投影） */
     data class OverlayScene(
-        val width: Int,
-        val height: Int,
+        var width: Int,
+        var height: Int,
         val stars: List<StarChartOverlay.Star2D>,
         val lines: List<StarChartOverlay.Line2D>,
         val labels: List<StarChartOverlay.Label2D>,

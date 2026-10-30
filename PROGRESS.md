@@ -5,10 +5,10 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-29（§0.124 P0 核心性能与健壮性优化：FITS 流式 Header 解析防 100MB+ OOM 闪退/跳过 BINTABLE/主 HDU 继承/200 块防熔断、批量任务协程熔断取消防算力泄漏、原生引擎首轮提星解耦/单次灰度缓冲复用/降采样缓冲复用省去 150~300ms CPU/140MB+ 内存、OverlayRenderer 统一委托 LayeredRenderer 实现双渲染器收敛并加固 OOM 保护；38 类 / 296 项单测全绿；docs/105）
-**当前基线**：v1.5.87（versionCode 107，**已发版** 2026-10-26，tag `v1.5.87`）
+**最后更新**：2026-10-30（§0.125 代码审查遗留项全面收尾：同步 B2/B3/B13/B14 已修状态，全面结清 docs/72 C 类全部条目、D 类量化同构守卫单测与 docs/74 §4 AR 逐帧零分配收尾项；38 类 / 301 项单测全绿；docs/106）
+**当前基线**：v1.5.88（versionCode 108，开发基线含 §0.122~§0.125；最近正式发版为 v1.5.87 / tag `v1.5.87`）
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
-**构建环境**：本机拥有全套高配构建环境，Kotlin 编译、全量单元测试（35 类 / 276 项全绿，约 2.5 分钟）与 APK 打包（约 2 分钟）均在本机高速完成。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
+**构建环境**：本机拥有全套高配构建环境，Kotlin 编译、全量单元测试（38 类 / 301 项全绿，约 40 秒）与 APK 打包（约 10 秒）均在本机高速完成。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
 
 ---
 
@@ -79,18 +79,10 @@
     （分界约 30%）。若要治，方向是检测端：星云形态学剔除（扁长/大面积 blob 降权）
     或密场提高 maxStars，**不要去动匹配器** —— 合成图 A/B 已证明匹配器 15/15 全能解。
     注意真实长焦照片的星云比 DSS 拉伸图暗得多，实际影响可能远小于回归所示。
-11. **代码审查遗留（已修 18 条）** —— 完整清单见
-    `docs/72-代码审查问题清单-20260922.md`（已标注哪些修掉了）。
-    **已修**：A1~A8 全部 + B1 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B14 B15。
-    **未修 2 条 + C 类**：
-    - **B2**：视场 90° 上界是窄场路径唯一防线，76.9~90° 的坍缩伪解可能直达用户
-    - **B13**：`BatchScreen` 用消息文案前缀判成败 —— 改文案即静默错判
-    - ~~**B14**~~：已在 Sprint 4 (§0.115) 纯函数化为 `CameraMath.computeFitCenterRect` 并全量单测覆盖
-    - C 类全部（注释漂移、i18n 两套机制并存、死代码）+ A6/A7 收尾小项（见 `docs/74` 第四节）
-    ⚠️ **§0.78 / §0.81 / §0.82 的改动都没有离线测试能覆盖渲染、相机与内存**，
-    真机验证清单见 `docs/74` 第五节。
-    **建议下一步**：B2 / B3 / B13 都是小改动且能离线验证 → 可一并清掉；
-    C 类适合在有其他改动时顺手带上。
+11. ~~**代码审查遗留**~~ —— **已完成（§0.125 全面结清，见 `docs/72` 与 `docs/106`）**。
+    - **A1~A8 + B1~B15 全部已修**（含 §0.101 B13 强类型 `BatchOutcome`、§0.103 B2 深域 45° 上界与可信 FOV 准入、§0.112 B3 AR 标定高置信门禁、§0.115/§0.123 B14 `CameraMath.computeFitCenterRect`）；
+    - **C 类全部 + D 类量化同构守卫 + `docs/74` §4 AR 逐帧零分配收尾项已在 §0.125 全部结清**（`LocalStarMatcher` 死函数与 `debugPhaseTimings`/`looseFired`/KDoc 对齐、`SettingsScreen`/`I18n`/`Theme` 双语机制统一、`CameraMath.computeHorizonSegmentInto` 消除每帧 `Ref` 分配、`ProjectedSky` 全链路池化与 AR 星座名中英切换、`CameraScreen` 手动 FOV 锁定与太阳系点击取最近、`ResultScreen` 星座 Chip 横向滚动、`HistoryStore.nearestConstellation` 预索引与角距截断、`SolarSystemEphemeris` 缓存同步）。
+    - ⚠️ 真机渲染与传感器体验验证清单仍见 `docs/74` 第五节。
 12. **外部评估的剩余项（§0.79/§0.80 已做两条）** —— 见 `docs/76` 第五节。
     ~~发版流程脚本化~~ **已在 §0.80 完成**（`tools/release.py`）。
     仍未做三条：
@@ -101,6 +93,27 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-10-30（§0.125：代码审查遗留项全面收尾，docs/72 B/C/D 类 & docs/74 §4 AR 零分配收尾）**：
+  - **审查清单状态对齐（`docs/72` & `PROGRESS.md`）**：核实并同步 B2（§0.103 深域 45° 上界与 `shouldSkipDeepRetry`）、B3（§0.112 AR 标定 `isHighConfidence` 门禁）、B13（§0.101 `BatchOutcome` 密封类与三计数）、B14（§0.115/§0.123 `CameraMath.computeFitCenterRect`）的已完成状态。
+  - **`LocalStarMatcher.kt` C 类清理与 D 类量化同构守卫**：
+    1. 删除 §0.115 无锁化后残留的零调用私有死函数 `snapshotDiagnostics()`、`matchLocked(...)` 与无用字段 `runtimeScoredCap`；
+    2. 统一 `matchInternal` 全部 4 个出口的 `phaseTimings` 为完整 7 段格式（含 `backupMulti=` 与 `total=`），并新增 `shallowPhaseTimings` / `debugShallowPhaseTimings` 在深域重试前归档浅域耗时；
+    3. 修复 `debugVoteTable` 中 `looseFired` 声明后从未自增的缺陷；
+    4. 对齐 `indexCache`、`buildIndex`、`quantizeKeys` KDoc 口径，开放 `bucketKey`/`quantizeKeys` 为 `internal` 并新增量化同构守卫单测。
+  - **i18n 双机制收敛与死词条激活（`Theme.kt` / `I18n.kt` / `SettingsScreen.kt`）**：
+    1. `AppThemeMode` 新增英文标签 `labelEn` 与 `label(isEnglish)`；
+    2. `I18n.Settings` 补齐 `parallelRacingTitle`/`parallelRacingDesc`，`I18n.Camera` 补齐 `flashDesc`/`nightModeDesc`/`switchCameraDesc`；
+    3. `SettingsScreen.kt` 全面改调 `I18n.Settings.*` 与 `mode.label(isEn)`，消除页面内硬编码双语分支与 0 引用死词条。
+  - **AR 逐帧零分配收尾与相机页 C 类修复（`CameraMath.kt` / `StarChartOverlay.kt` / `LayeredRenderer.kt` / `ArSkyProjector.kt` / `CameraScreen.kt`）**：
+    1. 提炼纯函数 `CameraMath.computeHorizonSegmentInto`，消除 AR Canvas 地平线求交局部函数捕获变量导致的每帧 5 个 `Ref` 对象分配；
+    2. `ProjectedSky` 新增 `linePool`、`messierPool`、`labelPool`、`solarPool`、星座质心累加器及 `toOverlayScene()` 复用包装壳，并将 `isEnglish` 透传至 `ArSkyProjector.project`，彻底消除 AR 投影尾部分配并修复英文模式 AR 星座名未切换的问题；
+    3. `CameraScreen` 新增 `fovUserOverridden` 防止后台自动标定覆盖用户手动滑块值，修复 `arHitTest` 太阳系分支取最近天体，清理 `proSupported` 短路死代码，工具条无障碍标签全量接入 `I18n`。
+  - **结果页与数据/历表层 C 类收尾（`ResultScreen.kt` / `HistoryStore.kt` / `SolarSystemEphemeris.kt` / `StarCamApplication.kt`）**：
+    1. `ResultScreen` 星座 `AssistChip` 行增加 `horizontalScroll`，方向角 `parity` 括号按中英切换并统一 `Locale.ROOT`；
+    2. `HistoryStore.nearestConstellation` 预索引 ~919 颗带星座标识亮星的单位向量，采用点积比较 + 15° 角距上界截断，并拦截 `NaN` 输入防止误命中第 0 颗星；
+    3. `SolarSystemEphemeris.cachedTopocentric` / `clearCache` 增加 `@Synchronized`；移除 `StarCamApplication` 空重写 `onConfigurationChanged`。
+  - **测试与验证**：新增 5 项单测，全量 38 类 / 301 项单测全绿；`assembleDebug` 构建通过；`check_secrets.py` 0 泄露；详见 `docs/106-验证报告增补-§0.125-代码审查遗留项全面收尾.md`。
 
 - **2026-10-29（§0.124：P0 核心性能与健壮性优化落地）**：
   - **FITS 流式 Header 解析与防 OOM（`FitsImage.kt`）**：

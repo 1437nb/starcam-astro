@@ -111,7 +111,7 @@ fun SettingsScreen(
                 // 也不依赖任何折叠状态（原先放在"识别日志"区里，用户按「底部」去找会落空）
                 title = {
                     Column {
-                        Text(if (isEn) "Settings" else "设置")
+                        Text(com.starcam.astro.ui.I18n.Settings.title)
                         if (appVersion.isNotEmpty()) {
                             Text(
                                 com.starcam.astro.ui.I18n.Settings.appVersion(appVersion),
@@ -125,7 +125,7 @@ fun SettingsScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = if (isEn) "Back" else "返回",
+                            contentDescription = com.starcam.astro.ui.I18n.back,
                         )
                     }
                 },
@@ -143,11 +143,11 @@ fun SettingsScreen(
                 .padding(16.dp),
         ) {
             // 语言设置（支持跟随系统 / 简体中文 / English 即时生效）
-            Text(if (isEn) "Language" else "语言", style = MaterialTheme.typography.titleMedium)
+            Text(com.starcam.astro.ui.I18n.Settings.languageSection, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
-                if (isEn) "Choose display language for UI, constellation names, star names, and Messier objects."
-                else "选择界面、星座名称、恒星专名及梅西耶天体的显示语言。",
+                com.starcam.astro.ui.I18n.Settings.languageDesc,
+
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -176,11 +176,11 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
 
             // 外观（§0.33）：夜视红为暗适应模式——红光不破坏夜间视力，建议观星时使用
-            Text(if (isEn) "Appearance" else "外观", style = MaterialTheme.typography.titleMedium)
+            Text(com.starcam.astro.ui.I18n.Settings.appearanceSection, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
-                if (isEn) "Night Red is recommended for dark adaptation: pure black background + low-intensity red light."
-                else "夜间观星建议开启「夜视红」：纯黑背景 + 低亮度红光，对暗适应的破坏最小，OLED 屏幕也更省电。",
+                com.starcam.astro.ui.I18n.Settings.appearanceDesc,
+
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -202,8 +202,8 @@ fun SettingsScreen(
                         },
                     )
                     Text(
-                        if (isEn) (if (mode == AppThemeMode.NIGHT_RED) "Night Red (Dark Adaptation)" else "Deep Sky Blue (Default)")
-                        else mode.label,
+                        mode.label(isEn),
+
                         fontWeight = FontWeight.Medium,
                     )
                 }
@@ -249,11 +249,11 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(if (isEn) "Parallel Engine Racing" else "双引擎并发竞速", fontWeight = FontWeight.Medium)
+                    Text(com.starcam.astro.ui.I18n.Settings.parallelRacingTitle, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        if (isEn) "Race local star table and native engine concurrently on unknown FOV photos for fastest solve"
-                        else "未知视场照片同时启动本地星表与官方引擎并发加速，取最先解出者",
+                        com.starcam.astro.ui.I18n.Settings.parallelRacingDesc,
+
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

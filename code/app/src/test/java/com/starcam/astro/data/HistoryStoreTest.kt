@@ -180,4 +180,19 @@ class HistoryStoreTest {
             temp.delete()
         }
     }
+
+    @Test
+    fun nearestConstellation_handlesValidCoordsNanAndCutoff() {
+        // 猎户座腰带中心附近（RA=83.8°, Dec=-1.2°）
+        assertEquals("猎户座", HistoryStore.nearestConstellation(83.8, -1.2, isEnglish = false))
+        assertEquals("Orion", HistoryStore.nearestConstellation(83.8, -1.2, isEnglish = true))
+
+        // NaN / Infinite 输入必须安全返回空串（修复旧版 best==null 首轮把星表第 0 颗星写入的缺陷）
+        assertEquals("", HistoryStore.nearestConstellation(Double.NaN, 0.0))
+        assertEquals("", HistoryStore.nearestConstellation(0.0, Double.NaN))
+        assertEquals("", HistoryStore.nearestConstellation(Double.POSITIVE_INFINITY, 0.0))
+
+        // 超出角距上界时返回空串
+        assertEquals("", HistoryStore.nearestConstellation(180.0, 0.0, maxSepDeg = 0.001))
+    }
 }

@@ -291,4 +291,43 @@ class LocalMatcherTest {
             LocalStarMatcher.DEEP_PATH_MAX_FOV_DEG > 20.0,
         )
     }
+
+    /**
+     * §0.125（docs/72 D 类守卫）：[LocalStarMatcher.bucketKey] 与 [LocalStarMatcher.quantizeKeys]
+     * 必须保持严格同构 —— `bucketKey(r2, r3)` 恒等于 `quantizeKeys(r2, r3, window = 0).single()`，
+     * 且恒包含在 `window = 2` / `window = 14` 的查询桶集合内。
+     */
+    @Test
+    fun `bucketKey与quantizeKeys零窗逐点一致且被查询窗包含`() {
+        val samples = floatArrayOf(-0.1f, 0f, 0.12f, 0.25f, 0.5f, 0.733f, 0.999f, 1.0f, 1.2f)
+        for (r2 in samples) {
+            for (r3 in samples) {
+                val bk = LocalStarMatcher.bucketKey(r2, r3)
+                val q0 = LocalStarMatcher.quantizeKeys(r2, r3, window = 0)
+                org.junit.Assert.assertEquals(1, q0.size)
+                org.junit.Assert.assertEquals("r2=$r2, r3=$r3 零窗桶键不一致", bk, q0[0])
+                val qStrict = LocalStarMatcher.quantizeKeys(r2, r3, window = 2)
+                assertTrue("严格窗(w=2)必须包含自身桶键", bk in qStrict)
+                val qLoose = LocalStarMatcher.quantizeKeys(r2, r3, window = 14)
+                assertTrue("宽松窗(w=14)必须包含自身桶键", bk in qLoose)
+            }
+        }
+    }
+
+    /**
+     * §0.125（docs/72 C 类修复）：[LocalStarMatcher.debugPhaseTimings] 在主投票轮强解提前退出时
+     * 亦必须输出完整的 7 段格式（含 `backupMulti=` 与 `total=`）。
+     */
+    @Test
+    fun `debugPhaseTimings在提前退出路径仍输出完整七段格式`() {
+        val gray = renderStarField(DemoSolver.regions[0])
+        val detected = LocalStarMatcher.detectStarsGray(W, H, gray)
+        val match = LocalStarMatcher.match(detected, W, H)
+        assertNotNull(match)
+        val timings = LocalStarMatcher.debugPhaseTimings
+        assertNotNull("debugPhaseTimings 不应为空", timings)
+        for (key in listOf("primary=", "multi=", "weak=", "backup=", "backupMulti=", "scored=", "total=")) {
+            assertTrue("debugPhaseTimings 缺少字段 $key: $timings", timings!!.contains(key))
+        }
+    }
 }

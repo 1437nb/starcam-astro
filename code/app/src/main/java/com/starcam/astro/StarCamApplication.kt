@@ -2,7 +2,6 @@ package com.starcam.astro
 
 import android.app.Application
 import android.content.ComponentCallbacks2
-import android.content.res.Configuration
 import android.util.Log
 import com.starcam.astro.astro.LocalStarMatcher
 import com.starcam.astro.astro.StellarSolverNative
@@ -57,10 +56,6 @@ class StarCamApplication : Application() {
                 Log.i(TAG, "内存压力 level=$level，已归还 $freed 档原生索引 + 托管堆缓存")
             }
         }
-    }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
     }
 
     private companion object {

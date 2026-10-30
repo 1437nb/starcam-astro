@@ -206,6 +206,7 @@ fun CameraScreen(
     val arFlag = remember { java.util.concurrent.atomic.AtomicBoolean(settings.arLiveStarMap) }
     var arFovDeg by remember { mutableStateOf(settings.arFovDeg) }
     var fovAutoCalibrated by remember { mutableStateOf(false) }
+    var fovUserOverridden by remember { mutableStateOf(false) }
     var sensorParams by remember { mutableStateOf<CameraSensorParams?>(null) }
     // §0.50：Pro 手动曝光（会话级，与 EV/闪光灯一致不持久化）
     var proMode by remember { mutableStateOf(false) }
@@ -233,8 +234,9 @@ fun CameraScreen(
     var arTarget by remember { mutableStateOf<ArTarget?>(null) }
     var arTargetPicker by remember { mutableStateOf(false) }
     var arCard by remember { mutableStateOf<com.starcam.astro.ui.result.SkyObjectRef?>(null) }
-    // 目标投影 scratch 与导航画笔：一次性创建，每帧零新建对象（重做要点）
+    // 目标投影与地平线线段 scratch + 导航画笔：一次性创建，每帧零新建对象（重做要点）
     val arTpos = remember { FloatArray(3) }
+    val horizonSeg = remember { FloatArray(4) }
     val navPaintSp = with(LocalDensity.current) { 1.sp.toPx() }
     val navPaints = remember(navPaintSp) {
         NavPaints(
@@ -481,7 +483,7 @@ fun CameraScreen(
                             mainHandler.post {
                                 previewOverlay = null
                                 previewLabel = label
-                                if (isHighConfidence && solvedFov in 35.0..85.0) {
+                                if (!fovUserOverridden && isHighConfidence && solvedFov in 35.0..85.0) {
                                     arFovDeg = solvedFov.toFloat().coerceIn(40f, 90f)
                                     fovAutoCalibrated = true
                                     settings.arFovDeg = arFovDeg
@@ -589,10 +591,10 @@ fun CameraScreen(
         val fov = com.starcam.astro.astro.CameraMath.computeCameraHorizontalFovDeg(
             params.focals, params.physWidth, params.physHeight, isPortrait, params.sensorRot,
         )
-        if (fov != null) {
+        if (fov != null && !fovUserOverridden) {
             arFovDeg = fov
             fovAutoCalibrated = true
-        } else {
+        } else if (fov == null) {
             fovAutoCalibrated = false
         }
     }
@@ -714,16 +716,17 @@ fun CameraScreen(
      */
     fun arHitTest(rx: Float, ry: Float, messierTolPx: Float, starTolPx: Float):
         com.starcam.astro.ui.result.SkyObjectRef? {
-        // §0.58 日月光体最醒目，优先命中
+        // §0.58 / §0.125 日月光体最醒目，优先命中最近者（对齐 ResultScreen.hitTestObjectAt）
+        var best: com.starcam.astro.ui.result.SkyObjectRef? = null
         var solarD = messierTolPx * 1.6f
         for (s in arSky.solar) {
             val d = kotlin.math.hypot((s.x - rx).toDouble(), (s.y - ry).toDouble()).toFloat()
             if (d < solarD) {
                 solarD = d
-                return com.starcam.astro.ui.result.SkyObjectRef.SolarRef(s.pos)
+                best = com.starcam.astro.ui.result.SkyObjectRef.SolarRef(s.pos)
             }
         }
-        var best: com.starcam.astro.ui.result.SkyObjectRef? = null
+        if (best != null) return best
         var bestD = messierTolPx
         for (m in arSky.messier) {
             val d = kotlin.math.hypot((m.x - rx).toDouble(), (m.y - ry).toDouble()).toFloat()
@@ -821,6 +824,7 @@ fun CameraScreen(
                             correctionVec = null,
                             out = arSky,
                             solarPositions = solarFrame.list,
+                            isEnglish = isEn,
                         )
                         val nc = drawContext.canvas.nativeCanvas
                         nc.save()
@@ -828,10 +832,7 @@ fun CameraScreen(
                         nc.translate(rectL, rectT)
                         com.starcam.astro.astro.LayeredRenderer.draw(
                             nc,
-                            com.starcam.astro.astro.LayeredRenderer.OverlayScene(
-                                arSky.widthPx.toInt(), arSky.heightPx.toInt(),
-                                arSky.stars, arSky.lines, arSky.labels, arSky.messier, arSky.solar,
-                            ),
+                            arSky.toOverlayScene(),
                             com.starcam.astro.astro.LayerFlags.ALL,
                             isEnglish = isEn,
                             density = pxPerSp,
@@ -845,53 +846,15 @@ fun CameraScreen(
                             // §0.78：复用 remember 的 Paint，避免每帧新建 9 个
                             paints = arPaints,
                         )
-                        // §0.53/§0.56：地平线指示线与地平罗盘标尺（大圆针孔投影直线 + 4边鲁棒求交 + 8方位罗盘标尺，对齐 Stellarium）
+                        // §0.53/§0.56/§0.125：地平线指示线与地平罗盘标尺（大圆针孔投影直线 + 4边鲁棒求交 + 8方位罗盘标尺，零每帧 Ref 分配）
                         val f = (rectW / 2f) / kotlin.math.tan(Math.toRadians(arFovDeg / 2.0)).toFloat()
-                        val ru = effRight[2]
-                        val uu = effUp[2]
-                        val au = effAxis[2]
                         val halfW = rectW / 2f
                         val halfH = rectH / 2f
-
-                        // 直线方程：ru*(x - cx) - uu*(y - cy) + f*au = 0
-                        // A*x + B*y + C = 0
-                        val lineA = ru
-                        val lineB = -uu
-                        val lineC = f * au - ru * halfW + uu * halfH
-
-                        var p1x = 0f; var p1y = 0f
-                        var p2x = 0f; var p2y = 0f
-                        var hitCount = 0
-
-                        fun addHit(hx: Float, hy: Float) {
-                            if (hitCount == 0) {
-                                p1x = hx; p1y = hy
-                                hitCount++
-                            } else if (hitCount == 1) {
-                                if (kotlin.math.abs(p1x - hx) > 1f || kotlin.math.abs(p1y - hy) > 1f) {
-                                    p2x = hx; p2y = hy
-                                    hitCount++
-                                }
-                            }
-                        }
-
-                        if (kotlin.math.abs(lineB) > 1e-5f) {
-                            val yLeft = -lineC / lineB
-                            if (yLeft in 0f..rectH) addHit(0f, yLeft)
-                            val yRight = -(lineC + lineA * rectW) / lineB
-                            if (yRight in 0f..rectH) addHit(rectW, yRight)
-                        }
-                        if (kotlin.math.abs(lineA) > 1e-5f && hitCount < 2) {
-                            val xTop = -lineC / lineA
-                            if (xTop in 0f..rectW) addHit(xTop, 0f)
-                            if (hitCount < 2) {
-                                val xBottom = -(lineC + lineB * rectH) / lineA
-                                if (xBottom in 0f..rectW) addHit(xBottom, rectH)
-                            }
-                        }
-
-                        if (hitCount >= 2) {
-                            nc.drawLine(p1x, p1y, p2x, p2y, horizonPaint)
+                        if (com.starcam.astro.astro.CameraMath.computeHorizonSegmentInto(
+                                effRight[2], effUp[2], effAxis[2], f, rectW, rectH, horizonSeg,
+                            )
+                        ) {
+                            nc.drawLine(horizonSeg[0], horizonSeg[1], horizonSeg[2], horizonSeg[3], horizonPaint)
                         }
 
                         // §0.56：地平 8 方位罗盘标尺（北/东/南/西 + 东北/东南/西南/西北）
@@ -957,7 +920,7 @@ fun CameraScreen(
                                         navPaints.arrow.strokeWidth = 3f * pxPerSp
                                         nc.drawLine(ax, ay, ax + ux * arrowLen, ay + uy * arrowLen, navPaints.arrow)
                                         val angDeg = Math.toDegrees(kotlin.math.atan((len / f).toDouble()))
-                                        val note = com.starcam.astro.ui.I18n.Ar.offAngle.format(angDeg)
+                                        val note = com.starcam.astro.ui.I18n.Ar.offAngle.format(java.util.Locale.ROOT, angDeg)
                                         navPaints.text.textSize = 12f * pxPerSp
                                         nc.drawText(
                                             label, ax + ux * 16f * pxPerSp - 40f * pxPerSp,
@@ -1146,7 +1109,7 @@ fun CameraScreen(
                 IconButton(onClick = onBack) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "返回",
+                        contentDescription = com.starcam.astro.ui.I18n.back,
                         tint = Color.White,
                     )
                 }
@@ -1201,7 +1164,7 @@ fun CameraScreen(
                     IconButton(onClick = { flashOn = !flashOn }) {
                         Icon(
                             AppIcons.FlashOn,
-                            contentDescription = "闪光灯",
+                            contentDescription = com.starcam.astro.ui.I18n.Camera.flashDesc,
                             tint = if (flashOn) MaterialTheme.colorScheme.primary else Color.White,
                         )
                     }
@@ -1211,12 +1174,13 @@ fun CameraScreen(
                     }) {
                         Icon(
                             AppIcons.Night,
-                            contentDescription = "夜景增强（EV+2）",
+                            contentDescription = com.starcam.astro.ui.I18n.Camera.nightModeDesc,
                             tint = if (evIndex > 0) MaterialTheme.colorScheme.primary else Color.White,
                         )
                     }
                     IconButton(
                         onClick = {
+                            fovUserOverridden = false
                             facing = if (facing == CameraSelector.LENS_FACING_BACK) {
                                 CameraSelector.LENS_FACING_FRONT
                             } else {
@@ -1226,7 +1190,7 @@ fun CameraScreen(
                     ) {
                         Icon(
                             AppIcons.CameraSwitch,
-                            contentDescription = "切换镜头",
+                            contentDescription = com.starcam.astro.ui.I18n.Camera.switchCameraDesc,
                             tint = Color.White,
                         )
                     }
@@ -1379,11 +1343,11 @@ fun CameraScreen(
                 if (arEnabled && settings.sensorAssistedPointing) {
                     Text(
                         if (fovAutoCalibrated) {
-                            com.starcam.astro.ui.I18n.Ar.fovAuto.format(arFovDeg)
+                            com.starcam.astro.ui.I18n.Ar.fovAuto.format(java.util.Locale.ROOT, arFovDeg)
                         } else {
                             // %.0f 必须传浮点参数（传 Int 会抛 IllegalFormatException 导致
                             // 相机页组合即闪退，v1.5.35 实测）
-                            com.starcam.astro.ui.I18n.Ar.fovLabel.format(arFovDeg)
+                            com.starcam.astro.ui.I18n.Ar.fovLabel.format(java.util.Locale.ROOT, arFovDeg)
                         },
                         color = if (fovAutoCalibrated) Color(0xFFB9F6CA) else Color.White.copy(alpha = 0.85f),
                         style = MaterialTheme.typography.bodySmall,
@@ -1394,6 +1358,7 @@ fun CameraScreen(
                         onValueChange = {
                             arFovDeg = it
                             fovAutoCalibrated = false // 手动微调后标记为手动值
+                            fovUserOverridden = true
                         },
                         onValueChangeFinished = { settings.arFovDeg = arFovDeg },
                         valueRange = 40f..90f,
@@ -1401,8 +1366,9 @@ fun CameraScreen(
                 }
 
                 // §0.50：Pro 手动曝光（ISO + 快门，AE off 运行时注入）
-                val proSupported = isoRangeState != null && exposureRangeState != null &&
-                    (exposureRangeState ?: 0L..0L).let { it.first <= 33_333_333L && it.last >= 1_000_000_000L }
+                val expRange = exposureRangeState
+                val proSupported = isoRangeState != null && expRange != null &&
+                    expRange.first <= 33_333_333L && expRange.last >= 1_000_000_000L
                 if (proSupported) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,

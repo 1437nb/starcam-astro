@@ -1398,13 +1398,16 @@ private fun InfoPanel(state: ResultUiState.Success, modifier: Modifier = Modifie
                 InfoRow(com.starcam.astro.ui.I18n.Result.labelEngine, it.label(isEn))
             }
             InfoRow(com.starcam.astro.ui.I18n.Result.labelCenter, "RA ${formatRa(solve.raDeg)}    Dec ${formatDec(solve.decDeg)}")
-            InfoRow(com.starcam.astro.ui.I18n.Result.labelFov, "${"%.1f".format(solve.fieldWidthDeg)}° × ${"%.1f".format(solve.fieldHeightDeg)}°")
+            InfoRow(com.starcam.astro.ui.I18n.Result.labelFov, "${"%.1f".format(java.util.Locale.ROOT, solve.fieldWidthDeg)}° × ${"%.1f".format(java.util.Locale.ROOT, solve.fieldHeightDeg)}°")
             // §0.90 识别耗时（演示模式无耗时可言，为空则不显示该行）
             com.starcam.astro.ui.I18n.Result.formatSolveTime(state.elapsedMs)
                 .takeIf { it.isNotEmpty() }
                 ?.let { InfoRow(com.starcam.astro.ui.I18n.Result.labelSolveTime, it) }
-            InfoRow(com.starcam.astro.ui.I18n.Result.labelPixScale, "${"%.1f".format(solve.pixScaleArcsec)}${if (isEn) "″/px" else "″/像素"}")
-            InfoRow(com.starcam.astro.ui.I18n.Result.labelOrientation, "${"%.1f".format(solve.orientationDeg)}°（parity ${solve.parity}）")
+            InfoRow(com.starcam.astro.ui.I18n.Result.labelPixScale, "${"%.1f".format(java.util.Locale.ROOT, solve.pixScaleArcsec)}${if (isEn) "″/px" else "″/像素"}")
+            InfoRow(
+                com.starcam.astro.ui.I18n.Result.labelOrientation,
+                "${"%.1f".format(java.util.Locale.ROOT, solve.orientationDeg)}°${if (isEn) " (parity ${solve.parity})" else "（parity ${solve.parity}）"}",
+            )
             solve.subId?.let { InfoRow(com.starcam.astro.ui.I18n.Result.labelTaskId, "#$it") }
             Spacer(Modifier.height(8.dp))
             if (state.labels.isNotEmpty()) {
@@ -1412,7 +1415,7 @@ private fun InfoPanel(state: ResultUiState.Success, modifier: Modifier = Modifie
                 Spacer(Modifier.height(6.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 ) {
                     state.labels.forEach { label ->
                         AssistChip(onClick = {}, label = { Text(label.text) })

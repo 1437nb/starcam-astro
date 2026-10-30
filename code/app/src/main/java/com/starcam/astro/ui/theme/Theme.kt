@@ -14,9 +14,11 @@ import com.starcam.astro.data.AppLanguage
 import java.util.Locale
 
 /** 主题模式（§0.33）：夜视红为天文暗适应专用——红光对夜间视力影响最小 */
-enum class AppThemeMode(val key: String, val label: String) {
-    DEEP_SKY("deep_sky", "深空蓝（默认）"),
-    NIGHT_RED("night_red", "夜视红（暗适应）"),
+enum class AppThemeMode(val key: String, val label: String, val labelEn: String) {
+    DEEP_SKY("deep_sky", "深空蓝（默认）", "Deep Sky Blue (Default)"),
+    NIGHT_RED("night_red", "夜视红（暗适应）", "Night Red (Dark Adaptation)");
+
+    fun label(isEnglish: Boolean = false): String = if (isEnglish) labelEn else label
 }
 
 /** 主题运行时状态：设置页修改即时生效（无需重建 Activity） */

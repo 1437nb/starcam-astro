@@ -22,12 +22,16 @@ object ArSkyProjector {
     /** 恒星/天体单位向量（3n），与 [entries]/[messierList] 一一对应 */
     private val starVec: FloatArray
     val entries: List<StarEntry>
+    private val entryConIdx: IntArray
+    internal val conCodes: Array<String>
     private val messierVec: FloatArray
     val messierList: List<MessierObject>
 
     init {
         val vs = ArrayList<Float>(StarCatalogData.stars.size * 3)
         val es = ArrayList<StarEntry>()
+        val conMap = LinkedHashMap<String, Int>()
+        val conIdxList = ArrayList<Int>()
         for (s in StarCatalogData.stars) {
             if (s.mag > AR_MAG_LIMIT) continue
             val d = Math.PI / 180.0
@@ -36,9 +40,17 @@ object ArSkyProjector {
             vs += (cd * kotlin.math.sin(s.ra * d)).toFloat()
             vs += kotlin.math.sin(s.dec * d).toFloat()
             es += s
+            if (s.con.isNotEmpty()) {
+                val cIdx = conMap.getOrPut(s.con) { conMap.size }
+                conIdxList += cIdx
+            } else {
+                conIdxList += -1
+            }
         }
         starVec = vs.toFloatArray()
         entries = es
+        entryConIdx = conIdxList.toIntArray()
+        conCodes = conMap.keys.toTypedArray()
 
         val vm = ArrayList<Float>(MessierCatalog.byNumber.size * 3)
         val ms = ArrayList<MessierObject>()
@@ -176,6 +188,7 @@ object ArSkyProjector {
         correctionVec: FloatArray?,
         out: ProjectedSky,
         solarPositions: List<SolarSystemEphemeris.SolarPosition>? = null,
+        isEnglish: Boolean = false,
     ) {
         out.reset(widthPx, heightPx)
         if (widthPx <= 0f || heightPx <= 0f) return
@@ -242,6 +255,12 @@ object ArSkyProjector {
             s2.visible = true
             s2.belowHorizon = worldU < 0f
             out.stars.add(s2)
+            val cIdx = entryConIdx[i]
+            if (cIdx >= 0) {
+                out.conSumX[cIdx] += sx
+                out.conSumY[cIdx] += sy
+                out.conCount[cIdx]++
+            }
         }
 
         // 星座连线：两端点均可见才保留（按目录下标 O(1) 查屏幕坐标）
@@ -255,13 +274,20 @@ object ArSkyProjector {
             val idx = StarCatalogData.indexOfHip(out.stars[slot].entry.hip)
             if (idx >= 0) visibleIdx[idx] = slot
         }
+        // §0.125：复用本容器的 Line2D 对象池（docs/74 §4.2）
+        var lineSlot = 0
         for (seg in StarCatalogData.constellationLines) {
             val ia = visibleIdx[seg[0]]
             val ib = visibleIdx[seg[1]]
-            if (ia >= 0 && ib >= 0) out.lines += StarChartOverlay.Line2D(out.stars[ia], out.stars[ib])
+            if (ia >= 0 && ib >= 0) {
+                val ln = out.linePool[lineSlot++]
+                ln.a = out.stars[ia]
+                ln.b = out.stars[ib]
+                out.lines.add(ln)
+            }
         }
 
-        // 梅西耶深空天体
+        // 梅西耶深空天体（§0.125 复用本容器的 Messier2D 对象池，docs/74 §4.2）
         for (i in messierList.indices) {
             val o = i * 3
             cam[0] = messierVec[o]; cam[1] = messierVec[o + 1]; cam[2] = messierVec[o + 2]
@@ -272,14 +298,18 @@ object ArSkyProjector {
             val sy = cy - f * cam[1] / z + offY
             val margin = 40f
             if (sx < -margin || sx > widthPx + margin || sy < -margin || sy > heightPx + margin) continue
-            out.messier += StarChartOverlay.Messier2D(
-                messierList[i], sx, sy, visible = true, belowHorizon = worldU < 0f,
-            )
+            val m2 = out.messierPool[i]
+            m2.x = sx
+            m2.y = sy
+            m2.visible = true
+            m2.belowHorizon = worldU < 0f
+            out.messier.add(m2)
         }
 
-        // §0.58 太阳系天体（月亮 / 行星）：与恒星同一套针孔投影与地平线判定
+        // §0.58 太阳系天体（月亮 / 行星）：与恒星同一套针孔投影与地平线判定（§0.125 复用 Solar2D 对象池，docs/74 §4.3）
         if (solarPositions != null) {
             val dd = Math.PI / 180.0
+            var solarSlot = 0
             for (p in solarPositions) {
                 val cdd = kotlin.math.cos(p.decDeg * dd).toFloat()
                 cam[0] = (cdd * kotlin.math.cos(p.raDeg * dd)).toFloat()
@@ -296,12 +326,35 @@ object ArSkyProjector {
                 ) {
                     continue
                 }
-                out.solar += StarChartOverlay.Solar2D(p, sx, sy, visible = true, belowHorizon = worldU < 0f)
+                val s2d = if (solarSlot < out.solarPool.size) {
+                    out.solarPool[solarSlot].apply {
+                        pos = p
+                        x = sx
+                        y = sy
+                        visible = true
+                        belowHorizon = worldU < 0f
+                    }
+                } else {
+                    StarChartOverlay.Solar2D(
+                        p, sx, sy, visible = true, belowHorizon = worldU < 0f,
+                    ).also { out.solarPool.add(it) }
+                }
+                solarSlot++
+                out.solar.add(s2d)
             }
         }
 
-        // 星座名标签（质心，直接复用 StarChartOverlay 的分组逻辑）
-        out.labels += StarChartOverlay.constellationLabels(out.stars)
+        // §0.125 星座名标签（零分配分组质心 + 英文切换支持，docs/74 §4.4）
+        for (c in conCodes.indices) {
+            val cnt = out.conCount[c]
+            if (cnt >= 2) {
+                val lbl = out.labelPool[c]
+                lbl.text = Constellations.name(conCodes[c], isEnglish)
+                lbl.x = out.conSumX[c] / cnt
+                lbl.y = out.conSumY[c] / cnt
+                out.labels.add(lbl)
+            }
+        }
     }
 
     /** 单帧投影结果（可复用容器） */
@@ -330,6 +383,29 @@ object ArSkyProjector {
                 )
             }
 
+        /** §0.125：本容器专属的 Line2D / Messier2D / Label2D 对象池与星座质心累加器（docs/74 §4.2, §4.4） */
+        internal val linePool: Array<StarChartOverlay.Line2D> =
+            Array(StarCatalogData.constellationLines.size) {
+                StarChartOverlay.Line2D(starPool[0], starPool[0])
+            }
+
+        internal val messierPool: Array<StarChartOverlay.Messier2D> =
+            Array(ArSkyProjector.messierList.size) { i ->
+                StarChartOverlay.Messier2D(
+                    ArSkyProjector.messierList[i], 0f, 0f, visible = false, belowHorizon = false,
+                )
+            }
+
+        internal val labelPool: Array<StarChartOverlay.Label2D> =
+            Array(ArSkyProjector.conCodes.size) {
+                StarChartOverlay.Label2D("", 0f, 0f)
+            }
+
+        internal val conSumX = FloatArray(ArSkyProjector.conCodes.size)
+        internal val conSumY = FloatArray(ArSkyProjector.conCodes.size)
+        internal val conCount = IntArray(ArSkyProjector.conCodes.size)
+        internal val solarPool = ArrayList<StarChartOverlay.Solar2D>(9)
+
         val stars = ArrayList<StarChartOverlay.Star2D>(256)
         val lines = ArrayList<StarChartOverlay.Line2D>(48)
         val labels = ArrayList<StarChartOverlay.Label2D>(8)
@@ -341,8 +417,22 @@ object ArSkyProjector {
         var heightPx: Float = 0f
             private set
 
+        /** §0.125：本容器专属的复用 OverlayScene（消除 AR 逐帧包装壳分配，docs/74 §4.5） */
+        private val scene = LayeredRenderer.OverlayScene(
+            0, 0, stars, lines, labels, messier, solar,
+        )
+
+        fun toOverlayScene(): LayeredRenderer.OverlayScene {
+            scene.width = widthPx.toInt()
+            scene.height = heightPx.toInt()
+            return scene
+        }
+
         fun reset(w: Float, h: Float) {
             stars.clear(); lines.clear(); labels.clear(); messier.clear(); solar.clear()
+            java.util.Arrays.fill(conSumX, 0f)
+            java.util.Arrays.fill(conSumY, 0f)
+            java.util.Arrays.fill(conCount, 0)
             widthPx = w; heightPx = h
         }
     }

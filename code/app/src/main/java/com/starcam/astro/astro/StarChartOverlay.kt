@@ -25,11 +25,11 @@ object StarChartOverlay {
         var belowHorizon: Boolean = false,
     )
 
-    /** 星座连线（两端点均为可见星） */
-    data class Line2D(val a: Star2D, val b: Star2D)
+    /** 星座连线（两端点均为可见星；§0.125 支持 AR 对象池复用） */
+    data class Line2D(var a: Star2D, var b: Star2D)
 
-    /** 星座名称标签（屏幕坐标） */
-    data class Label2D(val text: String, val x: Float, val y: Float)
+    /** 星座名称标签（屏幕坐标；§0.125 支持 AR 对象池复用） */
+    data class Label2D(var text: String, var x: Float, var y: Float)
 
     /**
      * 将全部星表投影到屏幕。
@@ -85,13 +85,13 @@ object StarChartOverlay {
         return labels
     }
 
-    /** §0.43c：梅西耶深空天体投影（画面内返回可见标记）；[belowHorizon] 同 [Star2D] */
+    /** §0.43c：梅西耶深空天体投影（画面内返回可见标记）；[belowHorizon] 同 [Star2D]（§0.125 支持 AR 对象池复用） */
     data class Messier2D(
         val obj: MessierObject,
-        val x: Float,
-        val y: Float,
-        val visible: Boolean,
-        val belowHorizon: Boolean = false,
+        var x: Float,
+        var y: Float,
+        var visible: Boolean,
+        var belowHorizon: Boolean = false,
     )
 
     fun projectMessier(wcs: WcsTransform, width: Int, height: Int): List<Messier2D> {
@@ -118,11 +118,11 @@ object StarChartOverlay {
      * @param positions 由 [SolarSystemEphemeris.topocentricPositions] 得到的站心位置
      */
     data class Solar2D(
-        val pos: SolarSystemEphemeris.SolarPosition,
-        val x: Float,
-        val y: Float,
-        val visible: Boolean,
-        val belowHorizon: Boolean = false,
+        var pos: SolarSystemEphemeris.SolarPosition,
+        var x: Float,
+        var y: Float,
+        var visible: Boolean,
+        var belowHorizon: Boolean = false,
     )
 
     fun projectSolarSystem(

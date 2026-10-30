@@ -250,4 +250,40 @@ class CameraMathTest {
         )
         org.junit.Assert.assertNull(nullFov)
     }
+
+    @Test
+    fun computeHorizonSegmentIntoFindsTwoDistinctIntersections() {
+        val out = FloatArray(4)
+        // 1. 水平平视（ru=0, uu=1, au=0）：地平线水平穿过画面中心 y = rectH/2
+        val hitHorizontal = CameraMath.computeHorizonSegmentInto(
+            ru = 0f, uu = 1f, au = 0f,
+            focalPx = 500f, rectW = 1000f, rectH = 800f,
+            out = out,
+        )
+        assertTrue("水平平视时地平线应穿过视口左右两边", hitHorizontal)
+        assertEquals(0f, out[0], 1e-3f)
+        assertEquals(400f, out[1], 1e-3f)
+        assertEquals(1000f, out[2], 1e-3f)
+        assertEquals(400f, out[3], 1e-3f)
+
+        // 2. 竖直横滚 90°（ru=1, uu=0, au=0）：地平线竖直穿过画面中心 x = rectW/2
+        val hitVertical = CameraMath.computeHorizonSegmentInto(
+            ru = 1f, uu = 0f, au = 0f,
+            focalPx = 500f, rectW = 1000f, rectH = 800f,
+            out = out,
+        )
+        assertTrue("竖直横滚时地平线应穿过视口上下两边", hitVertical)
+        assertEquals(500f, out[0], 1e-3f)
+        assertEquals(0f, out[1], 1e-3f)
+        assertEquals(500f, out[2], 1e-3f)
+        assertEquals(800f, out[3], 1e-3f)
+
+        // 3. 仰望天顶（ru=0, uu=0.1, au=0.995）：地平线远在画面下方，不与视口相交
+        val hitZenith = CameraMath.computeHorizonSegmentInto(
+            ru = 0f, uu = 0.1f, au = 0.995f,
+            focalPx = 500f, rectW = 1000f, rectH = 800f,
+            out = out,
+        )
+        org.junit.Assert.assertFalse("仰望天顶时地平线在视口外，应返回 false", hitZenith)
+    }
 }

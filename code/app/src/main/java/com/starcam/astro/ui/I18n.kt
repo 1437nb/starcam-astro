@@ -51,12 +51,14 @@ object I18n {
     object Settings {
         val title: String get() = if (isEn) "Settings" else "设置"
         val languageSection: String get() = if (isEn) "Language" else "语言"
-        val languageDesc: String get() = if (isEn) "Choose display language for UI, constellation names, and star names." else "选择界面、星座名称、恒星专名及梅西耶天体的显示语言。"
+        val languageDesc: String get() = if (isEn) "Choose display language for UI, constellation names, star names, and Messier objects." else "选择界面、星座名称、恒星专名及梅西耶天体的显示语言。"
         val appearanceSection: String get() = if (isEn) "Appearance" else "外观"
-        val appearanceDesc: String get() = if (isEn) "Night Red is recommended for dark adaptation: pure black background + red light to protect night vision and save battery." else "夜间观星建议开启「夜视红」：纯黑背景 + 低亮度红光，对暗适应的破坏最小，OLED 屏幕也更省电。"
+        val appearanceDesc: String get() = if (isEn) "Night Red is recommended for dark adaptation: pure black background + low-intensity red light." else "夜间观星建议开启「夜视红」：纯黑背景 + 低亮度红光，对暗适应的破坏最小，OLED 屏幕也更省电。"
         val sensorSection: String get() = if (isEn) "Sensor-Assisted Pointing" else "传感器粗定标辅助"
         val sensorTitle: String get() = if (isEn) "Enable Sensor Coarse Pointing" else "开启传感器粗定标"
         val sensorDesc: String get() = if (isEn) "Uses device gyroscope, gravity, compass, and GPS location during shooting to compute camera sky pointing, narrowing plate solving search space by >90% and accelerating recognition." else "利用手机陀螺仪、重力、指南针与定位，在拍照时推算相机视场的天球指向，将解算搜索空间缩减 90% 以上，显著提升识别速度。"
+        val parallelRacingTitle: String get() = if (isEn) "Parallel Engine Racing" else "双引擎并发竞速"
+        val parallelRacingDesc: String get() = if (isEn) "Race local star table and native engine concurrently on unknown FOV photos for fastest solve" else "未知视场照片同时启动本地星表与官方引擎并发加速，取最先解出者"
         val engineSection: String get() = if (isEn) "Solving Engine" else "识别引擎"
         val engineDesc: String get() = if (isEn) "Three-tier solving architecture:\n① Built-in 8400+ star catalog matching (fast wide-field solving)\n② astrometry.net official engine (local NDK blind solving, 0.1°~180°)\n③ Online nova.astrometry.net fallback (requires API Key)\nAuto mode: wide-field photos use catalog first, official engine next." else "拍照认星使用三层引擎：\n① 内置 Hipparcos 亮星表广角匹配（约 8°~180°，秒级出结果）\n② astrometry.net 官方盲求解引擎（本地，0.1°~180° 视场，含广角）\n③ 在线 nova.astrometry.net 兜底（需 API Key）\n自动模式：广角照片先亮星表快匹配，失败后用官方引擎精解；\n窄场照片（<8°，如望远镜接拍）自动跳过亮星表直接官方引擎。"
         val onlineSection: String get() = if (isEn) "Online Solver (astrometry.net)" else "在线识别（astrometry.net）"
@@ -152,7 +154,7 @@ object I18n {
             val tenths = (ms + 50L) / 100L
             return if (tenths < 600L) {
                 val s = tenths / 10.0
-                if (isEn) "%.1f s".format(s) else "%.1f 秒".format(s)
+                if (isEn) "%.1f s".format(java.util.Locale.ROOT, s) else "%.1f 秒".format(java.util.Locale.ROOT, s)
             } else {
                 val totalSec = tenths / 10L
                 val m = totalSec / 60L
@@ -249,6 +251,9 @@ object I18n {
         val notReady: String get() = if (isEn) "Camera not ready, please wait" else "相机尚未就绪，请稍候"
         val captureFailed: String get() = if (isEn) "Capture failed" else "拍照失败"
         val liveOverlayDesc: String get() = if (isEn) "Live sky recognition overlay" else "实时认星标注"
+        val flashDesc: String get() = if (isEn) "Flash" else "闪光灯"
+        val nightModeDesc: String get() = if (isEn) "Night enhancement (EV+2)" else "夜景增强（EV+2）"
+        val switchCameraDesc: String get() = if (isEn) "Switch camera" else "切换镜头"
         fun identifiedLabel(label: String): String = if (isEn) "Identified: $label (Live)" else "已识别：$label（实时预览）"
         val focusHint: String get() = if (isEn) "🔭 Tap brightest star to focus" else "🔭 轻点画面中的最亮星即可对焦"
         fun evLabel(ev: Int): String = "EV ${if (ev >= 0) "+$ev" else "$ev"}"

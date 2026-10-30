@@ -389,19 +389,73 @@ object HistoryStore {
         return acos(s.coerceIn(-1.0, 1.0)) / r
     }
 
-    /** 天区中心最近的星座：取 5° 内最近星表星的所属星座（支持中英双语，跳过无星座的增补星 §0.42） */
-    fun nearestConstellation(raDeg: Double, decDeg: Double, isEnglish: Boolean = false): String {
-        var best: Pair<Double, String>? = null
-        for (star in StarCatalogData.stars) {
-            if (star.con.isEmpty()) continue
-            val d = angSep(raDeg, decDeg, star.ra, star.dec)
-            if (best == null || d < best.first) best = d to star.con
+    /**
+     * §0.125 带星座标识的亮星预索引（单位向量 + IAU 星座简写）。
+     * 星表全集 8419 颗星中仅 ~919 颗亮星带有 `con` 标签（§0.42 增补暗星 `con=""`）；
+     * 预计算其天球单位向量后，`nearestConstellation` 只需对 ~919 颗星做点积比较，
+     * 省去每次调用遍历 7500 颗无标签暗星及逐颗三角函数/反余弦开销。
+     */
+    private class ConStarIndex(
+        val ux: DoubleArray,
+        val uy: DoubleArray,
+        val uz: DoubleArray,
+        val codes: Array<String>,
+    )
+
+    private val conStarIndex: ConStarIndex by lazy {
+        val stars = StarCatalogData.stars.filter { it.con.isNotEmpty() }
+        val n = stars.size
+        val ux = DoubleArray(n)
+        val uy = DoubleArray(n)
+        val uz = DoubleArray(n)
+        val codes = Array(n) { stars[it].con }
+        val r = PI / 180.0
+        for (i in 0 until n) {
+            val s = stars[i]
+            val ra = s.ra * r
+            val dec = s.dec * r
+            val cd = cos(dec)
+            ux[i] = cd * cos(ra)
+            uy[i] = cd * sin(ra)
+            uz[i] = sin(dec)
         }
-        val con = best?.second ?: return ""
-        return Constellations.name(con, isEnglish)
+        ConStarIndex(ux, uy, uz, codes)
     }
 
-    /** 天区中心最近的星座（中文名，兼容旧接口）：取 5° 内最近星表星的所属星座 */
+    /**
+     * 天区中心最近的星座：取 [maxSepDeg]（默认 15°）内最近有星座标识亮星的所属星座
+     * （支持中英双语；非有限坐标或超出角距上界返回空串，§0.125 修复 NaN 首星误命中与全表遍历）。
+     */
+    fun nearestConstellation(
+        raDeg: Double,
+        decDeg: Double,
+        isEnglish: Boolean = false,
+        maxSepDeg: Double = 15.0,
+    ): String {
+        if (!raDeg.isFinite() || !decDeg.isFinite() || maxSepDeg <= 0.0) return ""
+        val r = PI / 180.0
+        val ra = raDeg * r
+        val dec = decDeg * r
+        val cd = cos(dec)
+        val tx = cd * cos(ra)
+        val ty = cd * sin(ra)
+        val tz = sin(dec)
+        val minCos = cos(maxSepDeg.coerceAtMost(180.0) * r)
+        val idx = conStarIndex
+        var bestCos = minCos
+        var bestIdx = -1
+        for (i in idx.codes.indices) {
+            val dot = tx * idx.ux[i] + ty * idx.uy[i] + tz * idx.uz[i]
+            if (dot >= bestCos) {
+                bestCos = dot
+                bestIdx = i
+            }
+        }
+        if (bestIdx < 0) return ""
+        return Constellations.name(idx.codes[bestIdx], isEnglish)
+    }
+
+    /** 天区中心最近的星座（中文名，兼容旧接口）：取 15° 内最近星表星的所属星座 */
     fun nearestConstellationZh(raDeg: Double, decDeg: Double): String =
         nearestConstellation(raDeg, decDeg, isEnglish = false)
 }

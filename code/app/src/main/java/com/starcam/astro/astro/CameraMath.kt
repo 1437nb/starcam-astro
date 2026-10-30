@@ -226,4 +226,77 @@ object CameraMath {
         }
         return if (fov in 30.0..100.0) fov.toFloat().coerceIn(40f, 90f) else null
     }
+
+    /**
+     * 地平线大圆针孔投影与矩形视口 4 边鲁棒求交（§0.125 消除 AR 逐帧闭包 Ref 分配，docs/74 §4.1）。
+     *
+     * 直线方程：ru*(x - cx) - uu*(y - cy) + f*au = 0，即 A*x + B*y + C = 0。
+     * 求该直线与 [0, rectW] × [0, rectH] 边界的两个不重合交点，写入 [out] = [x1, y1, x2, y2]。
+     *
+     * @return 交点满 2 个返回 true（此时 [out] 有效），否则返回 false。
+     */
+    fun computeHorizonSegmentInto(
+        ru: Float,
+        uu: Float,
+        au: Float,
+        focalPx: Float,
+        rectW: Float,
+        rectH: Float,
+        out: FloatArray,
+    ): Boolean {
+        val halfW = rectW / 2f
+        val halfH = rectH / 2f
+        val lineA = ru
+        val lineB = -uu
+        val lineC = focalPx * au - ru * halfW + uu * halfH
+
+        var p1x = 0f
+        var p1y = 0f
+        var p2x = 0f
+        var p2y = 0f
+        var hitCount = 0
+
+        if (kotlin.math.abs(lineB) > 1e-5f) {
+            val yLeft = -lineC / lineB
+            if (yLeft in 0f..rectH) {
+                p1x = 0f; p1y = yLeft; hitCount = 1
+            }
+            val yRight = -(lineC + lineA * rectW) / lineB
+            if (yRight in 0f..rectH) {
+                if (hitCount == 0) {
+                    p1x = rectW; p1y = yRight; hitCount = 1
+                } else if (kotlin.math.abs(p1x - rectW) > 1f || kotlin.math.abs(p1y - yRight) > 1f) {
+                    p2x = rectW; p2y = yRight; hitCount = 2
+                }
+            }
+        }
+        if (kotlin.math.abs(lineA) > 1e-5f && hitCount < 2) {
+            val xTop = -lineC / lineA
+            if (xTop in 0f..rectW) {
+                if (hitCount == 0) {
+                    p1x = xTop; p1y = 0f; hitCount = 1
+                } else if (kotlin.math.abs(p1x - xTop) > 1f || kotlin.math.abs(p1y - 0f) > 1f) {
+                    p2x = xTop; p2y = 0f; hitCount = 2
+                }
+            }
+            if (hitCount < 2) {
+                val xBottom = -(lineC + lineB * rectH) / lineA
+                if (xBottom in 0f..rectW) {
+                    if (hitCount == 0) {
+                        p1x = xBottom; p1y = rectH; hitCount = 1
+                    } else if (kotlin.math.abs(p1x - xBottom) > 1f || kotlin.math.abs(p1y - rectH) > 1f) {
+                        p2x = xBottom; p2y = rectH; hitCount = 2
+                    }
+                }
+            }
+        }
+        if (hitCount >= 2) {
+            out[0] = p1x
+            out[1] = p1y
+            out[2] = p2x
+            out[3] = p2y
+            return true
+        }
+        return false
+    }
 }

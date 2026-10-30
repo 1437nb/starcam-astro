@@ -736,6 +736,7 @@ object SolarSystemEphemeris {
      *
      * @param epochSec UTC 秒
      */
+    @Synchronized
     fun cachedTopocentric(
         epochSec: Long,
         latDeg: Double,
@@ -757,6 +758,7 @@ object SolarSystemEphemeris {
     }
 
     /** 清空缓存（单测用，避免跨用例串扰） */
+    @Synchronized
     fun clearCache() {
         cacheJd = Double.NaN
         cacheLat = Double.NaN

@@ -197,6 +197,7 @@ object LocalStarMatcher {
         var shallowScoredStats: String? = null
         var shallowScoredBest: Int? = null
         var shallowScoredInFrame: Int? = null
+        var shallowPhaseTimings: String? = null
         var deepRejectedReason: String? = null
 
         fun snapshotDiagnostics(): MatchDiagnostics = MatchDiagnostics(
@@ -216,9 +217,6 @@ object LocalStarMatcher {
     /** 兼容历史调试读取：最后一次求解完成时同步更新对象级字段（见 syncLegacyDiagnostics） */
     @Volatile
     private var runtimeCatalogMag: Float = PROD_CATALOG_MAG
-
-    @Volatile
-    private var runtimeScoredCap: Long = SCORED_MAX_CANDIDATES
 
     /** 当前生效的星表域星等上限（调试字段优先级最高，仅测试/标定台会写） */
     private fun catalogMag(): Float = debugForceCatalogMag ?: runtimeCatalogMag
@@ -326,11 +324,11 @@ object LocalStarMatcher {
     var debugScoredStats: String? = null
 
     /**
-     * §0.74 调试：matchInternal 各阶段耗时（毫秒，按调用顺序）。
-     * 形如 "primary=1230;multi=0;weak=0;backup=0;scored=0"。值为 0 表示该阶段未执行
-     * （提前退出或前置条件不满足）。用于定位耗时瓶颈 —— 实测宽场失败路径的时间
-     * 并不在常被怀疑的打分轮（它有 [SCORED_MAX_CANDIDATES] 上限兜底），
-     * 而在投票轮被完整跑遍的阶梯上。
+     * §0.74 / §0.125 调试：matchInternal 各阶段耗时（毫秒，按调用顺序）。
+     * 形如 "primary=1230;multi=0;weak=0;backup=0;backupMulti=0;scored=0;total=1230"。
+     * 值为 0 表示该阶段未执行（提前退出或前置条件不满足）。用于定位耗时瓶颈 ——
+     * 实测宽场失败路径的时间并不在常被怀疑的打分轮（它有 [SCORED_MAX_CANDIDATES] 上限兜底），
+     * 而在投票轮被完整跑遍的阶梯上。若走深域重试，浅域耗时另行归档至 [debugShallowPhaseTimings]。
      */
     @Volatile
     var debugPhaseTimings: String? = null
@@ -439,6 +437,8 @@ object LocalStarMatcher {
     @Volatile var debugShallowScoredBest: Int? = null
         private set
     @Volatile var debugShallowScoredInFrame: Int? = null
+        private set
+    @Volatile var debugShallowPhaseTimings: String? = null
         private set
 
     // ── §0.103（P0-2.5）深域准入留档 ────────────────────────────────
@@ -808,10 +808,10 @@ object LocalStarMatcher {
     /**
      * §0.75 索引缓存：**按星等上限分槽**。
      *
-     * 为什么不能是单槽：深域兜底（mag<=6.5，55 万条三角形、构建 8.9s）与浅域
+     * 为什么不能是单槽：深域兜底（mag<=6.5，55.6 万条三角形、构建 ~9.3s）与浅域
      * （mag<=4.0，3.4 万条、358ms）会在同一批照片里交替出现（批量导出宽窄混杂）。
-     * 单槽会让每次交替都重建一次索引 —— 深域重建一次就是 8.9 秒，10 张交替
-     * 就要 46 秒。分槽后两域各建一次、之后都命中缓存。
+     * 单槽会让每次交替都重建一次索引 —— 深域重建一次就是 ~9.3 秒，10 张交替
+     * 就要 ~46 秒。分槽后两域各建一次、之后都命中缓存。
      *
      * §0.77：改用 ConcurrentHashMap。求解可能在星图页分析线程与求解 IO 线程上并发
      * 发生，普通 HashMap 的「锁外读 + 锁内写」会被并发写破坏内部结构 —— 这是
@@ -1062,14 +1062,14 @@ object LocalStarMatcher {
     }
 
     /**
-     * 亮星集（mag ≤ 4.0 索引子集）：每颗星取角距 0.8°~25° 内最近的 12 颗
+     * 按星等上限 [magLimit] 构建星表三角形索引：每颗星取角距 0.8°~25° 内最近的 12 颗
      * 邻星，构建局部三角形索引。
-     * 注意契约：投票索引与星表（919 颗，mag≤4.5）并非同一集合——索引刻意
-     * 只取 mag≤4.0 的亮子集。实测（第四/五轮）若把索引放宽到 4.5，富星场
-     * 中每个查询的候选数暴增，弱验证（第 4 星 0.35° 单命中）拦不住假三角形，
-     * 假票稀释真票，真实照片解算率从 8/12 跌回 5/12。合成场若渲染出
-     * 4.0~4.5 的不可匹配星，同样会稀释亮星近邻列表（仙后座回归实测）——
-     * 投票工作集与索引的 mag≤4.0 域必须保持一致。
+     * - 浅域默认 [PROD_CATALOG_MAG]（mag ≤ 4.0，514 颗亮子集）：刻意比 919 颗渲染亮星表
+     *   （mag ≤ 4.5）更严。实测若把浅域放宽到 4.5，富星场中每个查询的候选数暴增，
+     *   弱验证（第 4 星 0.35° 单命中）拦不住假三角形，假票稀释真票，真实照片解算率
+     *   从 8/12 跌回 5/12。
+     * - 深域兜底 [DEEP_CATALOG_MAG]（mag ≤ 6.5，8415 颗，§0.75）：仅在浅域整条阶梯无解且
+     *   满足窄场准入（视场 ≤ [DEEP_PATH_MAX_FOV_DEG]）时按需构建，专供 ≤30° 窄场照片兜底。
      */
     private fun buildIndex(magLimit: Float = PROD_CATALOG_MAG, token: SolveToken? = null): StarIndex {
         val bright = StarCatalogData.stars.filter { it.mag <= magLimit }
@@ -1210,10 +1210,11 @@ object LocalStarMatcher {
 
     /**
      * 归一化边长比 → 邻近桶（256 级细粒度，让正确匹配投票尖锐占优）。
-     * window=1：严格查询（±0.012）；window=5：宽松回退查询（±0.05，
-     * 覆盖大视场 gnomonic 投影造成的比值偏移，实测 ~4%）。
+     * §0.74 改为单桶存储（[bucketKey]）后，查询侧 window 同步 +1 补偿：
+     * window=2：严格查询（±0.012，对应旧 9 桶存储下的 window=1）；
+     * window=14：宽松回退查询（±0.05，对应旧 9 桶存储下的 window=13，覆盖大视场 gnomonic 投影比值偏移）。
      */
-    private fun quantizeKeys(r2: Float, r3: Float, window: Int = 1): List<Int> {
+    internal fun quantizeKeys(r2: Float, r3: Float, window: Int = 1): List<Int> {
         val b2 = (r2 * 256).toInt().coerceIn(0, 255)
         val b3 = (r3 * 256).toInt().coerceIn(0, 255)
         val size = (2 * window + 1) * (2 * window + 1)
@@ -1230,7 +1231,7 @@ object LocalStarMatcher {
      * §0.74 单桶键（triMap 存储用）。与 [quantizeKeys] 同一量化，只是不向相邻桶扩散。
      * 查询侧用 window+1 补偿，覆盖范围与旧的「9 桶存储 + window」完全一致。
      */
-    private fun bucketKey(r2: Float, r3: Float): Int {
+    internal fun bucketKey(r2: Float, r3: Float): Int {
         val b2 = (r2 * 256).toInt().coerceIn(0, 255)
         val b3 = (r3 * 256).toInt().coerceIn(0, 255)
         return b2 * 256 + b3
@@ -1313,6 +1314,7 @@ object LocalStarMatcher {
         debugShallowScoredStats = ctx.shallowScoredStats
         debugShallowScoredBest = ctx.shallowScoredBest
         debugShallowScoredInFrame = ctx.shallowScoredInFrame
+        debugShallowPhaseTimings = ctx.shallowPhaseTimings
         debugDeepRejectedReason = ctx.deepRejectedReason
         debugScoredWinPairs = ctx.scoredWinPairs
         debugScoredExpandedPairs = ctx.scoredExpandedPairs
@@ -1320,42 +1322,6 @@ object LocalStarMatcher {
         debugScoredWinAt = ctx.scoredWinAt
         lastMatchUsedFallback = ctx.usedFallback
         debugExpandDetail = ctx.expandDetail
-    }
-
-    /** 锁内快照（§0.107 历史留档）。 */
-    private fun snapshotDiagnostics(): MatchDiagnostics = MatchDiagnostics(
-        usedFallback = lastMatchUsedFallback,
-        deepRejectedReason = debugDeepRejectedReason,
-        voteStats = debugVoteStats,
-        scoredStats = debugScoredStats,
-        scoredBest = debugScoredBest,
-        scoredInFrame = debugScoredInFrame,
-        shallowVoteStats = debugShallowVoteStats,
-        shallowScoredStats = debugShallowScoredStats,
-        shallowScoredBest = debugShallowScoredBest,
-        shallowScoredInFrame = debugShallowScoredInFrame,
-    )
-
-    private fun matchLocked(
-        detected: List<DetectedStar>,
-        width: Int,
-        height: Int,
-        pointingHint: PointingHint?,
-        allowDeepRetry: Boolean,
-        fallbackDetected: List<DetectedStar>? = null,
-        fovHintDeg: Double? = null,
-        token: SolveToken? = null,
-    ): LocalMatchResult? {
-        val ctx = MatchContext(
-            catalogMag = debugForceCatalogMag ?: PROD_CATALOG_MAG,
-            scoredCap = SCORED_MAX_CANDIDATES,
-            token = token,
-        )
-        val res = matchInternalContext(
-            ctx, detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg,
-        )
-        syncLegacyDiagnostics(ctx)
-        return res
     }
 
     private fun matchInternalContext(
@@ -1375,6 +1341,7 @@ object LocalStarMatcher {
         ctx.shallowScoredStats = null
         ctx.shallowScoredBest = null
         ctx.shallowScoredInFrame = null
+        ctx.shallowPhaseTimings = null
         ctx.deepRejectedReason = null
         ctx.usedFallback = false
         if (pointingHint != null) {
@@ -1446,6 +1413,7 @@ object LocalStarMatcher {
         ctx.shallowScoredStats = ctx.scoredStats
         ctx.shallowScoredBest = ctx.scoredBest
         ctx.shallowScoredInFrame = ctx.scoredInFrame
+        ctx.shallowPhaseTimings = ctx.phaseTimings
         val savedMag = ctx.catalogMag
         ctx.catalogMag = DEEP_CATALOG_MAG
         val deep = try {
@@ -1483,6 +1451,10 @@ object LocalStarMatcher {
         val tStart = System.currentTimeMillis()
         var msPrimary = 0L; var msMulti = 0L; var msWeak = 0L
         var msBackup = 0L; var msBackupMulti = 0L; var msScored = 0L
+        fun formatPhaseTimings(): String =
+            "primary=$msPrimary;multi=$msMulti;weak=$msWeak;" +
+                "backup=$msBackup;backupMulti=$msBackupMulti;scored=$msScored;" +
+                "total=${System.currentTimeMillis() - tStart}"
 
         // 投票与 parity（镜像）无关：每个阈值只投一次，normal/mirrored 共享结果。
         // （v1.5.8 的双阈值曾按"每 parity × 每阈值"各投一次，投票最多 4 轮，
@@ -1492,7 +1464,7 @@ object LocalStarMatcher {
         var best = bestCandidate(detected, width, height, primaryPairs, pointingHint, mag = ctx.catalogMag)
         msPrimary = System.currentTimeMillis() - tA
         if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
-            ctx.phaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
+            ctx.phaseTimings = formatPhaseTimings()
             return best
         }
         // §0.43 稀疏场重投：单候选轮完全无解时，用每星 top-3 候选重投一轮
@@ -1508,7 +1480,7 @@ object LocalStarMatcher {
             )
             msMulti = System.currentTimeMillis() - tB
             if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
-                ctx.phaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
+                ctx.phaseTimings = formatPhaseTimings()
                 return best
             }
         }
@@ -1537,7 +1509,7 @@ object LocalStarMatcher {
                 )
                 if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
                     msWeak = System.currentTimeMillis() - tC
-                    ctx.phaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;backup=$msBackup;scored=$msScored"
+                    ctx.phaseTimings = formatPhaseTimings()
                     return best
                 }
             }
@@ -1577,9 +1549,7 @@ object LocalStarMatcher {
             best = scoredRound(ctx, detected, width, height, pointingHint)
             msScored = System.currentTimeMillis() - tF
         }
-        ctx.phaseTimings = "primary=$msPrimary;multi=$msMulti;weak=$msWeak;" +
-                "backup=$msBackup;backupMulti=$msBackupMulti;scored=$msScored;" +
-                "total=${System.currentTimeMillis() - tStart}"
+        ctx.phaseTimings = formatPhaseTimings()
         return best
     }
 
@@ -2487,12 +2457,17 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
                             strictHit = true
                         }
                     }
+                    var looseHit = false
                     for (t in looseRaw) {
                         if (abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f) {
-                            merged[triKey(t)] = t
+                            val k = triKey(t)
+                            if (merged.put(k, t) == null) {
+                                looseHit = true
+                            }
                         }
                     }
                     if (!strictHit) strictEmpty++
+                    if (looseHit) looseFired++
                     val candidates = merged.values
                         .sortedWith(compareBy({ abs(it.r2 - r2) + abs(it.r3 - r3) }, { it.hipA }, { it.hipB }, { it.hipC }))
                         .take(candidateCap())

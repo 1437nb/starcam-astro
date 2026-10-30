@@ -363,4 +363,44 @@ class ArSkyProjectorTest {
         assertTrue("应投影出部分太阳系天体", out.solar.isNotEmpty())
         assertTrue(out.solar.all { it.x.isFinite() && it.y.isFinite() && it.pos.raDeg.isFinite() })
     }
+
+    @Test
+    fun projectSupportsEnglishConstellationLabelsAndPoolsObjectsAcrossFrames() {
+        val (right, up, axis) = zenithBasis()
+        val out = ArSkyProjector.ProjectedSky()
+        val solar = listOf(solarAt(0.0, 40.0))
+
+        // 第一帧：中文星座标签
+        ArSkyProjector.project(
+            right, up, axis, 0.0, 40.0, 75.0, 1000f, 1000f, null, out, solar, isEnglish = false,
+        )
+        assertTrue("应投影出星座标签", out.labels.isNotEmpty())
+        val zhLabels = out.labels.map { it.text }.toSet()
+        val firstLineRef = out.lines.firstOrNull()
+        val firstMessierRef = out.messier.firstOrNull()
+        val firstLabelRef = out.labels.first()
+        val firstSolarRef = out.solar.first()
+        val scene1 = out.toOverlayScene()
+        assertEquals(1000, scene1.width)
+
+        // 第二帧（同一容器复用）：英文星座标签 + 验证池化对象实例复用
+        ArSkyProjector.project(
+            right, up, axis, 0.0, 40.0, 75.0, 1200f, 900f, null, out, solar, isEnglish = true,
+        )
+        val enLabels = out.labels.map { it.text }.toSet()
+        assertTrue("英文模式下标签文本应切换为英文: $enLabels", enLabels != zhLabels)
+        assertTrue("英文标签不应含中文『座』字", enLabels.none { it.contains("座") })
+        if (firstLineRef != null && out.lines.isNotEmpty()) {
+            assertTrue("同一容器跨帧应复用 Line2D 池槽实例", firstLineRef === out.lines.first())
+        }
+        if (firstMessierRef != null && out.messier.isNotEmpty()) {
+            assertTrue("同一容器跨帧应复用 Messier2D 池槽实例", firstMessierRef === out.messier.first())
+        }
+        assertTrue("同一容器跨帧应复用 Label2D 池槽实例", firstLabelRef === out.labels.first())
+        assertTrue("同一容器跨帧应复用 Solar2D 池槽实例", firstSolarRef === out.solar.first())
+        val scene2 = out.toOverlayScene()
+        assertTrue("toOverlayScene 应复用同一包装壳实例", scene1 === scene2)
+        assertEquals(1200, scene2.width)
+        assertEquals(900, scene2.height)
+    }
 }
