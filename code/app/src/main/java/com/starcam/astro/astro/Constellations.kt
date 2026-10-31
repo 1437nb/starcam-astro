@@ -63,4 +63,19 @@ object Constellations {
 
     /** 缩写 → 英文/拉丁名；未知返回缩写本身 */
     fun enName(abbr: String): String = name(abbr, isEnglish = true)
+
+    private val ZH_TO_ABBR by lazy { ZH.entries.associate { (k, v) -> v to k } }
+    private val LATIN_TO_ABBR by lazy { LATIN.entries.associate { (k, v) -> v.lowercase() to k } }
+
+    /**
+     * 将任意格式的星座名称（中文名、拉丁/英文全名、3 字母 IAU 缩写）转为指定语言的星座名。
+     * 若未找到匹配，返回原本字符串。
+     */
+    fun localize(name: String, isEnglish: Boolean = false): String {
+        if (name.isBlank()) return ""
+        val abbr = ZH_TO_ABBR[name]
+            ?: LATIN_TO_ABBR[name.lowercase()]
+            ?: (if (LATIN.containsKey(name) || ZH.containsKey(name)) name else null)
+        return if (abbr != null) name(abbr, isEnglish) else name
+    }
 }

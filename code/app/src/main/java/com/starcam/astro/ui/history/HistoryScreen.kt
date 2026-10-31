@@ -122,7 +122,8 @@ fun HistoryScreen(
             text = {
                 Text(
                     buildString {
-                        if (entry.constellation.isNotEmpty()) append(entry.constellation).append(" · ")
+                        val con = entry.localizedConstellation(isEn)
+                        if (con.isNotEmpty()) append(con).append(" · ")
                         append(timeFmt.format(Date(entry.timestamp)))
                     },
                 )
@@ -250,6 +251,7 @@ fun HistoryScreen(
                         HistoryCell(
                             entry = e,
                             timeFmt = timeFmt,
+                            isEn = isEn,
                             onClick = { onOpenEntry(e) },
                             onDelete = { deleting = e },
                         )
@@ -269,6 +271,7 @@ fun HistoryScreen(
 private fun HistoryCell(
     entry: HistoryStore.Entry,
     timeFmt: SimpleDateFormat,
+    isEn: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -309,8 +312,9 @@ private fun HistoryCell(
         // 底部信息：星座 + 时间
         Text(
             buildString {
-                if (entry.constellation.isNotEmpty()) append(entry.constellation)
-                append(" ").append(timeFmt.format(Date(entry.timestamp)))
+                val con = entry.localizedConstellation(isEn)
+                if (con.isNotEmpty()) append(con).append(" ")
+                append(timeFmt.format(Date(entry.timestamp)))
             },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

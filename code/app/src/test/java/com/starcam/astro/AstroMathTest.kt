@@ -76,6 +76,26 @@ class AstroMathTest {
     }
 
     @Test
+    fun constellationsLocalize() {
+        val c = com.starcam.astro.astro.Constellations
+        // 中文名 → 英文名
+        assertEquals("Orion", c.localize("猎户座", isEnglish = true))
+        assertEquals("Andromeda", c.localize("仙女座", isEnglish = true))
+        assertEquals("Ursa Major", c.localize("大熊座", isEnglish = true))
+        // 中文名 → 中文名（幂等）
+        assertEquals("猎户座", c.localize("猎户座", isEnglish = false))
+        // 英文名 → 中文名
+        assertEquals("猎户座", c.localize("Orion", isEnglish = false))
+        assertEquals("天鹅座", c.localize("Cygnus", isEnglish = false))
+        // 缩写 → 中英
+        assertEquals("Orion", c.localize("Ori", isEnglish = true))
+        assertEquals("猎户座", c.localize("Ori", isEnglish = false))
+        // 空串与未匹配容错
+        assertEquals("", c.localize("", isEnglish = true))
+        assertEquals("UnknownSky", c.localize("UnknownSky", isEnglish = true))
+    }
+
+    @Test
     fun starNamesEnglish() {
         // 天狼星、织女一、参宿四等亮星在英文模式下应解析出标准英文专名
         assertEquals("Sirius", com.starcam.astro.astro.StarNames.displayName(32349, "", isEnglish = true))

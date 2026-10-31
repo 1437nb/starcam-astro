@@ -53,6 +53,16 @@ object HistoryStore {
         val nMatch: Int? = null,
         val logodds: Double? = null,
     ) {
+        /**
+         * 获取当前语言对应的星座名称（中英双语）。
+         * 优先根据天球中心坐标高精度解算，兜底通过星座名字典中英反查。
+         */
+        fun localizedConstellation(isEnglish: Boolean = false): String {
+            val fromCoord = nearestConstellation(raDeg, decDeg, isEnglish)
+            if (fromCoord.isNotEmpty()) return fromCoord
+            return Constellations.localize(constellation, isEnglish)
+        }
+
         /** 从存储的元数据还原 [SolveResult]（含 WCS 投影），数据不全返回 null */
         fun toSolveResult(): SolveResult? {
             val w = imageWidth ?: return null

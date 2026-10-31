@@ -195,4 +195,46 @@ class HistoryStoreTest {
         // 超出角距上界时返回空串
         assertEquals("", HistoryStore.nearestConstellation(180.0, 0.0, maxSepDeg = 0.001))
     }
+
+    @Test
+    fun entry_localizedConstellation_supportsBilingualAndFallback() {
+        // 1. 包含有效坐标的条目：优先按坐标解算对应语言星座
+        val entryWithCoords = HistoryStore.Entry(
+            timestamp = 1000L,
+            imagePath = "/dummy/orion.jpg",
+            raDeg = 83.8,
+            decDeg = -1.2,
+            fovDeg = 25.0,
+            engine = "DEMO",
+            constellation = "猎户座",
+        )
+        assertEquals("猎户座", entryWithCoords.localizedConstellation(isEnglish = false))
+        assertEquals("Orion", entryWithCoords.localizedConstellation(isEnglish = true))
+
+        // 2. 坐标无效但带有存量中文星座名的历史条目：通过字典平滑反查
+        val legacyZhEntry = HistoryStore.Entry(
+            timestamp = 2000L,
+            imagePath = "/dummy/andromeda.jpg",
+            raDeg = Double.NaN,
+            decDeg = Double.NaN,
+            fovDeg = 30.0,
+            engine = "DEMO",
+            constellation = "仙女座",
+        )
+        assertEquals("仙女座", legacyZhEntry.localizedConstellation(isEnglish = false))
+        assertEquals("Andromeda", legacyZhEntry.localizedConstellation(isEnglish = true))
+
+        // 3. 坐标无效但带有存量英文星座名的历史条目：反查中文
+        val legacyEnEntry = HistoryStore.Entry(
+            timestamp = 3000L,
+            imagePath = "/dummy/cygnus.jpg",
+            raDeg = Double.NaN,
+            decDeg = Double.NaN,
+            fovDeg = 30.0,
+            engine = "DEMO",
+            constellation = "Cygnus",
+        )
+        assertEquals("天鹅座", legacyEnEntry.localizedConstellation(isEnglish = false))
+        assertEquals("Cygnus", legacyEnEntry.localizedConstellation(isEnglish = true))
+    }
 }
