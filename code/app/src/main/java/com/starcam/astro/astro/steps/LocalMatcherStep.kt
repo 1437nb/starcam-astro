@@ -31,7 +31,11 @@ class LocalMatcherStep : SolveStep {
             return StepOutcome.Skipped("全局时间预算耗尽")
         }
 
-        ctx.onProgress("本地星表识别中（内置 ${StarCatalogData.stars.size} 颗亮星）…")
+        val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
+        ctx.onProgress(
+            if (isEn) "Matching local star catalog (${StarCatalogData.stars.size} bright stars)…"
+            else "本地星表识别中（内置 ${StarCatalogData.stars.size} 颗亮星）…"
+        )
 
         var sepListForFallback: List<DetectedStar>? = null
         var previewStars: List<DetectedStar>? = null
@@ -162,8 +166,11 @@ class LocalMatcherStep : SolveStep {
             val verdict = StarSolver.evaluateLocalSolve(ctx.context, ctx.display, matched)
             when (verdict) {
                 is StarSolver.LocalAcceptVerdict.AcceptLocal -> {
-                    val domainTag = if (matched.catalogDomain == CatalogDomain.DEEP) " · 深域兜底" else ""
-                    val detail = "内置星表 · 内点 ${matched.inlierCount} 颗$domainTag"
+                    val domainTag = if (matched.catalogDomain == CatalogDomain.DEEP) {
+                        if (isEn) " · Deep fallback" else " · 深域兜底"
+                    } else ""
+                    val detail = if (isEn) "Built-in catalog · ${matched.inlierCount} inliers$domainTag"
+                    else "内置星表 · 内点 ${matched.inlierCount} 颗$domainTag"
                     ctx.log.line(
                         ctx.context,
                         "内置星表成功：$detail scale=%.2f\" 耗时=%dms"
@@ -180,9 +187,10 @@ class LocalMatcherStep : SolveStep {
                 is StarSolver.LocalAcceptVerdict.AdoptNative -> {
                     val nativeSolve = verdict.solve
                     val detail = buildString {
-                        append("官方复核修正 · 视场 %.1f°".format(nativeSolve.fieldWidthDeg))
+                        append(if (isEn) "Reviewed & corrected · FOV %.1f°".format(nativeSolve.fieldWidthDeg)
+                        else "官方复核修正 · 视场 %.1f°".format(nativeSolve.fieldWidthDeg))
                         nativeSolve.indexId?.let { append(" · index-$it") }
-                        nativeSolve.nMatch?.let { append(" · 匹配 $it 星") }
+                        nativeSolve.nMatch?.let { append(if (isEn) " · $it stars matched" else " · 匹配 $it 星") }
                     }
                     ctx.log.line(
                         ctx.context,

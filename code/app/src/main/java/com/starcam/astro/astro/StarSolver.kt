@@ -455,12 +455,15 @@ object StarSolver {
             }
         }
 
+        val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
+        val racingPrefix = if (isEn) "Parallel engine solving · " else "双引擎并发识别中 · "
+
         val localJob = launch(Dispatchers.Default) {
             try {
                 val outcome = localStep.execute(
                     ctx.copy(
                         token = localToken,
-                        onProgress = { msg -> ctx.onProgress("双引擎并发识别中 · $msg") },
+                        onProgress = { msg -> ctx.onProgress("$racingPrefix$msg") },
                     ),
                 )
                 channel.send(outcome)
@@ -468,7 +471,7 @@ object StarSolver {
                 if (e is CancellationException) {
                     // 取消
                 } else {
-                    channel.send(StepOutcome.Failure("内置星表异常: ${e.message}"))
+                    channel.send(StepOutcome.Failure(if (isEn) "Local catalog error: ${e.message}" else "内置星表异常: ${e.message}"))
                 }
             }
         }
@@ -478,7 +481,7 @@ object StarSolver {
                 val outcome = nativeStep.execute(
                     ctx.copy(
                         token = nativeToken,
-                        onProgress = { msg -> ctx.onProgress("双引擎并发识别中 · $msg") },
+                        onProgress = { msg -> ctx.onProgress("$racingPrefix$msg") },
                     ),
                 )
                 channel.send(outcome)
@@ -486,7 +489,7 @@ object StarSolver {
                 if (e is CancellationException) {
                     // 取消
                 } else {
-                    channel.send(StepOutcome.Failure("官方引擎异常: ${e.message}"))
+                    channel.send(StepOutcome.Failure(if (isEn) "Native engine error: ${e.message}" else "官方引擎异常: ${e.message}"))
                 }
             }
         }
@@ -513,7 +516,9 @@ object StarSolver {
         }
 
         cancelChecker.cancel()
-        winningOutcome ?: firstFailure ?: StepOutcome.Failure("双引擎并发识别均未命中")
+        winningOutcome ?: firstFailure ?: StepOutcome.Failure(
+            if (isEn) "Parallel solve yielded no result" else "双引擎并发识别均未命中"
+        )
     }
 
     /**

@@ -2,9 +2,9 @@ package com.starcam.astro.astro
 
 import kotlin.random.Random
 
-/** 天文冷知识（§0.33.4）：识别等待时随机展示一条，替代误导性的固定文案 */
+/** 天文冷知识（§0.33.4）：识别等待时随机展示一条，替代误导性的固定文案，支持中英双语 */
 object AstroTips {
-    val all: List<String> = listOf(
+    val allZh: List<String> = listOf(
         "光从太阳到地球约需 8 分 20 秒——你看到的太阳，是 8 分钟前的它。",
         "北斗七星的七颗星里，只有 6 颗同属一个星群，摇光（开阳的伴侣星）其实游离在外。",
         "月亮正以每年约 3.8 厘米的速度远离地球。",
@@ -27,6 +27,34 @@ object AstroTips {
         "离太阳最近的恒星是比邻星，约 4.24 光年——以今天最快的飞船也要飞几万年。",
     )
 
-    /** 随机一条（默认用系统随机源；[seed] 供测试固定） */
-    fun random(seed: Int = Random.nextInt()): String = all[((seed % all.size) + all.size) % all.size]
+    val allEn: List<String> = listOf(
+        "Light takes about 8 minutes 20 seconds to travel from the Sun to Earth — the Sun you see is 8 minutes in the past.",
+        "Of the Big Dipper's seven stars, only six belong to the same cluster; Alkaid is physically unrelated.",
+        "The Moon is slowly drifting away from Earth at a rate of approximately 3.8 cm per year.",
+        "About 95% of the universe consists of dark matter and dark energy; all visible stars make up less than 5%.",
+        "Light from the Andromeda Galaxy (M31) left 2.5 million years ago, when early hominids walked Earth.",
+        "A single cubic centimeter of neutron-star material weighs ~1 billion tons, like all humanity compressed into a sugar cube.",
+        "Jupiter could hold over 1,300 Earths, making it by far the largest planet in our solar system.",
+        "Sagittarius A* at the Milky Way's core is a supermassive black hole ~4 million times the mass of our Sun.",
+        "The Orion Nebula (M42) is ~1,344 light-years away, the closest massive star-forming nursery to Earth.",
+        "The Pleiades (M45) are only ~100 million years old, while our Sun is 4.6 billion years old.",
+        "Neptune is the only planet discovered via mathematical prediction (1846) before being observed.",
+        "Polaris is only the 48th brightest star in the sky and is slowly drifting away from the true celestial pole.",
+        "Venus is the hottest planet in the solar system (~465°C), even though Mercury orbits closer to the Sun.",
+        "One light-year is approximately 9.46 trillion kilometers — the distance light travels in one full year.",
+        "Sirius (Alpha Canis Majoris) is the brightest star in the night sky, ~8.6 light-years away.",
+        "The Moon is tidally locked to Earth, so the far side can never be seen directly from Earth's surface.",
+        "Saturn's average density is lower than water: theoretically, it would float in a sufficiently vast ocean.",
+        "The Crab Nebula (M1) is the remnant of a supernova recorded by Chinese astronomers in 1054 AD as a \"guest star\".",
+        "Vega was the North Star ~12,000 years ago and will reclaim that title in another ~12,000 years.",
+        "Proxima Centauri is the closest star to our Solar System at ~4.24 light-years away.",
+    )
+
+    val all: List<String> get() = allZh
+
+    /** 随机一条（默认用系统随机源；[seed] 供测试固定；支持中英双语） */
+    fun random(isEnglish: Boolean = false, seed: Int = Random.nextInt()): String {
+        val list = if (isEnglish) allEn else allZh
+        return list[((seed % list.size) + list.size) % list.size]
+    }
 }

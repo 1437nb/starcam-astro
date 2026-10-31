@@ -227,8 +227,9 @@ fun ResultScreen(
     val detectedStars = viewModel.detectedStars
     val detectedStarTotal = viewModel.detectedStarTotal
 
-    // 识别等待时的天文冷知识（§0.33.4）：每张照片换一条
-    val tip = remember(imagePath, demoRegion) { AstroTips.random() }
+    // 识别等待时的天文冷知识（§0.33.4）：每张照片换一条，支持中英双语
+    val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
+    val tip = remember(imagePath, demoRegion, isEn) { AstroTips.random(isEnglish = isEn) }
     // 全屏缩放查看器（§0.34/§0.37）：成功页/失败页点击图片打开
     // Triple(原图, 标注图, 标题)，查看器内可切换原图/标注
     var viewer by remember { mutableStateOf<Triple<Bitmap, Bitmap, String>?>(null) }

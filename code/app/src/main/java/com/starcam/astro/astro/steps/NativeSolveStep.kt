@@ -160,7 +160,8 @@ class NativeSolveStep : SolveStep {
                     null
                 }
                 if (nativeSolve != null) {
-                    nativeDetail = "视场 %.1f°–%.1f°".format(lo, hi)
+                    nativeDetail = if (isEn) "FOV %.1f°–%.1f°".format(lo, hi)
+                    else "视场 %.1f°–%.1f°".format(lo, hi)
                     break
                 }
             }
@@ -211,7 +212,8 @@ class NativeSolveStep : SolveStep {
                         }
                         if (nativeSolve != null) {
                             nativeSolve = StarSolver.rescaleSolveFor(nativeSolve, scaled.width, scaled.height, origW, origH)
-                            nativeDetail = "降采样重试（视场 %.1f°–%.1f°）".format(lo, hi)
+                            nativeDetail = if (isEn) "Downsampled retry (FOV %.1f°–%.1f°)".format(lo, hi)
+                            else "降采样重试（视场 %.1f°–%.1f°）".format(lo, hi)
                             break
                         }
                     }
@@ -224,7 +226,7 @@ class NativeSolveStep : SolveStep {
             val detail = buildString {
                 append(nativeDetail)
                 nativeSolve.indexId?.let { append(" · index-$it") }
-                nativeSolve.nMatch?.let { append(" · 匹配 $it 星") }
+                nativeSolve.nMatch?.let { append(if (isEn) " · $it stars matched" else " · 匹配 $it 星") }
             }
             ctx.log.line(
                 ctx.context,
