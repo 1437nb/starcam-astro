@@ -265,7 +265,7 @@ def verify_signature(apk: Path) -> str:
     return digest
 
 
-def archive(apk: Path) -> Path:
+def archive(apk: Path) -> tuple[Path, str]:
     step("归档到 apk/ 并计算校验和")
     APK_DIR.mkdir(exist_ok=True)
     dst = APK_DIR / apk.name
@@ -274,8 +274,7 @@ def archive(apk: Path) -> Path:
     print(f"  {dst}")
     print(f"  大小   : {dst.stat().st_size / 1024 / 1024:.1f} MB")
     print(f"  SHA-256: {sha}")
-    (APK_DIR / (apk.stem + ".sha256")).write_text(f"{sha}  {apk.name}\n", encoding="utf-8")
-    return dst
+    return dst, sha
 
 
 def main() -> None:
@@ -323,13 +322,13 @@ def main() -> None:
     preflight()
     apk = build(args.desc)
     digest = verify_signature(apk)
-    dst = archive(apk)
+    dst, sha = archive(apk)
 
     step("后续步骤（需要凭据，本脚本不代劳）")
     print(f"  1) 提交版本号改动：git add code/app/build.gradle.kts && git commit -m 'chore(release): v{args.version}'")
     print(f"  2) 推送 + 建 tag + 创建 Release + 上传附件：见 AGENTS.md §4 / tools/gh_api_push.py")
     print(f"     附件：{dst}")
-    print(f"     SHA-256：{digest[:16]}…（完整值见 apk/{dst.stem}.sha256）")
+    print(f"     SHA-256：{sha}")
     print("  3) 发完下载回来比对 SHA-256（AGENTS.md §4「发完必做的回验」）")
 
 
