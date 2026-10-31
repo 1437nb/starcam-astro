@@ -5,8 +5,8 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-31（§0.128 视星等单位中英文与全天体卡片本地化：中文语言下统一使用 '等'，英文保持 'm'；40 类 / 306 项单测全绿；docs/109）
-**当前基线**：v1.5.89（versionCode 109，开发基线含 §0.122~§0.128；最近正式发版为 v1.5.87 / tag `v1.5.87`）
+**最后更新**：2026-11-01（§0.129 识别历史界面星座名英文动态本地化：坐标高精度优先解算+字典中英双向反查；40 类 / 308 项单测全绿；docs/110）
+**当前基线**：v1.5.89（versionCode 109，开发基线含 §0.122~§0.129；最近正式发版为 v1.5.87 / tag `v1.5.87`）
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
 **构建环境**：本机拥有全套高配构建环境，Kotlin 编译、全量单元测试（39 类 / 303 项全绿，约 49 秒）与 APK 打包（约 14 秒）均在本机高速完成。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
 
@@ -93,6 +93,18 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-11-01（§0.129：识别历史界面星座名英文动态本地化）**：
+  - **星座名多向本地化字典（`Constellations.kt`）**：
+    1. 增加 `ZH_TO_ABBR` 与 `LATIN_TO_ABBR` 反向映射；
+    2. 新增 `Constellations.localize(name, isEnglish)`，支持中文名、拉丁/英文名与 3 字母 IAU 缩写相互转换。
+  - **坐标解算 + 字典平滑兜底（`HistoryStore.kt`）**：
+    1. 在 `HistoryStore.Entry` 扩展 `localizedConstellation(isEnglish)`；
+    2. 有坐标时直接调用 `nearestConstellation(raDeg, decDeg, isEnglish)` 毫秒级解算目标语言星座全名；
+    3. 坐标缺失时自动回退至字典反查，完美兼顾存量历史数据。
+  - **历史界面双语实时刷新（`HistoryScreen.kt`）**：
+    1. `HistoryCell` 网格缩略图底栏与删除确认弹窗全面接入 `entry.localizedConstellation(isEn)`，随语言设置动态显示为英文（如 `Orion 15:30`）。
+  - **测试与验证**：在 `AstroMathTest` 与 `HistoryStoreTest` 新增 2 项专项测试；全量 40 个测试类 / 308 项单测全绿；Debug APK 构建成功（9s）；凭据自检通过；详见 `docs/110-验证报告增补-§0.129-识别历史界面星座名英文动态本地化.md`。
 
 - **2026-10-31（§0.128：视星等单位中英文与全天体卡片本地化）**：
   - **首页今日天象行星胶囊（`TonightSkyCard.kt`）**：
