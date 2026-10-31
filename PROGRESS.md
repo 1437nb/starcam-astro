@@ -5,10 +5,10 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-10-30（§0.125 代码审查遗留项全面收尾：同步 B2/B3/B13/B14 已修状态，全面结清 docs/72 C 类全部条目、D 类量化同构守卫单测与 docs/74 §4 AR 逐帧零分配收尾项；38 类 / 301 项单测全绿；docs/106）
-**当前基线**：v1.5.88（versionCode 108，开发基线含 §0.122~§0.125；最近正式发版为 v1.5.87 / tag `v1.5.87`）
+**最后更新**：2026-10-31（§0.126 首页UI微调/设置整行切换/纯白与纯黑双主题：清理首页全部按钮与今日天象emoji、设置页单选与Switch整行触控切换、新增纯黑AMOLED与纯白深蓝双主题；39 类 / 303 项单测全绿；docs/107）
+**当前基线**：v1.5.88（versionCode 108，开发基线含 §0.122~§0.126；最近正式发版为 v1.5.87 / tag `v1.5.87`）
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
-**构建环境**：本机拥有全套高配构建环境，Kotlin 编译、全量单元测试（38 类 / 301 项全绿，约 40 秒）与 APK 打包（约 10 秒）均在本机高速完成。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
+**构建环境**：本机拥有全套高配构建环境，Kotlin 编译、全量单元测试（39 类 / 303 项全绿，约 49 秒）与 APK 打包（约 14 秒）均在本机高速完成。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
 
 ---
 
@@ -93,6 +93,21 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-10-31（§0.126：首页 UI 微调、设置整行触控切换与纯白/纯黑双主题）**：
+  - **首页按钮与天象卡片 Emoji 清理（`I18n.kt` & `TonightSkyCard.kt`）**：
+    1. 清理 `takePhoto`、`chooseFitsRaw`、`offlineDemo`、`history`、`settings` 全部 Emoji 前缀，移除重复且繁杂的图标干扰；
+    2. 今日天象卡片顶栏移除 `🌌` 字符，顶部月相速览简化为 `上弦月 · 52%` 文本样式，观星指引建议移除 `✨`/`🔭`/`🌕` 建议图标；
+    3. 展开月相详情移除 `🌙`；展开行星列表移除行首雷同的 `🪐` Emoji，直接清晰呈现各行星名称与视窗。
+  - **设置界面整行点击切换（`SettingsScreen.kt`）**：
+    1. 语言选择（`AppLanguage`）、外观主题（`AppThemeMode`）、识别引擎（`EngineMode`）所有单选行全面接入 `Modifier.selectable(..., role = Role.RadioButton)`，`RadioButton(onClick = null)`，解决必须精准点击 20dp 小圆圈的触控痛点；
+    2. 传感器辅助粗定标、双引擎并发竞速、识别日志记录 `Switch` 选项行全面接入 `Modifier.toggleable(..., role = Role.Switch)`，`Switch(onCheckedChange = null)`，支持整行触控切换。
+  - **新增纯黑（AMOLED）与纯白（浅色）双主题（`Theme.kt`）**：
+    1. `AppThemeMode` 扩展 `PURE_BLACK` 与 `PURE_WHITE` 枚举；
+    2. `PureBlackColors`：绝对黑背景 `#000000` + 精细中性灰阶容器（`#121212` / `#1E1E1E`）+ 亮白字体，提供纯净沉浸的 AMOLED 深色体验；
+    3. `PureWhiteColors`：StarCam 首套 Material 3 `lightColorScheme` 浅色主题，纯白背景 `#FFFFFF` + 浅灰色阶容器 + 方案 A（星空深蓝 `#005AC1`）高对比度强调色；
+    4. 单例 `ThemeState` 与 `SettingsRepository` 自动联动即时切换生效。
+  - **测试与验证**：新增 `ThemeTest` 覆盖主题枚举与双语标签；全量 39 个测试类 / 303 项单测全绿；Debug APK 构建成功（14s）；凭据自检 357 文件 0 泄露；详见 `docs/107-验证报告增补-§0.126-首页UI微调设置整行切换与纯白纯黑主题.md`。
 
 - **2026-10-30（§0.125：代码审查遗留项全面收尾，docs/72 B/C/D 类 & docs/74 §4 AR 零分配收尾）**：
   - **审查清单状态对齐（`docs/72` & `PROGRESS.md`）**：核实并同步 B2（§0.103 深域 45° 上界与 `shouldSkipDeepRetry`）、B3（§0.112 AR 标定 `isHighConfidence` 门禁）、B13（§0.101 `BatchOutcome` 密封类与三计数）、B14（§0.115/§0.123 `CameraMath.computeFitCenterRect`）的已完成状态。

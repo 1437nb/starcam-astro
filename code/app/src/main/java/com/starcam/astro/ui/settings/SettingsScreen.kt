@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -156,17 +159,23 @@ fun SettingsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .selectable(
+                            selected = appLanguage == lang,
+                            onClick = {
+                                appLanguage = lang
+                                settings.appLanguage = lang
+                                LocaleState.language = lang
+                            },
+                            role = Role.RadioButton,
+                        )
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioButton(
                         selected = appLanguage == lang,
-                        onClick = {
-                            appLanguage = lang
-                            settings.appLanguage = lang
-                            LocaleState.language = lang
-                        },
+                        onClick = null,
                     )
+                    Spacer(Modifier.width(8.dp))
                     Text(lang.label(isEn), fontWeight = FontWeight.Medium)
                 }
             }
@@ -189,21 +198,26 @@ fun SettingsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .selectable(
+                            selected = themeMode == mode,
+                            onClick = {
+                                themeMode = mode
+                                settings.appTheme = mode
+                                ThemeState.mode = mode // 即时生效
+                                saved = false
+                            },
+                            role = Role.RadioButton,
+                        )
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioButton(
                         selected = themeMode == mode,
-                        onClick = {
-                            themeMode = mode
-                            settings.appTheme = mode
-                            ThemeState.mode = mode // 即时生效
-                            saved = false
-                        },
+                        onClick = null,
                     )
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         mode.label(isEn),
-
                         fontWeight = FontWeight.Medium,
                     )
                 }
@@ -219,6 +233,14 @@ fun SettingsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .toggleable(
+                        value = sensorPointing,
+                        onValueChange = { checked ->
+                            sensorPointing = checked
+                            settings.sensorAssistedPointing = checked
+                        },
+                        role = Role.Switch,
+                    )
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -234,10 +256,7 @@ fun SettingsScreen(
                 Spacer(Modifier.width(16.dp))
                 Switch(
                     checked = sensorPointing,
-                    onCheckedChange = { checked ->
-                        sensorPointing = checked
-                        settings.sensorAssistedPointing = checked
-                    },
+                    onCheckedChange = null,
                 )
             }
 
@@ -245,6 +264,14 @@ fun SettingsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .toggleable(
+                        value = parallelRacing,
+                        onValueChange = { checked ->
+                            parallelRacing = checked
+                            settings.parallelEngineRacing = checked
+                        },
+                        role = Role.Switch,
+                    )
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -253,7 +280,6 @@ fun SettingsScreen(
                     Spacer(Modifier.height(2.dp))
                     Text(
                         com.starcam.astro.ui.I18n.Settings.parallelRacingDesc,
-
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -261,10 +287,7 @@ fun SettingsScreen(
                 Spacer(Modifier.width(16.dp))
                 Switch(
                     checked = parallelRacing,
-                    onCheckedChange = { checked ->
-                        parallelRacing = checked
-                        settings.parallelEngineRacing = checked
-                    },
+                    onCheckedChange = null,
                 )
             }
 
@@ -278,6 +301,15 @@ fun SettingsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .toggleable(
+                        value = logEnabled,
+                        onValueChange = { checked ->
+                            logEnabled = checked
+                            com.starcam.astro.data.SolveLogStore.setEnabled(context, checked)
+                            refreshStats()
+                        },
+                        role = Role.Switch,
+                    )
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -293,11 +325,7 @@ fun SettingsScreen(
                 Spacer(Modifier.width(16.dp))
                 Switch(
                     checked = logEnabled,
-                    onCheckedChange = { checked ->
-                        logEnabled = checked
-                        com.starcam.astro.data.SolveLogStore.setEnabled(context, checked)
-                        refreshStats()
-                    },
+                    onCheckedChange = null,
                 )
             }
             Spacer(Modifier.height(6.dp))
@@ -371,17 +399,23 @@ fun SettingsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .selectable(
+                            selected = engineMode == mode,
+                            onClick = {
+                                engineMode = mode
+                                settings.engineMode = mode
+                                saved = false
+                            },
+                            role = Role.RadioButton,
+                        )
                         .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioButton(
                         selected = engineMode == mode,
-                        onClick = {
-                            engineMode = mode
-                            settings.engineMode = mode
-                            saved = false
-                        },
+                        onClick = null,
                     )
+                    Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
                         Text(mode.label(isEn), fontWeight = FontWeight.Medium)
                         Text(

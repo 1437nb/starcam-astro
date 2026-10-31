@@ -88,14 +88,14 @@ fun TonightSkyCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "🌌 ${I18n.Home.tonightSky}",
+                    text = I18n.Home.tonightSky,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "${summary.moon.symbol} ${if (isEn) summary.moon.phaseNameEn else summary.moon.phaseNameZh} · ${summary.moon.illuminationPct}%",
+                        text = "${if (isEn) summary.moon.phaseNameEn else summary.moon.phaseNameZh} · ${summary.moon.illuminationPct}%",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Medium,
@@ -116,7 +116,7 @@ fun TonightSkyCard(
 
             // 观星指引建议
             Text(
-                text = "${summary.recommendationIcon} ${if (isEn) summary.recommendationEn else summary.recommendationZh}",
+                text = if (isEn) summary.recommendationEn else summary.recommendationZh,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -166,7 +166,7 @@ fun TonightSkyCard(
                     Spacer(Modifier.height(12.dp))
 
                     Text(
-                        text = "🌙 ${if (isEn) summary.moon.phaseNameEn else summary.moon.phaseNameZh}${if (isEn) ": " else "："}" +
+                        text = "${if (isEn) summary.moon.phaseNameEn else summary.moon.phaseNameZh}${if (isEn) ": " else "："}" +
                             "${I18n.Home.moonAge} ${String.format(Locale.ROOT, "%.1f", summary.moon.moonAgeDays)} ${if (isEn) "days" else "天"}" +
                             " · ${I18n.Home.moonIllumination} ${summary.moon.illuminationPct}%" +
                             " · ${if (summary.moon.isWaxing) (if (isEn) "Waxing" else "渐盈") else (if (isEn) "Waning" else "渐亏")}",
@@ -184,7 +184,7 @@ fun TonightSkyCard(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = "🪐 ${if (isEn) p.nameEn else p.nameZh}",
+                                text = if (isEn) p.nameEn else p.nameZh,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurface,

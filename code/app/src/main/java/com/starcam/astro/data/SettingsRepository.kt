@@ -130,7 +130,7 @@ class SettingsRepository(context: Context) {
         set(value) = prefs.edit().putString(KEY_ENGINE_MODE, value.key).apply()
 
     /**
-     * 主题模式（§0.33）：深空蓝（默认）/ 夜视红（暗适应）。
+     * 主题模式（§0.33）：深空蓝（默认）/ 纯黑（AMOLED极简）/ 纯白（浅色模式）/ 夜视红（暗适应）。
      * 启动时写入 [com.starcam.astro.ui.theme.ThemeState]，设置页修改即时生效。
      */
     var appTheme: AppThemeMode
