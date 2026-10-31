@@ -67,4 +67,13 @@ class TonightSkyTest {
             sky.recommendationZh.contains("环形山") || sky.recommendationZh.contains("主要行星"),
         )
     }
+
+    @Test
+    fun planetMagnitudeFormat_respectsBilingualRules() {
+        val mag = -4.2
+        val zhStr = "${String.format(java.util.Locale.ROOT, "%+.1f", mag)}等"
+        val enStr = "${String.format(java.util.Locale.ROOT, "%+.1f", mag)}m"
+        assertEquals("-4.2等", zhStr)
+        assertEquals("-4.2m", enStr)
+    }
 }

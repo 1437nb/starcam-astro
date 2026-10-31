@@ -1202,7 +1202,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                             info?.let {
                                 append("   ·   ")
                                 append(com.starcam.astro.ui.I18n.InfoCard.magLabel); append(": ")
-                                append("m${"%.1f".format(it.mag)}")
+                                append("${"%.1f".format(it.mag)}${if (isEn) "m" else "等"}")
                             }
                         },
                         color = typeColor,
@@ -1253,7 +1253,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                     Text(
                         buildString {
                             append(com.starcam.astro.ui.I18n.InfoCard.magLabel); append(": ")
-                            append("m${"%.1f".format(entry.mag)}")
+                            append("${"%.1f".format(entry.mag)}${if (isEn) "m" else "等"}")
                             append("   ·   ")
                             append(com.starcam.astro.ui.I18n.InfoCard.constellationLabel); append(": ")
                             append(conName)
@@ -1312,7 +1312,7 @@ internal fun ObjectInfoCard(ref: SkyObjectRef, onDismiss: () -> Unit, modifier: 
                     Text(
                         buildString {
                             append(com.starcam.astro.ui.I18n.InfoCard.magLabel); append(": ")
-                            append("m${"%.1f".format(pos.magnitude)}")
+                            append("${"%.1f".format(pos.magnitude)}${if (isEn) "m" else "等"}")
                             append("   ·   ")
                             append(com.starcam.astro.ui.I18n.InfoCard.elongationLabel); append(": ")
                             append("${"%.0f".format(pos.elongationDeg)}°")

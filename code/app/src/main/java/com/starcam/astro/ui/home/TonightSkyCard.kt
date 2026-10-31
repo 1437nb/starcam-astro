@@ -136,7 +136,7 @@ fun TonightSkyCard(
                             color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         ) {
                             Text(
-                                text = "${if (isEn) planet.nameEn else planet.nameZh} ${String.format(Locale.ROOT, "%+.1f", planet.magnitude)}m",
+                                text = "${if (isEn) planet.nameEn else planet.nameZh} ${String.format(Locale.ROOT, "%+.1f", planet.magnitude)}${if (isEn) "m" else "等"}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
