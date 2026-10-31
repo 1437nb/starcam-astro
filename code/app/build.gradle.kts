@@ -28,13 +28,13 @@ android {
         applicationId = "com.starcam.astro"
         minSdk = 26
         targetSdk = 34
-        versionCode = 108
-        versionName = "1.5.88"
+        versionCode = 109
+        versionName = "1.5.89"
     }
 
     // 每版更新内容简述（用户规则：在 APK 文件名上带上更新内容）
     val updateDesc = project.findProperty("updateDesc") as? String
-        ?: "review-cleanup-and-p0-perf"
+        ?: "ui-polish-and-pure-themes"
 
     // APK 产物自动带版本号、更新内容与变体名（用户规则：文件名标注版本与更新内容）
     applicationVariants.all {
