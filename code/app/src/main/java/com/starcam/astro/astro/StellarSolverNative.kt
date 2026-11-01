@@ -185,10 +185,11 @@ object StellarSolverNative {
         thresholdBgMultiple: Double = 2.0,
         maxStars: Int = SEP_MATCH_MAX,
         lastDiag: StringBuilder? = null,
+        grayInput: FloatArray? = null,
     ): SepStars? {
         val w = bitmap.width
         val h = bitmap.height
-        val gray = bitmapToGray(bitmap)
+        val gray = grayInput?.also { require(it.size == w * h) }?.copyOf() ?: bitmapToGray(bitmap)
         val json = try {
             extractStars(gray, w, h, thresholdBgMultiple, maxStars)
         } catch (e: Throwable) {

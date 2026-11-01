@@ -34,12 +34,13 @@ class OnlineNovaStep : SolveStep {
         }
 
         val isEn = LocaleState.isEnglish
+        ctx.onPhase(com.starcam.astro.astro.SolvePhase.ONLINE)
         ctx.onProgress(
             if (isEn) "Local engines unmatched, uploading for online solve…"
             else "本地引擎未匹配，正在上传在线求解…",
         )
 
-        val upload = File(ctx.context.cacheDir, "upload_${System.currentTimeMillis()}.jpg")
+        val upload = File.createTempFile("starcam-upload-", ".jpg", ctx.context.cacheDir)
         try {
             val ok = ImageUtils.compressForUpload(ctx.imagePath, upload) != null
             if (!ok) return StepOutcome.Failure("图片压缩上传失败")

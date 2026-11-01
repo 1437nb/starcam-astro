@@ -32,6 +32,7 @@ class LocalMatcherStep : SolveStep {
         }
 
         val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
+        ctx.onPhase(com.starcam.astro.astro.SolvePhase.DETECTING)
         ctx.onProgress(
             if (isEn) "Matching local star catalog (${StarCatalogData.stars.size} bright stars)…"
             else "本地星表识别中（内置 ${StarCatalogData.stars.size} 颗亮星）…"
@@ -49,7 +50,7 @@ class LocalMatcherStep : SolveStep {
             fun sepStars(sigma: Double): StellarSolverNative.SepStars? = try {
                 StellarSolverNative.sepDetectStars(
                     ctx.display, sigma,
-                    StellarSolverNative.SEP_MATCH_MAX, extractDiag,
+                    StellarSolverNative.SEP_MATCH_MAX, extractDiag, grayInput = ctx.pixels.gray,
                 )
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
@@ -68,7 +69,7 @@ class LocalMatcherStep : SolveStep {
             val sepTrustworthy = sepList != null && sepList.size >= 5
             val bb = if (sepTrustworthy) {
                 try {
-                    LocalStarMatcher.detectStars(ctx.display)
+                    LocalStarMatcher.detectStarsGray(ctx.display.width, ctx.display.height, ctx.pixels.gray, maxStars = 100)
                 } catch (e: Throwable) {
                     if (e is CancellationException) throw e
                     null
@@ -84,7 +85,7 @@ class LocalMatcherStep : SolveStep {
                 detectedTotal = detectedTotal0,
                 boxBlurRetry = {
                     try {
-                        LocalStarMatcher.detectStars(ctx.display)
+                        LocalStarMatcher.detectStarsGray(ctx.display.width, ctx.display.height, ctx.pixels.gray, maxStars = 100)
                     } catch (e: Throwable) {
                         if (e is CancellationException) throw e
                         null
@@ -124,6 +125,7 @@ class LocalMatcherStep : SolveStep {
             PointingHintStore.get(ctx.imagePath)
         } else null
 
+        ctx.onPhase(com.starcam.astro.astro.SolvePhase.MATCHING)
         val attempt = if (stars != null && stars.size >= 5) {
             try {
                 LocalStarMatcher.matchWithDiagnostics(
@@ -155,7 +157,7 @@ class LocalMatcherStep : SolveStep {
         if (stars != null) {
             SolveLogStore.setStars(ctx.report, stars, lastLocalStarTotal)
             try {
-                lastGraySnapshot = LocalStarMatcher.bitmapToGray(ctx.display)
+                lastGraySnapshot = ctx.pixels.gray
                 lastGrayW = ctx.display.width
                 lastGrayH = ctx.display.height
             } catch (_: Throwable) {
@@ -163,6 +165,7 @@ class LocalMatcherStep : SolveStep {
         }
 
         if (matched != null) {
+            ctx.onPhase(com.starcam.astro.astro.SolvePhase.VERIFYING)
             val verdict = StarSolver.evaluateLocalSolve(ctx.context, ctx.display, matched)
             when (verdict) {
                 is StarSolver.LocalAcceptVerdict.AcceptLocal -> {

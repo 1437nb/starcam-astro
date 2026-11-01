@@ -12,6 +12,8 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 ## Download
 
+**Local optimization build v1.5.91 (versionCode 111, §0.130)** adds a unified import panel, background copying with progress and cancellation, clearer offline status, solving phases and elapsed time, shared grayscale preprocessing, an 8 MiB thumbnail cache, and reusable AR label layout buffers. Upload deduplication and server validation are also improved. This is a local delivery; the public download below remains the published build. See the [validation report](docs/113-验证报告增补-§0.130-导入与识别体验性能优化v1.5.91.md) for scope and verification.
+
 Latest release: **[v1.5.87](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.87)**
 
 | Package | Size | Notes |
@@ -46,7 +48,7 @@ Latest release: **[v1.5.87](https://github.com/1437nb/starcam-astro/releases/tag
 ### 4. Astrophotography Tools & Dark Adaptation
 - **Tonight Sky Card**: Pure-JVM solar system ephemeris displaying moon illumination, lunar age, visibility windows for Mercury/Venus/Mars/Jupiter/Saturn, and observing advice;
 - **Native FITS & Camera RAW Support**: Built-in Kotlin FITS decoder (BITPIX 8/16/32/±32/±64 with automatic WCS/date/location priors) and camera RAW preview extractor (CR2/NEF/ARW/DNG/etc.), plus direct original-file gallery loading;
-- **Dual Themes & Bilingual UI**: Instant switching between **Deep Sky Blue** and **Night Vision Red** (preserves dark adaptation in the field), as well as Simplified Chinese and English.
+- **Four Themes & Bilingual UI**: Deep Sky Blue, Pure Black, Pure White, and Night Vision Red, with instant Simplified Chinese / English switching.
 
 ---
 
@@ -61,8 +63,8 @@ Latest release: **[v1.5.87](https://github.com/1437nb/starcam-astro/releases/tag
 │       ├── main/assets/offline_photos/      # 12 public night-sky demo photos
 │       ├── main/jniLibs/arm64-v8a/          # Prebuilt libstellar_solver.so native solver
 │       ├── main/cpp/astro_bridge.c          # JNI bridge source
-│       └── test/java/com/starcam/astro/     # 35 unit test classes & truth regression suite
-├── docs/                   # Architecture & 100+ validation reports (§0.00 – §0.121)
+│       └── test/java/com/starcam/astro/     # Standard suite: 43 classes / 319 tests, including public-photo truth checks
+├── docs/                   # Architecture & 100+ validation reports (through §0.130)
 ├── tools/                  # Catalog generators, truth calibration & release scripts
 └── LICENSE                 # GNU General Public License v2.0
 ```

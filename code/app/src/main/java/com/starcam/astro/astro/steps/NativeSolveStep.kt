@@ -38,6 +38,7 @@ class NativeSolveStep : SolveStep {
         }
 
         val isEn = LocaleState.isEnglish
+        ctx.onPhase(com.starcam.astro.astro.SolvePhase.NATIVE)
         var priors = try {
             ExifPriorsReader.read(ctx.imagePath)
         } catch (e: Throwable) {
@@ -60,7 +61,7 @@ class NativeSolveStep : SolveStep {
         var nativeSolve: SolveResult? = null
         var nativeDetail = ""
         val effFov = ctx.fovOverride ?: ctx.fovDeg
-        val grayBuffer = StellarSolverNative.bitmapToGray(ctx.display)
+        val grayBuffer = ctx.pixels.nativeCopy()
 
         // 1) 传感器先验
         val sensorHint = if (ctx.settings.sensorAssistedPointing) {

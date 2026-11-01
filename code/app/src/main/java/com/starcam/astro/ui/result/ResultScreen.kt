@@ -127,7 +127,13 @@ import kotlinx.coroutines.withContext
 
 /** 识别结果页状态（放大查看器命中测试复用 Success 数据） */
 sealed interface ResultUiState {
-    data class Loading(val bitmap: Bitmap? = null, val message: String) : ResultUiState
+    data class Loading(
+        val bitmap: Bitmap? = null,
+        val message: String,
+        val phase: com.starcam.astro.astro.SolvePhase = com.starcam.astro.astro.SolvePhase.PREPARING,
+        val startedAtNanos: Long = System.nanoTime(),
+        val budgetSec: Int? = null,
+    ) : ResultUiState
     data class Success(
         val solve: SolveResult,
         val bitmap: Bitmap,
@@ -330,6 +336,13 @@ private fun LoadingContent(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var elapsedSec by remember(state.startedAtNanos) { mutableStateOf(0L) }
+    LaunchedEffect(state.startedAtNanos) {
+        while (true) {
+            elapsedSec = ((System.nanoTime() - state.startedAtNanos) / 1_000_000_000L).coerceAtLeast(0L)
+            kotlinx.coroutines.delay(1000)
+        }
+    }
     val infiniteTransition = rememberInfiniteTransition(label = "solvingMotion")
     val sweepProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -419,6 +432,21 @@ private fun LoadingContent(
         Spacer(Modifier.height(24.dp))
         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(16.dp))
+        Text(
+            state.phase.label(com.starcam.astro.ui.theme.LocaleState.isEnglish),
+            style = MaterialTheme.typography.titleSmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 24.dp),
+        )
+        state.budgetSec?.let { budget ->
+            val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
+            Text(
+                if (isEn) "Elapsed ${elapsedSec}s · Budget ${budget}s" else "已用 ${elapsedSec}秒 · 总预算 ${budget}秒",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
         Text(
             state.message,
             style = MaterialTheme.typography.bodyMedium,
@@ -826,7 +854,7 @@ private fun renderAnnotatedBitmap(
     )
     LayeredRenderer.draw(
         canvas, scene, flags, isEnglish, density = 2.0f,
-        degPerPx = plateScaleDegPerPx(state),
+        degPerPx = plateScaleDegPerPx(state) ?: Float.NaN,
     )
     return out
 }
@@ -972,7 +1000,7 @@ private fun StarPhotoOverlay(
                         scene, flags, isEn, density = pxPerSp, night = night,
                         drawWidth = size.width.toFloat(),
                         drawHeight = size.height.toFloat(),
-                        degPerPx = plateScaleDegPerPx(state),
+                        degPerPx = plateScaleDegPerPx(state) ?: Float.NaN,
                     )
                 }
             }

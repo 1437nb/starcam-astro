@@ -279,7 +279,7 @@ private fun HistoryCell(
         value = withContext(Dispatchers.IO) {
             try {
                 if (File(entry.imagePath).isFile) {
-                    ImageUtils.decodeSampledBitmap(entry.imagePath, 256)
+                    com.starcam.astro.util.ThumbnailCache.load(entry.imagePath)
                 } else null
             } catch (e: Exception) {
                 null

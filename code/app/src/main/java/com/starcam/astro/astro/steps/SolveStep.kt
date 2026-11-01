@@ -7,6 +7,9 @@ import com.starcam.astro.astro.EngineResult
 import com.starcam.astro.astro.SolveDiagnostics
 import com.starcam.astro.astro.SolveEngine
 import com.starcam.astro.astro.SolveToken
+import com.starcam.astro.astro.SolvePixels
+import com.starcam.astro.astro.LocalStarMatcher
+import com.starcam.astro.astro.SolvePhase
 import com.starcam.astro.data.SettingsRepository
 import com.starcam.astro.data.SolveLogStore
 
@@ -28,6 +31,8 @@ data class StepContext(
     val logT0: Long,
     val onProgress: (String) -> Unit,
     val onStarsDetected: (List<SolveDiagnostics.DiagStar>, Int) -> Unit = { _, _ -> },
+    val pixels: SolvePixels = SolvePixels(display.width, display.height) { LocalStarMatcher.bitmapToGray(display) },
+    val onPhase: (SolvePhase) -> Unit = {},
 ) {
     /** 距离全局死线剩余秒数 */
     val remainingSec: Double

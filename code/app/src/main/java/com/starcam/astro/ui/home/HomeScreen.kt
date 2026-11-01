@@ -35,17 +35,26 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,7 +80,6 @@ import com.starcam.astro.ui.theme.StarCamDimens
 import com.starcam.astro.ui.theme.ThemeState
 import com.starcam.astro.ui.theme.onSuccessContainer
 import com.starcam.astro.ui.theme.successContainer
-import com.starcam.astro.util.ImageUtils
 
 /**
  * 主页（§0.85 Material 3 重构 + 品牌动效升级）：拍照认星 / 相册选图 / 离线演示 / 设置。
@@ -81,6 +89,7 @@ import com.starcam.astro.util.ImageUtils
  *  - 次级动作收进一张 surfaceContainerLow 卡片，按"列表行 + 尾部箭头"排布；
  *  - 字号一律走 [MaterialTheme.typography]，间距走 [StarCamDimens]。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     hasApiKey: Boolean,
@@ -93,23 +102,25 @@ fun HomeScreen(
     onOpenHistory: () -> Unit,
 ) {
     val context = LocalContext.current
+    val importer: PhotoImportViewModel = viewModel()
+    val importState = importer.state
+    var chooseImport by remember { mutableStateOf(false) }
+    LaunchedEffect(importState.finished) {
+        if (importState.finished) {
+            val paths = importState.paths
+            if (importState.failed > 0) {
+                android.widget.Toast.makeText(context, I18n.Home.importFailures(importState.failed), android.widget.Toast.LENGTH_LONG).show()
+            }
+            importer.consumeResult()
+            if (paths.size == 1) onPickImage(paths.first())
+            else if (paths.isNotEmpty()) onPickImages(paths)
+        }
+    }
     // 多选照片 → 批量识别导出（最多 9 张）
     val multiPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(maxItems = 9)
     ) { uris ->
-        if (uris.isNotEmpty()) {
-            val files = uris.mapNotNull { uri ->
-                ImageUtils.copyUriToCache(
-                    context, uri,
-                    "picked_${System.currentTimeMillis()}_${uris.indexOf(uri)}.jpg",
-                )
-            }
-            if (files.size == 1) {
-                onPickImage(files[0].absolutePath)
-            } else if (files.isNotEmpty()) {
-                onPickImages(files.map { it.absolutePath })
-            }
-        }
+        importer.importPhotos(uris, keepName = false)
     }
 
     // FITS / 相机 RAW（§0.108）：系统照片选择器只认图片（选不到 .fits/.cr2），
@@ -117,17 +128,45 @@ fun HomeScreen(
     val docPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
-        if (uris.isNotEmpty()) {
-            val stamp = System.currentTimeMillis()
-            val files = uris.mapNotNull { uri ->
-                ImageUtils.copyUriToCacheKeepingName(context, uri, "picked_$stamp")
-            }
-            if (files.size == 1) {
-                onPickImage(files[0].absolutePath)
-            } else if (files.isNotEmpty()) {
-                onPickImages(files.map { it.absolutePath })
+        importer.importPhotos(uris, keepName = true)
+    }
+
+    if (chooseImport) {
+        ModalBottomSheet(onDismissRequest = { chooseImport = false }) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(I18n.Home.importTitle, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                Text(I18n.Home.importHint, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                HomeActionRow(AppIcons.Gallery, I18n.Home.chooseGalleryOriginal) {
+                    chooseImport = false
+                    onOpenGallery()
+                }
+                HomeActionRow(AppIcons.Gallery, I18n.Home.chooseGalleryCompat) {
+                    chooseImport = false
+                    multiPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+                HomeActionRow(Icons.Filled.List, I18n.Home.chooseFitsRaw) {
+                    chooseImport = false
+                    docPicker.launch(arrayOf("*/*"))
+                }
+                Spacer(Modifier.height(24.dp))
             }
         }
+    }
+    if (importState.running) {
+        AlertDialog(
+            onDismissRequest = importer::cancel,
+            title = { Text(I18n.Home.importing) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LinearProgressIndicator(
+                        progress = { importState.completed.toFloat() / importState.total.coerceAtLeast(1) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(I18n.Home.importProgress(importState.completed, importState.total))
+                }
+            },
+            confirmButton = { TextButton(onClick = importer::cancel) { Text(I18n.cancel) } },
+        )
     }
 
     Scaffold(
@@ -187,41 +226,14 @@ fun HomeScreen(
 
             // ── 相册选择：原图模式优先（保留拍摄参数）──
             FilledTonalButton(
-                onClick = onOpenGallery,
+                onClick = { chooseImport = true },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(StarCamDimens.buttonHeight),
             ) {
                 Icon(AppIcons.Gallery, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.size(StarCamDimens.sm))
-                Text(I18n.Home.chooseGalleryOriginal, style = MaterialTheme.typography.labelLarge)
-            }
-            Spacer(Modifier.height(StarCamDimens.sm))
-
-            // 系统选择器为兼容模式（HyperOS 等安全访问会对第三方脱敏 EXIF）
-            OutlinedButton(
-                onClick = {
-                    multiPicker.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(StarCamDimens.buttonHeight),
-            ) {
-                Text(I18n.Home.chooseGalleryCompat, style = MaterialTheme.typography.labelLarge)
-            }
-
-            Spacer(Modifier.height(StarCamDimens.sm))
-
-            // FITS / 相机 RAW（§0.108）：望远镜与相机的原始素材，走 SAF 文档选择器
-            OutlinedButton(
-                onClick = { docPicker.launch(arrayOf("*/*")) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(StarCamDimens.buttonHeight),
-            ) {
-                Text(I18n.Home.chooseFitsRaw, style = MaterialTheme.typography.labelLarge)
+                Text(I18n.Home.importPhotos, style = MaterialTheme.typography.labelLarge)
             }
 
             Spacer(Modifier.height(StarCamDimens.sectionGap))
@@ -270,7 +282,7 @@ fun HomeScreen(
             Surface(
                 shape = MaterialTheme.shapes.small,
                 color = if (hasApiKey) MaterialTheme.colorScheme.successContainer
-                else MaterialTheme.colorScheme.errorContainer,
+                else MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
@@ -282,14 +294,14 @@ fun HomeScreen(
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                         tint = if (hasApiKey) MaterialTheme.colorScheme.onSuccessContainer
-                        else MaterialTheme.colorScheme.onErrorContainer,
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.size(StarCamDimens.sm))
                     Text(
                         if (hasApiKey) I18n.Home.apiKeyConfigured else I18n.Home.apiKeyNotConfigured,
                         style = MaterialTheme.typography.labelMedium,
                         color = if (hasApiKey) MaterialTheme.colorScheme.onSuccessContainer
-                        else MaterialTheme.colorScheme.onErrorContainer,
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

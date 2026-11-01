@@ -151,7 +151,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                     state = ResultUiState.Error(I18n.Result.cannotReadImage)
                     return@launch
                 }
-                state = ResultUiState.Loading(display, I18n.Result.preparingSolve)
+                state = ResultUiState.Loading(display, I18n.Result.preparingSolve, budgetSec = settings.solveBudgetSec)
                 var diag: SolveDiagnostics? = null
                 val t0 = System.currentTimeMillis()
 
@@ -161,7 +161,16 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                     imagePath = imagePath,
                     settings = settings,
                     token = token,
-                    onProgress = { msg -> state = ResultUiState.Loading(display, msg) },
+                    onProgress = { msg ->
+                        if (!token.isCancelled) {
+                            (state as? ResultUiState.Loading)?.let { state = it.copy(message = msg) }
+                        }
+                    },
+                    onPhase = { phase ->
+                        if (!token.isCancelled) {
+                            (state as? ResultUiState.Loading)?.let { state = it.copy(phase = phase) }
+                        }
+                    },
                     onDiagnostics = { diag = it },
                     onStarsDetected = { list, total ->
                         detectedStars = list
@@ -211,6 +220,10 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         elapsedMs: Long = 0,
         recordHistory: Boolean = false,
     ) {
+        (state as? ResultUiState.Loading)?.let {
+            val phase = com.starcam.astro.astro.SolvePhase.RENDERING
+            state = it.copy(phase = phase, message = phase.label(LocaleState.isEnglish))
+        }
         val w = bitmap.width
         val h = bitmap.height
         val rawWcs = solve.wcs ?: run {

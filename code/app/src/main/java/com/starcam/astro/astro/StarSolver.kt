@@ -464,6 +464,7 @@ object StarSolver {
                     ctx.copy(
                         token = localToken,
                         onProgress = { msg -> ctx.onProgress("$racingPrefix$msg") },
+                        onPhase = { ctx.onPhase(SolvePhase.RACING) },
                     ),
                 )
                 channel.send(outcome)
@@ -482,6 +483,7 @@ object StarSolver {
                     ctx.copy(
                         token = nativeToken,
                         onProgress = { msg -> ctx.onProgress("$racingPrefix$msg") },
+                        onPhase = { ctx.onPhase(SolvePhase.RACING) },
                     ),
                 )
                 channel.send(outcome)
@@ -539,6 +541,7 @@ object StarSolver {
         token: SolveToken = SolveToken(),
         onDiagnostics: (SolveDiagnostics) -> Unit = {},
         onStarsDetected: (List<SolveDiagnostics.DiagStar>, Int) -> Unit = { _, _ -> },
+        onPhase: (SolvePhase) -> Unit = {},
         onProgress: (String) -> Unit,
     ): EngineResult? = withContext(Dispatchers.IO) {
         coroutineContext.ensureActive()
@@ -605,6 +608,7 @@ object StarSolver {
             logT0 = logT0,
             onProgress = onProgress,
             onStarsDetected = onStarsDetected,
+            onPhase = onPhase,
         )
 
         val shouldRace = settings.parallelEngineRacing &&

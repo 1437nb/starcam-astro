@@ -8,6 +8,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -308,8 +309,10 @@ class PlateSolveClient(
                 val md = java.security.MessageDigest.getInstance("SHA-256")
                 file.inputStream().use { input ->
                     val buf = ByteArray(16384)
-                    val read = input.read(buf)
-                    if (read > 0) md.update(buf, 0, read)
+                    var read: Int
+                    while (input.read(buf).also { read = it } >= 0) {
+                        if (read > 0) md.update(buf, 0, read)
+                    }
                 }
                 "${file.length()}_" + md.digest().joinToString("") { String.format(java.util.Locale.ROOT, "%02x", it) }.take(16)
             } catch (_: Exception) {
@@ -319,9 +322,10 @@ class PlateSolveClient(
 
         /** 只接受 HTTPS（本地回环调试地址除外，便于自建服务联调）。 */
         fun isSecureServerUrl(url: String): Boolean {
-            val u = url.trim().lowercase()
-            if (u.startsWith("https://")) return true
-            return u.startsWith("http://127.0.0.1") || u.startsWith("http://localhost")
+            val u = url.trim().toHttpUrlOrNull() ?: return false
+            if (u.username.isNotEmpty() || u.password.isNotEmpty()) return false
+            return u.scheme == "https" ||
+                (u.scheme == "http" && (u.host == "127.0.0.1" || u.host == "localhost"))
         }
     }
 }

@@ -139,14 +139,17 @@ object ImageUtils {
     }
 
     /** 把相册选择的 URI 拷贝到应用缓存目录 */
-    fun copyUriToCache(context: Context, uri: Uri, name: String): File? {
+    fun copyUriToCache(context: Context, uri: Uri, name: String, checkActive: () -> Unit = {}): File? {
+        val dest = File(context.cacheDir, name)
         return try {
-            val dest = File(context.cacheDir, name)
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(dest).use { input.copyTo(it) }
+            val input = context.contentResolver.openInputStream(uri) ?: return null
+            input.use {
+                FileOutputStream(dest).use { output -> CancellableStreams.copy(input, output, checkActive) }
             }
             dest
         } catch (e: Exception) {
+            dest.delete()
+            if (e is java.util.concurrent.CancellationException) throw e
             null
         }
     }
@@ -160,18 +163,23 @@ object ImageUtils {
      * 安全：显示名来自外部提供方，先做**文件名净化**（去掉路径分隔符与不可见字符，
      * 只留字母数字与 `._-`），避免 `../` 之类的越界写入。
      */
-    fun copyUriToCacheKeepingName(context: Context, uri: Uri, prefix: String): File? {
+    fun copyUriToCacheKeepingName(context: Context, uri: Uri, prefix: String, checkActive: () -> Unit = {}): File? {
+        var dest: File? = null
         return try {
             val display = queryDisplayName(context, uri)
             val safe = sanitizeFileName(
                 display ?: (prefix + "." + extFromMime(context, uri)),
             )
-            val dest = File(context.cacheDir, "${prefix}_$safe")
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(dest).use { input.copyTo(it) }
+            val target = File(context.cacheDir, "${prefix}_$safe")
+            dest = target
+            val input = context.contentResolver.openInputStream(uri) ?: return null
+            input.use {
+                FileOutputStream(target).use { output -> CancellableStreams.copy(input, output, checkActive) }
             }
-            dest
+            target
         } catch (e: Exception) {
+            dest?.delete()
+            if (e is java.util.concurrent.CancellationException) throw e
             null
         }
     }

@@ -60,6 +60,15 @@ object LayeredRenderer {
         val stroke = Paint(Paint.ANTI_ALIAS_FLAG)
         val text = Paint(Paint.ANTI_ALIAS_FLAG)
         val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        internal val metrics = Paint.FontMetrics()
+        internal val frame = FrameScratch()
+        private val namesZh = android.util.SparseArray<String>()
+        private val namesEn = android.util.SparseArray<String>()
+
+        internal fun starName(entry: StarEntry, english: Boolean): String {
+            val names = if (english) namesEn else namesZh
+            return names[entry.hip] ?: StarNames.displayName(entry.hip, entry.name, english).also { names.put(entry.hip, it) }
+        }
 
         init {
             stroke.style = Paint.Style.STROKE
@@ -103,7 +112,7 @@ object LayeredRenderer {
         drawWidth: Float = canvas.width.toFloat(),
         drawHeight: Float = canvas.height.toFloat(),
         dimBelowHorizon: Boolean = false,
-        degPerPx: Float? = null,
+        degPerPx: Float = Float.NaN,
         paints: RenderPaints? = null,
     ) {
         val w = scene.width
@@ -114,7 +123,9 @@ object LayeredRenderer {
 
         // §0.78：Paint 每帧复用；seg 是连线的收缩结果缓冲（循环外建一次，见 shrinkInto）
         val p = paints ?: RenderPaints()
-        val seg = FloatArray(4)
+        val frame = p.frame
+        frame.reset()
+        val seg = frame.segment
 
         val lineColor = if (night) 0x66FF8A80.toInt() else 0x8C7FD0FF.toInt()
         val nameColor = if (night) 0xFFE8A8A0.toInt() else 0xFFF7EDCB.toInt()
@@ -127,7 +138,8 @@ object LayeredRenderer {
         // ① 星座连线：两端按星等留空（星星不被线覆盖）
         if (flags.lines) {
             p.stroke.strokeWidth = 1.2f * density
-            for (line in scene.lines) {
+            for (index in scene.lines.indices) {
+                val line = scene.lines[index]
                 val ok = shrinkInto(
                     seg,
                     line.a.x, line.a.y, line.a.entry.mag,
@@ -146,18 +158,20 @@ object LayeredRenderer {
         // §0.120：标签避让与防越界机制（BoundingBox 记录已占用的文字/图标区域，避免重叠与裁切）
         val margin = 6f * density
         val pad = 2f * density
-        val occupiedBoxes = mutableListOf<BoundingBox>()
+        val occupiedBoxes = frame.boxes
 
         // ② 梅西耶深空天体标注（先排布深空天体，使其圈与文字优先占位；小圆圈 + 编号与名称，颜色按类型）
         if (flags.messier) {
             p.stroke.strokeWidth = 1.4f * density
             p.text.textSize = 10f * density
             p.text.setShadowLayer(2.5f * density, 1f, 1f, 0xFF000000.toInt())
-            val fm = p.text.fontMetrics
+            p.text.getFontMetrics(p.metrics)
+            val fm = p.metrics
             val ascentAbs = -fm.ascent
             val descent = fm.descent
             val r = 7f * density
-            for (m in scene.messier) {
+            for (index in scene.messier.indices) {
+                val m = scene.messier[index]
                 if (!m.visible) continue
                 val cx = m.x * sx
                 val cy = m.y * sy
@@ -167,7 +181,7 @@ object LayeredRenderer {
                 p.stroke.color = if (dim) dimMessier else MessierCatalog.typeColor(m.obj.type)
                 p.text.color = if (dim) dimMessier else nameColor
                 canvas.drawCircle(cx, cy, r, p.stroke)
-                occupiedBoxes.add(BoundingBox(cx - r - pad, cy - r - pad, cx + r + pad, cy + r + pad))
+                frame.occupy(cx - r - pad, cy - r - pad, cx + r + pad, cy + r + pad)
 
                 val label = m.obj.label(isEnglish)
                 val tw = p.text.measureText(label)
@@ -181,7 +195,7 @@ object LayeredRenderer {
                 ly = ly.coerceIn(margin + ascentAbs, maxOf(margin + ascentAbs, drawHeight - margin - descent))
 
                 canvas.drawText(label, lx, ly, p.text)
-                occupiedBoxes.add(BoundingBox(lx - pad, ly - ascentAbs - pad, lx + tw + pad, ly + descent + pad))
+                frame.occupy(lx - pad, ly - ascentAbs - pad, lx + tw + pad, ly + descent + pad)
             }
         }
 
@@ -193,10 +207,12 @@ object LayeredRenderer {
             p.text.setShadowLayer(3f * density, 1f, 1f, 0xFF000000.toInt())
             // 真实视直径上限：不超过画面短边的 1/3（防止极端长焦下日月糊满屏）
             val maxDiskR = minOf(drawWidth, drawHeight) / 3f
-            val fm = p.text.fontMetrics
+            p.text.getFontMetrics(p.metrics)
+            val fm = p.metrics
             val ascentAbs = -fm.ascent
             val descent = fm.descent
-            for (s in scene.solar) {
+            for (index in scene.solar.indices) {
+                val s = scene.solar[index]
                 if (!s.visible) continue
                 val cx = s.x * sx
                 val cy = s.y * sy
@@ -209,7 +225,7 @@ object LayeredRenderer {
                 val markerR = 8f * density
                 // 日月：优先按真实视直径绘制
                 var diskR = 0f
-                if (degPerPx != null && degPerPx > 0f && SolarSystemCatalog.isDisk(body)) {
+                if (degPerPx > 0f && SolarSystemCatalog.isDisk(body)) {
                     val px = (s.pos.angularDiameterDeg / 2.0 / degPerPx).toFloat() * sx
                     diskR = px.coerceIn(2.5f * density, maxDiskR)
                 }
@@ -230,7 +246,7 @@ object LayeredRenderer {
                     p.stroke.color = withAlpha(color, if (dim) 0.5f else 0.9f)
                     canvas.drawCircle(cx, cy, markerR, p.stroke)
                 }
-                occupiedBoxes.add(BoundingBox(cx - effR - pad, cy - effR - pad, cx + effR + pad, cy + effR + pad))
+                frame.occupy(cx - effR - pad, cy - effR - pad, cx + effR + pad, cy + effR + pad)
 
                 p.text.color = if (dim) dimName else nameColor
                 val planetName = SolarSystemCatalog.name(body, isEnglish)
@@ -243,7 +259,7 @@ object LayeredRenderer {
                 labelX = labelX.coerceIn(margin, maxOf(margin, drawWidth - margin - ptw))
                 labelY = labelY.coerceIn(margin + ascentAbs, maxOf(margin + ascentAbs, drawHeight - margin - descent))
                 canvas.drawText(planetName, labelX, labelY, p.text)
-                occupiedBoxes.add(BoundingBox(labelX - pad, labelY - ascentAbs - pad, labelX + ptw + pad, labelY + descent + pad))
+                frame.occupy(labelX - pad, labelY - ascentAbs - pad, labelX + ptw + pad, labelY + descent + pad)
             }
         }
 
@@ -254,32 +270,42 @@ object LayeredRenderer {
         if (flags.starNames) {
             p.text.textSize = 12f * density
             p.text.setShadowLayer(3f * density, 1f, 1f, 0xFF000000.toInt())
-            val fm = p.text.fontMetrics
+            p.text.getFontMetrics(p.metrics)
+            val fm = p.metrics
             val ascentAbs = -fm.ascent
             val descent = fm.descent
             val messierSuppressionDist = 28f * density
 
-            val candidates = scene.stars.filter { s ->
-                if (!s.visible || s.entry.mag > 3.2) return@filter false
+            val candidates = frame.candidates
+            for (index in scene.stars.indices) {
+                val s = scene.stars[index]
+                if (!s.visible || s.entry.mag > 3.2) continue
                 val sxPos = s.x * sx
                 val syPos = s.y * sy
                 // 仅对坐标严格在画面内的星点标注名字
-                if (sxPos !in 0f..drawWidth || syPos !in 0f..drawHeight) return@filter false
+                if (sxPos !in 0f..drawWidth || syPos !in 0f..drawHeight) continue
                 // 当梅西耶天体开启时，若星点处于可见梅西耶天体中心近距离内（如 M45 内部的昴宿六），抑制星名
-                if (flags.messier && scene.messier.any { m ->
-                    m.visible && kotlin.math.hypot(sxPos - m.x * sx, syPos - m.y * sy) < messierSuppressionDist
-                }) {
-                    return@filter false
+                var suppressed = false
+                if (flags.messier) {
+                    for (mi in scene.messier.indices) {
+                        val m = scene.messier[mi]
+                        if (m.visible && kotlin.math.hypot(sxPos - m.x * sx, syPos - m.y * sy) < messierSuppressionDist) {
+                            suppressed = true
+                            break
+                        }
+                    }
                 }
-                true
-            }.sortedBy { it.entry.mag } // 优先排布较亮的恒星
+                if (!suppressed) candidates.add(s)
+            }
+            frame.sortCandidates()
 
-            for (s in candidates) {
-                val name = StarNames.displayName(s.entry.hip, s.entry.name, isEnglish)
+            for (index in candidates.indices) {
+                val s = candidates[index]
+                val name = p.starName(s.entry, isEnglish)
                 if (name.isEmpty()) continue
                 val tw = p.text.measureText(name)
-                val placement = computeStarNamePlacement(
-                    name = name,
+                val placed = computeStarNamePlacementInto(
+                    out = frame.placement,
                     px = s.x * sx,
                     py = s.y * sy,
                     mag = s.entry.mag,
@@ -291,10 +317,11 @@ object LayeredRenderer {
                     density = density,
                     occupiedBoxes = occupiedBoxes,
                 )
-                if (placement != null) {
+                if (placed) {
+                    val placement = frame.placement
                     p.text.color = if (dimBelowHorizon && s.belowHorizon) dimName else nameColor
-                    canvas.drawText(placement.text, placement.x, placement.y, p.text)
-                    occupiedBoxes.add(placement.box)
+                    canvas.drawText(name, placement.x, placement.y, p.text)
+                    frame.occupy(placement.box.left, placement.box.top, placement.box.right, placement.box.bottom)
                 }
             }
         }
@@ -304,10 +331,12 @@ object LayeredRenderer {
             p.text.textSize = 11f * density
             p.text.setShadowLayer(3f * density, 1f, 1f, 0xFF000000.toInt())
             p.text.color = conColor
-            val fm = p.text.fontMetrics
+            p.text.getFontMetrics(p.metrics)
+            val fm = p.metrics
             val ascentAbs = -fm.ascent
             val descent = fm.descent
-            for (l in scene.labels) {
+            for (index in scene.labels.indices) {
+                val l = scene.labels[index]
                 val tw = p.text.measureText(l.text)
                 val lx = (l.x * sx - tw / 2f).coerceIn(margin, maxOf(margin, drawWidth - margin - tw))
                 val ly = (l.y * sy).coerceIn(margin + ascentAbs, maxOf(margin + ascentAbs, drawHeight - margin - descent))
@@ -333,7 +362,7 @@ object LayeredRenderer {
         val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
         canvas.drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
-        draw(canvas, scene, flags, isEnglish, density = 2.0f, degPerPx = degPerPx)
+        draw(canvas, scene, flags, isEnglish, density = 2.0f, degPerPx = degPerPx ?: Float.NaN)
         return out
     }
 
@@ -377,11 +406,12 @@ object LayeredRenderer {
 
     /** 轻量边界盒（纯 JVM 内部结构，用于标签避让与防越界计算） */
     internal data class BoundingBox(
-        val left: Float,
-        val top: Float,
-        val right: Float,
-        val bottom: Float,
+        var left: Float,
+        var top: Float,
+        var right: Float,
+        var bottom: Float,
     ) {
+        fun set(l: Float, t: Float, r: Float, b: Float) { left = l; top = t; right = r; bottom = b }
         fun intersects(other: BoundingBox): Boolean =
             left < other.right && right > other.left && top < other.bottom && bottom > other.top
     }
@@ -392,6 +422,49 @@ object LayeredRenderer {
         val y: Float,
         val box: BoundingBox,
     )
+
+    internal class PlacementBuffer {
+        var x = 0f
+        var y = 0f
+        val box = BoundingBox(0f, 0f, 0f, 0f)
+        fun set(tx: Float, ty: Float, w: Float, ascent: Float, descent: Float, pad: Float) {
+            x = tx; y = ty
+            box.set(tx - pad, ty - ascent - pad, tx + w + pad, ty + descent + pad)
+        }
+    }
+
+    /** Per-renderer high-water pools. Lists retain storage while each frame starts with no occupied boxes. */
+    internal class FrameScratch {
+        val segment = FloatArray(4)
+        val boxes = ArrayList<BoundingBox>(128)
+        private val pool = ArrayList<BoundingBox>(128)
+        val candidates = ArrayList<StarChartOverlay.Star2D>(256)
+        val placement = PlacementBuffer()
+        fun reset() { boxes.clear(); candidates.clear() }
+        fun occupy(l: Float, t: Float, r: Float, b: Float) {
+            val index = boxes.size
+            val box = if (index < pool.size) pool[index] else BoundingBox(0f, 0f, 0f, 0f).also { pool.add(it) }
+            box.set(l, t, r, b)
+            boxes.add(box)
+        }
+        fun sortCandidates() {
+            // Stable insertion sort uses existing list storage, without TimSort's temporary arrays.
+            for (i in 1 until candidates.size) {
+                val star = candidates[i]
+                var j = i - 1
+                while (j >= 0 && candidates[j].entry.mag > star.entry.mag) {
+                    candidates[j + 1] = candidates[j]
+                    j--
+                }
+                candidates[j + 1] = star
+            }
+        }
+    }
+
+    private fun collides(boxes: List<BoundingBox>, box: BoundingBox): Boolean {
+        for (i in boxes.indices) if (boxes[i].intersects(box)) return true
+        return false
+    }
 
     /**
      * §0.120：计算单个星名的最佳防碰撞避让与防越界坐标。
@@ -411,35 +484,42 @@ object LayeredRenderer {
         density: Float,
         occupiedBoxes: List<BoundingBox>,
     ): LabelPlacement? {
+        val out = PlacementBuffer()
+        return if (computeStarNamePlacementInto(out, px, py, mag, textWidth, ascentAbs, descent, drawWidth, drawHeight, density, occupiedBoxes)) {
+            LabelPlacement(name, out.x, out.y, out.box)
+        } else null
+    }
+
+    internal fun computeStarNamePlacementInto(
+        out: PlacementBuffer,
+        px: Float, py: Float, mag: Double, textWidth: Float,
+        ascentAbs: Float, descent: Float, drawWidth: Float, drawHeight: Float,
+        density: Float, occupiedBoxes: List<BoundingBox>,
+    ): Boolean {
         val offset = 7f * density
         val margin = 6f * density
         val pad = 2f * density
 
-        val quadrants = listOf(
-            px + offset to py - offset,
-            px + offset to py + ascentAbs + offset,
-            px - textWidth - offset to py - offset,
-            px - textWidth - offset to py + ascentAbs + offset,
-        )
-
-        for ((tx, ty) in quadrants) {
-            val box = BoundingBox(tx - pad, ty - ascentAbs - pad, tx + textWidth + pad, ty + descent + pad)
+        for (quadrant in 0..3) {
+            val tx = if (quadrant < 2) px + offset else px - textWidth - offset
+            val ty = if (quadrant % 2 == 0) py - offset else py + ascentAbs + offset
+            out.set(tx, ty, textWidth, ascentAbs, descent, pad)
             val inCanvas = tx >= margin && (tx + textWidth) <= (drawWidth - margin) &&
                 (ty - ascentAbs) >= margin && (ty + descent) <= (drawHeight - margin)
-            if (inCanvas && occupiedBoxes.none { it.intersects(box) }) {
-                return LabelPlacement(name, tx, ty, box)
+            if (inCanvas && !collides(occupiedBoxes, out.box)) {
+                return true
             }
         }
 
         // 若 4 象限均无法完全无冲突容纳，尝试边界强制收敛
         val clampedTx = (px + offset).coerceIn(margin, maxOf(margin, drawWidth - margin - textWidth))
         val clampedTy = (py - offset).coerceIn(margin + ascentAbs, maxOf(margin + ascentAbs, drawHeight - margin - descent))
-        val clampedBox = BoundingBox(clampedTx - pad, clampedTy - ascentAbs - pad, clampedTx + textWidth + pad, clampedTy + descent + pad)
+        out.set(clampedTx, clampedTy, textWidth, ascentAbs, descent, pad)
 
-        val hasCollision = occupiedBoxes.any { it.intersects(clampedBox) }
+        val hasCollision = collides(occupiedBoxes, out.box)
         if (hasCollision && mag > 2.0) {
-            return null
+            return false
         }
-        return LabelPlacement(name, clampedTx, clampedTy, clampedBox)
+        return true
     }
 }

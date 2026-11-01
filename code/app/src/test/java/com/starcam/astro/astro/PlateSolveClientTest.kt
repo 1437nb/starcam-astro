@@ -40,4 +40,22 @@ class PlateSolveClientTest {
         assertEquals("相同文件的去重键必须确定一致", key1, key2)
         assertTrue("去重键必须包含文件大小", key1.startsWith("1024_"))
     }
+
+    @Test
+    fun loopbackExceptionRejectsLookalikeHostsAndUserInfo() {
+        for (url in listOf(
+            "http://localhost.example.com/api", "http://127.0.0.1.example.com/api",
+            "http://localhost@example.com/api", "https://user:password@example.com/api", "https://",
+        )) assertFalse(url, PlateSolveClient.isSecureServerUrl(url))
+        assertFalse(PlateSolveClient.isSecureServerUrl("http://[::1]:8080/api"))
+    }
+
+    @Test
+    fun uploadDedupDistinguishesEqualHeadersAndDifferentImagePayloads() {
+        val a = tempFolder.newFile("a.jpg")
+        val b = tempFolder.newFile("b.jpg")
+        a.writeBytes(ByteArray(32768))
+        b.writeBytes(ByteArray(32768).also { it[20000] = 1 })
+        assertFalse(PlateSolveClient.computeFileKey(a) == PlateSolveClient.computeFileKey(b))
+    }
 }

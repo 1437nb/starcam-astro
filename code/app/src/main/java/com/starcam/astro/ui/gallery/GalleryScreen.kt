@@ -229,7 +229,7 @@ private fun GalleryCell(
     val thumb by produceState<Bitmap?>(initialValue = null, item.path) {
         value = withContext(Dispatchers.IO) {
             try {
-                ImageUtils.decodeSampledBitmap(item.path, 256)
+                com.starcam.astro.util.ThumbnailCache.load(item.path)
             } catch (e: Exception) {
                 null
             }

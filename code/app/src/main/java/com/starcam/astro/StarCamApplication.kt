@@ -38,6 +38,7 @@ class StarCamApplication : Application() {
         // UI 不可见 / 后台 / 内存偏低都值得归还；只对「运行中且偏低」以上动作，
         // 避免用户正在连续识别时把索引丢掉导致下次变慢。
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            com.starcam.astro.util.ThumbnailCache.clear()
             val freed = try {
                 StellarSolverNative.trimIndexCache()
             } catch (e: Throwable) {

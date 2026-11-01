@@ -26,6 +26,12 @@ object I18n {
 
     // ==================== 主页 (HomeScreen) ====================
     object Home {
+        val importPhotos: String get() = if (isEn) "Import Photo" else "导入照片"
+        val importTitle: String get() = if (isEn) "Choose an import method" else "选择导入方式"
+        val importHint: String get() = if (isEn) "Original photos preserve shooting information. Use the system picker if access is restricted." else "原图模式可保留拍摄参数；访问受限时可使用系统相册。"
+        val importing: String get() = if (isEn) "Importing photos" else "正在导入照片"
+        fun importProgress(done: Int, total: Int): String = if (isEn) "$done of $total processed" else "已处理 $done / $total 张"
+        fun importFailures(count: Int): String = if (isEn) "$count file(s) could not be imported. Try another import method." else "$count 个文件未能导入，可尝试其他导入方式。"
         val takePhoto: String get() = if (isEn) "Take Photo" else "拍照认星"
         val chooseGalleryOriginal: String get() = if (isEn) "Choose from Gallery (Original Photo)" else "从相册选择（原图·保留拍摄参数）"
         val chooseGalleryCompat: String get() = if (isEn) "System Gallery (Compatible Mode)" else "系统相册（兼容模式·位置可能被隐藏）"
@@ -37,8 +43,8 @@ object I18n {
         val visiblePlanets: String get() = if (isEn) "Visible Planets" else "可见行星"
         val moonIllumination: String get() = if (isEn) "Illumination" else "月照"
         val moonAge: String get() = if (isEn) "Moon age" else "月龄"
-        val apiKeyConfigured: String get() = if (isEn) "✓ API Key configured, online solving available" else "✓ 已配置 API Key，可在线识别"
-        val apiKeyNotConfigured: String get() = if (isEn) "API Key not configured: free key needed for online solving. Try \"Offline Demo\" first" else "未配置 API Key：在线识别需免费 Key；可先体验「离线演示」"
+        val apiKeyConfigured: String get() = if (isEn) "Offline solving ready · Online assistance configured" else "离线识别可用 · 已配置在线辅助"
+        val apiKeyNotConfigured: String get() = if (isEn) "Offline solving ready · Online assistance is optional" else "离线识别可用 · 在线辅助为可选功能"
         val howToUseTitle: String get() = if (isEn) "How to Use" else "如何使用"
         val howToUse1: String get() = if (isEn) "1. Shoot night sky in low light pollution (Night/Long exposure, with at least 3 bright stars)" else "1. 夜晚到光污染较少的地方，用手机拍摄星空（建议使用夜景/长曝光，至少包含 3 颗亮星）"
         val howToUse2: String get() = if (isEn) "2. Tap \"Take Photo\" or pick from gallery" else "2. 点击「拍照认星」或从相册选择照片"
