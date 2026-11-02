@@ -1,0 +1,196 @@
+{
+  "device": {
+    "manufacturer": "Google",
+    "model": "Android SDK built for x86_64",
+    "api": 28,
+    "android": "9",
+    "abis": [
+      "x86_64",
+      "x86"
+    ],
+    "memoryClassMiB": 512,
+    "lowRam": false,
+    "nativeSolverAvailable": false
+  },
+  "tests": [
+    {
+      "name": "original-size-jpeg-roundtrip",
+      "status": "passed",
+      "elapsedMs": 1018,
+      "nativeHeapAfterBytes": 12644936
+    },
+    {
+      "name": "preview-size-is-independent",
+      "status": "passed",
+      "elapsedMs": 7,
+      "nativeHeapAfterBytes": 12794760
+    },
+    {
+      "name": "exif-1-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 59,
+      "nativeHeapAfterBytes": 9995720
+    },
+    {
+      "name": "exif-2-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 20,
+      "nativeHeapAfterBytes": 14193032
+    },
+    {
+      "name": "exif-3-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 26,
+      "nativeHeapAfterBytes": 12150920
+    },
+    {
+      "name": "exif-4-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 22,
+      "nativeHeapAfterBytes": 10105480
+    },
+    {
+      "name": "exif-5-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 35,
+      "nativeHeapAfterBytes": 10165384
+    },
+    {
+      "name": "exif-6-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 21,
+      "nativeHeapAfterBytes": 8086536
+    },
+    {
+      "name": "exif-7-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 24,
+      "nativeHeapAfterBytes": 8090056
+    },
+    {
+      "name": "exif-8-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 24,
+      "nativeHeapAfterBytes": 8073672
+    },
+    {
+      "name": "online-rotated-photo-original-export",
+      "status": "passed",
+      "elapsedMs": 20,
+      "nativeHeapAfterBytes": 8089288
+    },
+    {
+      "name": "layer-flags-change-actual-canvas-output",
+      "status": "passed",
+      "elapsedMs": 149,
+      "nativeHeapAfterBytes": 13350888
+    },
+    {
+      "name": "fits-full-dimensions",
+      "status": "passed",
+      "elapsedMs": 64,
+      "nativeHeapAfterBytes": 6630216
+    },
+    {
+      "name": "raw-embedded-preview-full-dimensions",
+      "status": "passed",
+      "elapsedMs": 35,
+      "nativeHeapAfterBytes": 13593896
+    },
+    {
+      "name": "missing-source-original-is-rejected",
+      "status": "passed",
+      "elapsedMs": 2,
+      "nativeHeapAfterBytes": 13593896
+    },
+    {
+      "name": "missing-source-preview-still-saves",
+      "status": "passed",
+      "elapsedMs": 6,
+      "nativeHeapAfterBytes": 13594536
+    },
+    {
+      "name": "legacy-unknown-pixel-basis-is-rejected",
+      "status": "passed",
+      "elapsedMs": 1,
+      "nativeHeapAfterBytes": 6253352
+    },
+    {
+      "name": "oversized-source-rejected-before-pixel-decode",
+      "status": "passed",
+      "elapsedMs": 3,
+      "nativeHeapAfterBytes": 6257704
+    },
+    {
+      "name": "batch-public-photos-solve-without-auto-export",
+      "status": "passed",
+      "elapsedMs": 3069,
+      "nativeHeapAfterBytes": 7063472
+    }
+  ],
+  "passed": 19,
+  "failed": 0,
+  "scope": "Android Bitmap/Canvas/EXIF/export/storage; no claim of physical camera, AR sensors or native performance validation",
+  "executionKind": "emulator",
+  "api": 28,
+  "apk": "StarCam-v1.5.93-original-resolution-export-debug.apk",
+  "apkSha256": "637ab55cce0e78e965e3c412230348c09257939f702f727edbe1aad47636dd76",
+  "testApkSha256": "2a4ac9857c99477903789faa7654acfafb6ebe31a25c513d5b4e96057efcdf5b",
+  "sourceCommit": "48c01078dd287f37534ddf7649f1f007a19728be",
+  "ui": [
+    {
+      "name": "home-primary-actions",
+      "status": "passed",
+      "elapsedMs": 3656,
+      "evidence": "home.png"
+    },
+    {
+      "name": "import-dialog-and-return",
+      "status": "passed",
+      "elapsedMs": 5156,
+      "evidence": "import-methods.png"
+    },
+    {
+      "name": "demo-full-result",
+      "status": "passed",
+      "elapsedMs": 7750,
+      "evidence": "result.png"
+    },
+    {
+      "name": "export-size-dialog",
+      "status": "passed",
+      "elapsedMs": 4844,
+      "evidence": "export-size-dialog.png"
+    },
+    {
+      "name": "landscape-export-dialog",
+      "status": "passed",
+      "elapsedMs": 2625,
+      "evidence": "export-landscape.png"
+    },
+    {
+      "name": "original-save-from-ui",
+      "status": "passed",
+      "elapsedMs": 2250,
+      "evidence": "original-saved-from-ui.png"
+    },
+    {
+      "name": "large-font-import-dialog",
+      "status": "passed",
+      "elapsedMs": 8078,
+      "evidence": "import-large-font.png"
+    },
+    {
+      "name": "language-switch-chinese-and-system",
+      "status": "passed",
+      "elapsedMs": 10984,
+      "evidence": "settings-chinese.png"
+    },
+    {
+      "name": "batch-open-individually-and-return",
+      "status": "passed",
+      "elapsedMs": 15813,
+      "evidence": "batch-open-return.png"
+    }
+  ]
+}

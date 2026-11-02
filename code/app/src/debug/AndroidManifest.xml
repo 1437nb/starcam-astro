@@ -3,6 +3,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity
+            android:name=".DeviceAcceptanceActivity"
+            android:exported="true"
+            android:label="StarCam Device Acceptance"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode" />
+        <activity
             android:name=".AutoTestActivity"
             android:exported="true"
             android:label="识别效率测试"

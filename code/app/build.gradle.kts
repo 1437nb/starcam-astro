@@ -30,6 +30,7 @@ android {
         targetSdk = 34
         versionCode = 113
         versionName = "1.5.93"
+        testInstrumentationRunner = "com.starcam.astro.DeviceAcceptanceInstrumentation"
     }
 
     // 每版更新内容简述（用户规则：在 APK 文件名上带上更新内容）
