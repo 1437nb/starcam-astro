@@ -18,6 +18,8 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 **Compatibility checks**: v1.5.94 passed 21 Android functional cases and 9 UI cases on each of the Android 9 and 14 emulators (60 executions total), covering mixed-format import and existing export flows. Physical phones, the native ARM solver, and AR sensors still need validation. See the [latest results](docs/118-验证报告增补-§0.133-照片RAW与FITS统一导入v1.5.94.md) and [environment setup](docs/117-安卓模拟器与兼容性记录-20261102.md). Open a window on this workstation with `pwsh -File tools/start_android_emulator.ps1 -Api 34`.
 
+**Full local JVM regression**: v1.5.94 was rerun across 56 classes / 357 tests, with zero failures, errors or skips, including the 336 standard tests and local photo/FITS/narrow-field benches. Public photos solved correctly in 12/12 cases; the narrow-field observation bench still left 20/32 unsolved. See the [per-suite counts](docs/compatibility/20261103-v1.5.94-jvm-full.json).
+
 **v1.5.92 (versionCode 112)** lets you open each completed batch photo in the full result viewer, reuse its solution, choose layers, and export only the photos you want. Returning preserves the batch list. **Batch solving no longer saves every annotated photo automatically.** This release also includes import progress and cancellation, solving phases and elapsed time, performance improvements, and bilingual refinements. See the [release notes](docs/release-notes-v1.5.92.md) and [validation checklist](docs/114-验证报告增补-§0.131-批量逐张查看与手动导出v1.5.92.md).
 
 Latest release: **[v1.5.92](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.92)**
