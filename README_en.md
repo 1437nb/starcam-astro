@@ -12,7 +12,7 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 ## Download
 
-**Local development build v1.5.93 (versionCode 113, §0.132)** adds preview-size or original-size annotated JPEG export, source-pixel reprojection, orientation handling, and memory preflight. RAW uses the full embedded JPEG preview. Debug validation only; the public download remains v1.5.92. See the [scope and device checklist](docs/116-验证报告增补-§0.132-原图尺寸导出v1.5.93.md).
+**Local build v1.5.93 (versionCode 113, §0.132)** adds preview-size or original-size annotated JPEG export, source-pixel reprojection, orientation handling, and memory preflight. RAW uses the full embedded JPEG preview. The official signed Release APK has been built and verified locally with the same certificate as v1.5.92, allowing in-place upgrades. It has not been published; the public download remains v1.5.92. See the [scope, build verification and device checklist](docs/116-验证报告增补-§0.132-原图尺寸导出v1.5.93.md).
 
 **Compatibility checks**: Android 9 and 14 emulators each passed 19 Android functional cases and 9 UI cases (56 executions total), covering original-size export, EXIF, storage, and individual batch viewing with return. Physical phones, the native ARM solver, and AR sensors still need validation. See the [environment, evidence and reproduction steps](docs/117-安卓模拟器与兼容性记录-20261102.md). On this workstation, open a window with `pwsh -File tools/start_android_emulator.ps1 -Api 34`.
 
