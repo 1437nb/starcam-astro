@@ -52,6 +52,7 @@ object HistoryStore {
         val wcsCd22: Double? = null,
         val nMatch: Int? = null,
         val logodds: Double? = null,
+        val subId: Long? = null,
     ) {
         /**
          * 获取当前语言对应的星座名称（中英双语）。
@@ -98,6 +99,7 @@ object HistoryStore {
                 wcs = wcs,
                 nMatch = nMatch,
                 logodds = logodds,
+                subId = subId,
             )
         }
 
@@ -134,6 +136,7 @@ object HistoryStore {
                     wcsCd22 = wcs?.cd22,
                     nMatch = solve.nMatch,
                     logodds = solve.logodds,
+                    subId = solve.subId,
                 )
             }
         }
@@ -278,6 +281,7 @@ object HistoryStore {
                     e.wcsCd22?.let { put("cd22", it) }
                     e.nMatch?.let { put("nmatch", it) }
                     e.logodds?.let { put("logodds", it) }
+                    e.subId?.let { put("subid", it) }
                 },
             )
         }
@@ -320,6 +324,7 @@ object HistoryStore {
                         wcsCd22 = if (o.has("cd22") && !o.isNull("cd22")) o.getDouble("cd22") else null,
                         nMatch = if (o.has("nmatch") && !o.isNull("nmatch")) o.getInt("nmatch") else null,
                         logodds = if (o.has("logodds") && !o.isNull("logodds")) o.getDouble("logodds") else null,
+                        subId = if (o.has("subid") && !o.isNull("subid")) o.getLong("subid") else null,
                     ),
                 )
             } catch (e: Exception) {

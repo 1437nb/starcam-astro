@@ -117,6 +117,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                         isDemo = false,
                         elapsedMs = 0L,
                         recordHistory = false,
+                        cachedEngineHint = cachedEngine,
                     )
                     return@launch
                 }
@@ -221,6 +222,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         isDemo: Boolean,
         elapsedMs: Long = 0,
         recordHistory: Boolean = false,
+        cachedEngineHint: String? = null,
     ) {
         (state as? ResultUiState.Loading)?.let {
             val phase = com.starcam.astro.astro.SolvePhase.RENDERING
@@ -301,6 +303,13 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
             elapsedMs = elapsedMs,
             solar = prepared.solar,
             locationIsFallback = prepared.locationIsFallback,
+            exportSourcePath = imagePath,
+            solveUsesUprightPixels = when {
+                solve.subId != null || engine == SolveEngine.ONLINE_NOVA -> true
+                cachedEngineHint?.contains("nova.astrometry.net", ignoreCase = true) == true -> true
+                cachedEngineHint == "批量导出" -> null
+                else -> false
+            },
         )
     }
 

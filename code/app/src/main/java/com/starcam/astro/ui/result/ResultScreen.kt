@@ -164,6 +164,9 @@ sealed interface ResultUiState {
          * 信息面板据实提示用户；天体标注的可信度同样受此影响。
          */
         val locationIsFallback: Boolean = false,
+        /** 原始输入文件，供按原图尺寸重新解码导出。 */
+        val exportSourcePath: String? = null,
+        val solveUsesUprightPixels: Boolean? = false,
     ) : ResultUiState
     data class Error(
         val message: String,
@@ -675,29 +678,8 @@ private fun SuccessContent(
             showPlanets = state.solar.isNotEmpty(),
         )
         Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // §0.120：导出只有星座连线的纯净图片
-            SaveToGalleryButton(
-                state = state,
-                flags = LayerFlags.LINES_ONLY,
-                label = com.starcam.astro.ui.I18n.Result.saveLinesOnly,
-                isOutlined = true,
-                toastProvider = { com.starcam.astro.ui.I18n.Result.savedLinesOnlyToast(it) },
-            )
-            // 保存当前自定义图层配置的标注图
-            SaveToGalleryButton(
-                state = state,
-                flags = layerFlags,
-                label = com.starcam.astro.ui.I18n.Result.saveAnnotated,
-                isOutlined = false,
-                toastProvider = { com.starcam.astro.ui.I18n.Result.savedToast(it) },
-            )
+        PhotoExportActions(state, layerFlags) { flags, english ->
+            renderAnnotatedBitmap(state, isEnglish = english, flags = flags)
         }
         Spacer(Modifier.height(8.dp))
         InfoPanel(state, Modifier.padding(horizontal = 16.dp))
@@ -779,64 +761,6 @@ private fun LayerFilterChips(
                     { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
                 } else null,
             )
-        }
-    }
-}
-
-/** 保存到相册：把照片 + 星座标注合成图存入本地（Android 10+ 直接入相册；§0.47 遵循图层开关，§0.120 支持仅连线导出） */
-@Composable
-private fun SaveToGalleryButton(
-    state: ResultUiState.Success,
-    flags: LayerFlags = LayerFlags.ALL,
-    label: String = com.starcam.astro.ui.I18n.Result.saveToGallery,
-    isOutlined: Boolean = false,
-    toastProvider: (String) -> String = { com.starcam.astro.ui.I18n.Result.savedToast(it) },
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var saving by remember { mutableStateOf(false) }
-
-    val onClick = {
-        if (!saving) {
-            saving = true
-            scope.launch {
-                val location = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val annotated = renderAnnotatedBitmap(state, flags = flags)
-                        try {
-                            ImageUtils.saveBitmapToGallery(
-                                context,
-                                annotated,
-                                "StarCam_${System.currentTimeMillis()}.jpg",
-                            )
-                        } finally {
-                            annotated.recycle()
-                        }
-                    }.getOrNull()
-                }
-                saving = false
-                Toast.makeText(
-                    context,
-                    if (location != null) toastProvider(location) else com.starcam.astro.ui.I18n.Result.saveFailed,
-                    Toast.LENGTH_LONG,
-                ).show()
-            }
-        }
-    }
-
-    if (isOutlined) {
-        OutlinedButton(
-            onClick = onClick,
-            enabled = !saving,
-        ) {
-            Text(if (saving) com.starcam.astro.ui.I18n.Result.saving else label)
-        }
-    } else {
-        Button(
-            onClick = onClick,
-            enabled = !saving,
-        ) {
-            Text(if (saving) com.starcam.astro.ui.I18n.Result.saving else label)
         }
     }
 }

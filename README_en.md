@@ -12,6 +12,8 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 ## Download
 
+**Local development build v1.5.93 (versionCode 113, §0.132)** adds preview-size or original-size annotated JPEG export, source-pixel reprojection, orientation handling, and memory preflight. RAW uses the full embedded JPEG preview. Debug validation only; the public download remains v1.5.92. See the [scope and device checklist](docs/116-验证报告增补-§0.132-原图尺寸导出v1.5.93.md).
+
 **v1.5.92 (versionCode 112)** lets you open each completed batch photo in the full result viewer, reuse its solution, choose layers, and export only the photos you want. Returning preserves the batch list. **Batch solving no longer saves every annotated photo automatically.** This release also includes import progress and cancellation, solving phases and elapsed time, performance improvements, and bilingual refinements. See the [release notes](docs/release-notes-v1.5.92.md) and [validation checklist](docs/114-验证报告增补-§0.131-批量逐张查看与手动导出v1.5.92.md).
 
 Latest release: **[v1.5.92](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.92)**
@@ -65,8 +67,8 @@ Latest release: **[v1.5.92](https://github.com/1437nb/starcam-astro/releases/tag
 │       ├── main/assets/offline_photos/      # 12 public night-sky demo photos
 │       ├── main/jniLibs/arm64-v8a/          # Prebuilt libstellar_solver.so native solver
 │       ├── main/cpp/astro_bridge.c          # JNI bridge source
-│       └── test/java/com/starcam/astro/     # Standard suite: 44 classes / 323 tests, including public-photo truth checks
-├── docs/                   # Architecture & 100+ validation reports (through §0.131)
+│       └── test/java/com/starcam/astro/     # Standard suite: 46 classes / 336 tests, including public-photo truth checks
+├── docs/                   # Architecture & 100+ validation reports (through §0.132)
 ├── tools/                  # Catalog generators, truth calibration & release scripts
 └── LICENSE                 # GNU General Public License v2.0
 ```

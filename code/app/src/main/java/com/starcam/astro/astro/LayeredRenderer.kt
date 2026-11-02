@@ -114,6 +114,7 @@ object LayeredRenderer {
         dimBelowHorizon: Boolean = false,
         degPerPx: Float = Float.NaN,
         paints: RenderPaints? = null,
+        lineGapScale: Float = 1f,
     ) {
         val w = scene.width
         val h = scene.height
@@ -144,6 +145,7 @@ object LayeredRenderer {
                     seg,
                     line.a.x, line.a.y, line.a.entry.mag,
                     line.b.x, line.b.y, line.b.entry.mag,
+                    gapScale = lineGapScale,
                 )
                 if (!ok) continue
                 p.stroke.color = if (dimBelowHorizon && (line.a.belowHorizon || line.b.belowHorizon)) {
@@ -377,13 +379,14 @@ object LayeredRenderer {
         out: FloatArray,
         ax: Float, ay: Float, magA: Double,
         bx: Float, by: Float, magB: Double,
+        gapScale: Float = 1f,
     ): Boolean {
         val dx = bx - ax
         val dy = by - ay
         val len = kotlin.math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
-        val gapA = gapOf(magA)
-        val gapB = gapOf(magB)
-        if (len <= gapA + gapB + 2f) return false
+        val gapA = gapOf(magA) * gapScale
+        val gapB = gapOf(magB) * gapScale
+        if (len <= gapA + gapB + 2f * gapScale) return false
         val ux = dx / len
         val uy = dy / len
         out[0] = ax + ux * gapA

@@ -212,6 +212,21 @@ object I18n {
         val exportFailed: String get() = if (isEn) "Export failed" else "导出失败"
     }
 
+    object Export {
+        val title: String get() = if (isEn) "Choose export size" else "选择导出尺寸"
+        val description: String get() = if (isEn) "Save a JPEG with the selected layers. Your source photo stays unchanged." else "按已选图层保存为 JPEG，原始照片保持不变。"
+        fun preview(w: Int, h: Int): String = if (isEn) "Preview size · $w × $h" else "预览尺寸 · $w × $h"
+        fun original(w: Int, h: Int, raw: Boolean): String = if (isEn) "${if (raw) "Embedded preview" else "Original size"} · $w × $h" else "${if (raw) "内嵌预览尺寸" else "原图尺寸"} · $w × $h"
+        val originalNote: String get() = if (isEn) "Original pixels are reloaded and annotated at full size; more memory and time are needed." else "重新读取原图并在原尺寸叠加标注，需要更多内存和时间。"
+        val rawNote: String get() = if (isEn) "RAW exports use the embedded JPEG preview at its full size, not sensor RAW pixels." else "RAW 按内嵌 JPEG 预览的完整尺寸导出，不是传感器原始数据的全尺寸解码。"
+        val fitsNote: String get() = if (isEn) "FITS exports keep the image dimensions and use the current grayscale stretch, saved as an 8-bit JPEG." else "FITS 保留图像尺寸，按当前灰度拉伸方式输出 8 位 JPEG。"
+        val saving: String get() = if (isEn) "Exporting… large photos may take longer." else "正在导出，大尺寸照片可能需要较长时间…"
+        val sourceMissing: String get() = if (isEn) "Source photo unavailable. You can still save the preview." else "原始照片不可用，仍可保存预览尺寸。"
+        val cannotRead: String get() = if (isEn) "Cannot read the source at original size. Try preview size." else "无法按原图尺寸读取此文件，请选择预览尺寸。"
+        val memoryLimit: String get() = if (isEn) "Not enough memory for original-size export. Close other apps or choose preview size; no image was resized silently." else "当前内存不足以按原图尺寸导出，请关闭其他应用后重试，或选择预览尺寸；不会自动降低尺寸。"
+        val unknownBasis: String get() = if (isEn) "Re-solve this older record to enable aligned original-size export." else "请重新识别这条旧记录，以启用准确对齐的原图尺寸导出。"
+    }
+
     // ==================== 批量识别 (BatchScreen) ====================
     object Batch {
         val solved: String get() = if (isEn) "✓ Solved" else "✓ 已识别"

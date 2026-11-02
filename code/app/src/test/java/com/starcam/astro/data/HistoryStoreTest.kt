@@ -36,6 +36,7 @@ class HistoryStoreTest {
             wcs = wcs,
             nMatch = 25,
             logodds = 120.0,
+            subId = 123456L,
         )
 
         val entry = HistoryStore.Entry.fromSolve(
@@ -63,6 +64,7 @@ class HistoryStoreTest {
         assertEquals(0.015, entry.wcsCd22!!, 1e-6)
         assertEquals(25, entry.nMatch)
         assertEquals(120.0, entry.logodds!!, 1e-4)
+        assertEquals(123456L, entry.subId)
 
         val restored = entry.toSolveResult()
         assertNotNull(restored)
@@ -74,6 +76,7 @@ class HistoryStoreTest {
         assertEquals(originalSolve.imageWidth, restored.imageWidth)
         assertEquals(originalSolve.imageHeight, restored.imageHeight)
         assertNotNull(restored.wcs)
+        assertEquals(originalSolve.subId, restored.subId)
         assertEquals(wcs.crpix1, restored.wcs!!.crpix1, 1e-4)
         assertEquals(wcs.crpix2, restored.wcs!!.crpix2, 1e-4)
         assertEquals(wcs.crval1, restored.wcs!!.crval1, 1e-4)
