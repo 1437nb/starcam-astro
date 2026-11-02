@@ -59,6 +59,34 @@ class DeviceAcceptanceInstrumentation : Instrumentation() {
                 put("nativeSolverAvailable", NativeEngineProbe.available)
             })
             val source = jpeg("source.jpg", 1600, 1000)
+            case("mixed-photo-raw-fits-import-preserves-formats") {
+                val files = listOf(source, fits(), rawPreview(source.readBytes()))
+                val uris = files.map {
+                    androidx.core.content.FileProvider.getUriForFile(targetContext, "${targetContext.packageName}.acceptance.files", it)
+                }
+                val importer = com.starcam.astro.ui.home.PhotoImportViewModel(targetContext.applicationContext as android.app.Application)
+                try {
+                    runOnMainSync { importer.importPhotos(uris) }
+                    val deadline = SystemClock.elapsedRealtime() + 15000
+                    while (!importer.state.finished && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(50)
+                    val state = importer.state
+                    check(state.finished && state.failed == 0 && state.paths.size == 3)
+                    state.paths.zip(files).forEach { (path, original) ->
+                        check(File(path).extension == original.extension)
+                        check(File(path).readBytes().contentEquals(original.readBytes()))
+                        requireNotNull(com.starcam.astro.util.ImageUtils.decodeSampledBitmap(path)).useBitmap { bitmap ->
+                            check(bitmap.width > 0 && bitmap.height > 0)
+                        }
+                    }
+                } finally { runOnMainSync { importer.cancel() } }
+            }
+            case("mixed-import-over-limit-rejects-entire-selection") {
+                val uri = androidx.core.content.FileProvider.getUriForFile(targetContext, "${targetContext.packageName}.acceptance.files", source)
+                val importer = com.starcam.astro.ui.home.PhotoImportViewModel(targetContext.applicationContext as android.app.Application)
+                runOnMainSync { importer.importPhotos(List(10) { uri }) }
+                check(importer.state.finished && importer.state.overLimit && importer.state.paths.isEmpty())
+                runOnMainSync { importer.cancel() }
+            }
             case("original-size-jpeg-roundtrip") {
                 val out = export(source, original = true)
                 savedBitmap(out).useBitmap { bmp ->

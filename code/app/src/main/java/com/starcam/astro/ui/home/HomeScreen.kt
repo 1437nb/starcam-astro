@@ -108,7 +108,9 @@ fun HomeScreen(
     LaunchedEffect(importState.finished) {
         if (importState.finished) {
             val paths = importState.paths
-            if (importState.failed > 0) {
+            if (importState.overLimit) {
+                android.widget.Toast.makeText(context, I18n.Home.importLimit, android.widget.Toast.LENGTH_LONG).show()
+            } else if (importState.failed > 0) {
                 android.widget.Toast.makeText(context, I18n.Home.importFailures(importState.failed), android.widget.Toast.LENGTH_LONG).show()
             }
             importer.consumeResult()
@@ -116,19 +118,19 @@ fun HomeScreen(
             else if (paths.isNotEmpty()) onPickImages(paths)
         }
     }
-    // 多选照片 → 批量识别导出（最多 9 张）
+    // 相册兼容入口也保留文件扩展名，避免把相册中的 DNG 误存为 JPEG。
     val multiPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(maxItems = 9)
     ) { uris ->
-        importer.importPhotos(uris, keepName = false)
+        importer.importPhotos(uris)
     }
 
-    // FITS / 相机 RAW（§0.108）：系统照片选择器只认图片（选不到 .fits/.cr2），
-    // 因此单独走**系统文档选择器（SAF）**；拷到缓存时保留原扩展名 —— 解码分派按扩展名走。
+    // 统一使用 SAF 选择普通图片 / RAW / FITS；*/* 避免提供方将天文文件标成
+    // application/octet-stream 时被过滤。保留文件名，由现有解码管线分派格式。
     val docPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
-        importer.importPhotos(uris, keepName = true)
+        importer.importPhotos(uris)
     }
 
     if (chooseImport) {
@@ -143,10 +145,6 @@ fun HomeScreen(
                 HomeActionRow(AppIcons.Gallery, I18n.Home.chooseGalleryCompat) {
                     chooseImport = false
                     multiPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                }
-                HomeActionRow(Icons.Filled.List, I18n.Home.chooseFitsRaw) {
-                    chooseImport = false
-                    docPicker.launch(arrayOf("*/*"))
                 }
                 Spacer(Modifier.height(24.dp))
             }
@@ -224,9 +222,9 @@ fun HomeScreen(
             }
             Spacer(Modifier.height(StarCamDimens.md))
 
-            // ── 相册选择：原图模式优先（保留拍摄参数）──
+            // ── 统一文件导入：照片 / RAW / FITS 可以混合选择 ──
             FilledTonalButton(
-                onClick = { chooseImport = true },
+                onClick = { docPicker.launch(arrayOf("*/*")) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(StarCamDimens.buttonHeight),
@@ -235,6 +233,13 @@ fun HomeScreen(
                 Spacer(Modifier.size(StarCamDimens.sm))
                 Text(I18n.Home.importPhotos, style = MaterialTheme.typography.labelLarge)
             }
+            Text(
+                I18n.Home.supportedFormats,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            TextButton(onClick = { chooseImport = true }) { Text(I18n.Home.moreImportMethods) }
 
             Spacer(Modifier.height(StarCamDimens.sectionGap))
 

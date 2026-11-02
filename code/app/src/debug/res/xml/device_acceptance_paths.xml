@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 仅供 Debug 测试生成的夹具，不暴露其他应用文件。 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="acceptance" path="device-acceptance/" />
+</paths>

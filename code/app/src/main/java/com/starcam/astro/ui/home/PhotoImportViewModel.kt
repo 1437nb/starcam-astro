@@ -26,6 +26,7 @@ data class PhotoImportState(
     val failed: Int = 0,
     val finished: Boolean = false,
     val paths: List<String> = emptyList(),
+    val overLimit: Boolean = false,
 )
 
 /** Import survives configuration changes; content-provider reads never run in the picker callback. */
@@ -34,8 +35,12 @@ class PhotoImportViewModel(application: Application) : AndroidViewModel(applicat
         private set
     private var task: Job? = null
 
-    fun importPhotos(uris: List<Uri>, keepName: Boolean) {
+    fun importPhotos(uris: List<Uri>) {
         if (uris.isEmpty() || state.running) return
+        if (uris.size > 9) {
+            state = PhotoImportState(finished = true, overLimit = true)
+            return
+        }
         val inputs = uris.toList()
         state = PhotoImportState(running = true, total = inputs.size)
         task = viewModelScope.launch {
@@ -47,11 +52,7 @@ class PhotoImportViewModel(application: Application) : AndroidViewModel(applicat
                     val file = withContext(Dispatchers.IO) {
                         val jobContext = currentCoroutineContext()
                         val prefix = "import_${batchId}_$index"
-                        val imported = if (keepName) {
-                            ImageUtils.copyUriToCacheKeepingName(getApplication(), uri, prefix) { jobContext.ensureActive() }
-                        } else {
-                            ImageUtils.copyUriToCache(getApplication(), uri, "$prefix.jpg") { jobContext.ensureActive() }
-                        }
+                        val imported = ImageUtils.copyUriToCacheKeepingName(getApplication(), uri, prefix) { jobContext.ensureActive() }
                         imported?.also { ownedFiles.add(it) }
                     }
                     state = state.copy(

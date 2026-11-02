@@ -5,14 +5,16 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-11-02（v1.5.93 官方签名 Release 本机构建 / 验签 / 归档完成，未推送；实体手机仍待测，见 docs/116、117）
-**当前基线**：v1.5.93（versionCode 113，§0.132 原图尺寸导出；最近公开 Release 仍为 v1.5.92 / tag `v1.5.92`）
+**最后更新**：2026-11-03（v1.5.94 照片 / RAW / FITS 统一导入开发完成，Debug / lint 与 60 项模拟器验收通过；见 docs/118）
+**当前基线**：v1.5.94（versionCode 114，§0.133 统一导入；本地最近签名 Release 为 v1.5.93，最近公开 Release 仍为 v1.5.92 / tag `v1.5.92`）
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
 **构建环境**：本机拥有全套高配构建环境，Kotlin 编译、单元测试与 APK 打包均在本机完成。现有最新本机测试报告为 46 类 / 336 项、0 失败 / 0 错误 / 0 跳过（`-PskipPhotoTests=true` 口径，不含依赖私有素材的回归台；随包公开演示照片回归 12/12 真解）。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
 
 ---
 
 ## 一、下一步（建议优先级，待开发者拍板）
+
+> **2026-11-03 照片 / RAW / FITS 已统一导入**：按「把 raw 和 fits 识别和别的合并」，首页主导入直接进入系统文件选择器，普通照片 / RAW / FITS 可混选，最多 9 个；原图相册与兼容相册保留在备用菜单。统一保留扩展名，超限整批拒绝。Android 9 / 14 各 21 项 Android 功能 + 9 项 UI 通过，共 60 项；Debug / 测试 APK 构建与 lint 通过。完整范围、证据和实体手机清单见 docs/118。下一步真实 JPEG / RAW / FITS 混选和厂商文件提供方复测；本轮只构建 Debug，v1.5.94 Release / 推送仍按后续明确指令执行。
 
 > **2026-11-02 v1.5.93 Release 已构建**：按「跑 release」完成本地 R8 官方签名 APK，assembleRelease 与 lintVitalRelease 通过（3m 53s），16,657,794 字节，与 v1.5.92 同签名可覆盖升级，归档 `apk/StarCam-v1.5.93-original-resolution-export-release.apk` 及 `.apk.sha256`。SHA-256 `F2FA632C23B3BFF551CDCFEDDFD4B14BB40724D5CA1DB8C898142545E53F75FC`。未推送或发布 GitHub；下一步实体手机运行验收，源码推送 / 公开发布按后续明确指令执行。
 
@@ -114,6 +116,11 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-11-03（§0.133 / v1.5.94：照片、RAW、FITS 统一导入）**：
+  - 首页导入按钮直接打开 SAF，移除格式专用入口；保留相册原图和兼容模式备用方式。导入统一保留文件名与扩展名，单选 / 多选继续复用既有识别结果流程；超过 9 个文件明确拒绝整批。
+  - Android 9 / 14 各通过 21 项功能、9 项 UI，共 60 项；新增真实 content URI 混合复制 / 解码及超限拒绝测试。Debug / 测试 APK 构建通过，lint 0 Error / Fatal、9 Warning、9 Information。证据归档 docs/compatibility/20261103-unified-import-*.json，报告 docs/118。
+  - 初次 API 28 横屏读无障碍树失败，主机驱动增加短暂重试后完整复测通过，原失败记录保留。本轮未重跑 JVM 单测、未构建新 Release、未推送；真实手机与品牌 RAW / FITS 样本仍待验证。
 
 - **2026-11-02（v1.5.93 本地签名 Release）**：
   - 在功能 / 模拟器验收基线 `bd7b2a8` 上执行本机 assembleRelease（2 GiB 堆、offline、R8），BUILD SUCCESSFUL in 3m 53s，lintVitalRelease 通过；版本保持 1.5.93 / 113 / original-resolution-export。

@@ -38,11 +38,14 @@ class Device:
         return r.stdout if binary else r.stdout.decode("utf-8", "replace")
 
     def hierarchy(self):
-        raw = self.run("exec-out", "uiautomator", "dump", "/dev/tty", timeout=30)
-        start, end = raw.find("<?xml"), raw.rfind("</hierarchy>")
-        if start < 0 or end < 0:
-            raise RuntimeError("UI hierarchy unavailable")
-        return ET.fromstring(raw[start:end + len("</hierarchy>")])
+        # 旋转后 DocumentsUI / Compose 重建无障碍树时，API 28 可能短暂返回空根节点。
+        for _ in range(4):
+            raw = self.run("exec-out", "uiautomator", "dump", "/dev/tty", timeout=30)
+            start, end = raw.find("<?xml"), raw.rfind("</hierarchy>")
+            if start >= 0 and end >= 0:
+                return ET.fromstring(raw[start:end + len("</hierarchy>")])
+            time.sleep(.4)
+        raise RuntimeError("UI hierarchy unavailable: " + raw[-160:])
 
     @staticmethod
     def labels(tree):
@@ -110,6 +113,8 @@ def ui_smoke(device):
 
     settings = {key: device.run("shell", "settings", "get", "system", key).strip() for key in ("font_scale", "accelerometer_rotation", "user_rotation")}
     try:
+        # 每轮从首页开始，不清除应用数据；批量返回仍在同一轮内检验。
+        device.run("shell", "am", "force-stop", PACKAGE)
         device.run("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity")
         def home():
             device.wait("Take Photo", "拍照认星")
@@ -118,11 +123,16 @@ def ui_smoke(device):
         record("home-primary-actions", home)
         def importer():
             device.tap("Import Photo", "导入照片")
-            device.wait("Choose an import method", "选择导入方式")
-            image = device.screenshot("import-methods")
+            # 主入口直接打开系统 DocumentsUI，不再要求先选择文件格式。
+            device.wait("Recent", "最近", "Downloads", "下载")
+            tree = device.hierarchy()
+            if not any("documentsui" in node.attrib.get("package", "") for node in tree.iter("node")):
+                raise AssertionError("Unified import did not open the system document picker")
+            image = device.screenshot("unified-file-picker")
             device.back()
+            device.wait("Take Photo", "拍照认星")
             return image
-        record("import-dialog-and-return", importer)
+        record("unified-file-picker-and-return", importer)
         def demo():
             device.tap("Offline Demo", "离线演示")
             device.tap("Random", "随机")
@@ -157,9 +167,9 @@ def ui_smoke(device):
         def large_font():
             device.run("shell", "settings", "put", "system", "font_scale", "1.3")
             time.sleep(1)
-            device.scroll_to("Import Photo", "导入照片")
-            device.tap("Import Photo", "导入照片")
-            device.wait("Choose an import method", "选择导入方式")
+            device.scroll_to("More methods", "更多方式")
+            device.tap("More methods", "更多方式")
+            device.wait("More import methods", "更多导入方式")
             image = device.screenshot("import-large-font")
             device.back()
             return image

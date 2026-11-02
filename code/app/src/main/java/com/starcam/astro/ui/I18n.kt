@@ -27,7 +27,10 @@ object I18n {
     // ==================== 主页 (HomeScreen) ====================
     object Home {
         val importPhotos: String get() = if (isEn) "Import Photo" else "导入照片"
-        val importTitle: String get() = if (isEn) "Choose an import method" else "选择导入方式"
+        val importTitle: String get() = if (isEn) "More import methods" else "更多导入方式"
+        val moreImportMethods: String get() = if (isEn) "Choose from gallery / More methods" else "从相册选择 / 更多方式"
+        val supportedFormats: String get() = if (isEn) "JPG / PNG / RAW / FITS · Select up to 9 files together" else "支持 JPG / PNG / RAW / FITS，可混合选择，最多 9 张"
+        val importLimit: String get() = if (isEn) "Select up to 9 files at a time. Nothing was imported." else "每次最多选择 9 个文件，本次未导入，请重新选择。"
         val importHint: String get() = if (isEn) "Original photos preserve shooting information. Use the system picker if access is restricted." else "原图模式可保留拍摄参数；访问受限时可使用系统相册。"
         val importing: String get() = if (isEn) "Importing photos" else "正在导入照片"
         fun importProgress(done: Int, total: Int): String = if (isEn) "$done of $total processed" else "已处理 $done / $total 张"
@@ -35,7 +38,6 @@ object I18n {
         val takePhoto: String get() = if (isEn) "Take Photo" else "拍照认星"
         val chooseGalleryOriginal: String get() = if (isEn) "Choose from Gallery (Original Photo)" else "从相册选择（原图·保留拍摄参数）"
         val chooseGalleryCompat: String get() = if (isEn) "System Gallery (Compatible Mode)" else "系统相册（兼容模式·位置可能被隐藏）"
-        val chooseFitsRaw: String get() = if (isEn) "FITS / Camera RAW File" else "FITS / 相机 RAW 文件"
         val offlineDemo: String get() = if (isEn) "Offline Demo (Built-in Photos)" else "离线演示（内置真实星空照片）"
         val history: String get() = if (isEn) "Recognition History" else "识别历史"
         val settings: String get() = if (isEn) "Settings (API Key)" else "设置（API Key）"
