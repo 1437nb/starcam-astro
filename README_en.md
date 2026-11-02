@@ -12,7 +12,7 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 ## Download
 
-**Local signed build v1.5.92 (versionCode 112, §0.131)** lets you open each completed batch photo in the full result viewer, reuse its solution, select layers, and export only the photos you choose. Batch solving no longer saves all annotated photos automatically. Debug and signed Release builds are available locally; not published publicly. See the [validation checklist](docs/114-验证报告增补-§0.131-批量逐张查看与手动导出v1.5.92.md).
+**Local signed build v1.5.92 (versionCode 112, §0.131)** lets you open each completed batch photo in the full result viewer, reuse its solution, select layers, and export only the photos you choose. Batch solving no longer saves all annotated photos automatically. Debug and signed Release builds are available locally, and source is synced to GitHub main; no hosted Release or APK download has been published for this version. See the [validation checklist](docs/114-验证报告增补-§0.131-批量逐张查看与手动导出v1.5.92.md).
 
 **Local optimization build v1.5.91 (versionCode 111, §0.130)** adds a unified import panel, background copying with progress and cancellation, clearer offline status, solving phases and elapsed time, shared grayscale preprocessing, an 8 MiB thumbnail cache, and reusable AR label layout buffers. Upload deduplication and server validation are also improved. This is a local delivery; the public download below remains the published build. See the [validation report](docs/113-验证报告增补-§0.130-导入与识别体验性能优化v1.5.91.md) for scope and verification.
 
