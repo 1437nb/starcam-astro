@@ -1,5 +1,10 @@
 package com.starcam.astro.ui.batch
 
+import android.app.Activity
+import android.app.Application
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,8 +13,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
@@ -22,172 +29,71 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import com.starcam.astro.astro.OverlayRenderer
-import com.starcam.astro.data.HistoryStore
 import com.starcam.astro.data.SettingsRepository
-import com.starcam.astro.astro.StarSolver
-import com.starcam.astro.util.ImageUtils
-import com.starcam.astro.util.LocationHelper
+import com.starcam.astro.ui.I18n
+import com.starcam.astro.ui.result.ResultScreen
+import com.starcam.astro.util.ThumbnailCache
 import java.io.File
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 
-/**
- * 批量识别页：多选照片 → 逐张识别 → 叠加渲染 → 自动保存到相册
- * （Pictures/StarCam/），完成后汇总。求解引擎非线程安全，严格串行处理。
- */
+/** 批量完成后逐张查看，手动选择图层和导出；列表与求解结果保留在原批次。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BatchScreen(
     paths: List<String>,
+    sessionId: String,
     settings: SettingsRepository,
     onBack: () -> Unit,
+    onRetake: () -> Unit,
+    viewModel: BatchViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        key = "batch-$sessionId",
+        factory = BatchViewModel.factory(LocalContext.current.applicationContext as Application),
+    ),
 ) {
     val context = LocalContext.current
-    // status: 0=排队 1=识别中 2=已导出 3=失败 4=已识别·未导出（P0-2.2 起）
-    var states by remember { mutableStateOf(paths.map { 0 to "" }) }
-    var counts by remember { mutableStateOf(BatchCounts(0, 0, 0)) }
-    var finished by remember { mutableStateOf(false) }
-    // P0-2.1（外部审计 2026-10-06）：原为 SimpleDateFormat —— **非线程安全**（内部
-    // Calendar 是可变状态），而下方两个 worker 并发调用 format()。出错后果：文件名
-    // 时间错乱，甚至 ArrayIndexOutOfBoundsException 被外层 catch 吞掉 → 静默丢条目。
-    // DateTimeFormatter 不可变、线程安全（先例 data/SolveLogStore.kt §0.81）。
-    // 文件名保持 `_$i`（任务序号，批内唯一，防同秒撞名）。
-    val fmt = remember { DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss", Locale.US) }
-
-    LaunchedEffect(Unit) {
-        // §0.96 批量识别改为**并行**（并发度按内存定，见下）。可行性已逐项核实：
-        //  - native 求解器每次调用自带 job（calloc，不是全局静态）、索引加载持
-        //    g_index_mutex 且**在求解前释放**；§0.67 当年专门做过 3 线程并发求解验证；
-        //  - 本地匹配器有 solveLock 整段互斥 —— 并发走到那一步会排队，不会互相踩
-        //    （代价是那一段不会更快）；
-        //  - 历史/统计（§0.92 起 @Synchronized）与识别日志（synchronized(this)）均已线程安全。
-        // 真正的约束是内存：每张在飞的照片峰值约 30~80MB（2200px 位图 + 求解中间数组），
-        // 故低内存设备退回串行，常规设备 2 路。
-        val tally = BatchTally()
-
-        suspend fun processOne(i: Int, path: String): BatchOutcome = try {
-                withContext(Dispatchers.IO) {
-                    // §0.81：bmp / out 都是 2200px 级位图（各约 14MB）。9 张串行处理
-                    // 若都不回收，原生堆峰值可达 100~200MB。用可变引用 + try/finally
-                    // 兜住下面所有 return 路径（读不出文件 / 未识别 / 渲染失败）。
-                    var bmpRef: android.graphics.Bitmap? = null
-                    var outRef: android.graphics.Bitmap? = null
-                    try {
-                        val bmp = ImageUtils.decodeSampledBitmap(path, 2200)
-                            ?: return@withContext BatchOutcome.ProcessingFailed("无法读取照片文件")
-                        bmpRef = bmp
-                        val result = StarSolver.solve(context, bmp, path, settings) { }
-                            ?: return@withContext BatchOutcome.SolveFailed("未能识别（亮星不足或视场不支持）")
-                        val solve = result.solve
-                        // §0.58/§0.59 太阳系天体标注：需拍摄时间 + 位置。位置优先 EXIF GPS，
-                        // 缺失时用当前定位兜底（批量导出没有逐张提示的界面，位置来源在
-                        // 单张结果页展示）
-                        val solarFallback =
-                            if (com.starcam.astro.astro.ExifPriorsReader.needsLocationFallback(path)) {
-                                runCatching { LocationHelper(context).getBestLocation() }.getOrNull()
-                                    ?.let { it.latitude to it.longitude }
-                            } else {
-                                null
-                            }
-                        val solar = com.starcam.astro.astro.ExifPriorsReader.solarSystemForPhoto(
-                            path,
-                            solarFallback,
-                        )
-                        val out = OverlayRenderer.render(bmp, solve, solarPositions = solar)
-                            ?: return@withContext BatchOutcome.ProcessingFailed("渲染失败（结果缺坐标系）")
-                        outRef = out
-                        val name = "StarCam_${LocalDateTime.now().format(fmt)}_$i.jpg"
-                        val loc = ImageUtils.saveBitmapToGallery(context, out, name)
-                        try {
-                            HistoryStore.save(
-                                context,
-                                HistoryStore.Entry.fromSolve(
-                                    timestamp = System.currentTimeMillis(),
-                                    imagePath = path,
-                                    solve = solve,
-                                    engine = "批量导出",
-                                    constellation = HistoryStore.nearestConstellationZh(
-                                        solve.raDeg, solve.decDeg,
-                                    ),
-                                ),
-                            )
-                        } catch (_: Exception) {
-                        }
-                        // P0-2.3：保存失败不再计入"已导出"——计数由 tally 按结果类型记
-                        if (loc != null) {
-                            BatchOutcome.Saved(loc)
-                        } else {
-                            BatchOutcome.SolvedButSaveFailed("已识别但保存相册失败")
-                        }
-                    } finally {
-                        bmpRef?.takeIf { !it.isRecycled }?.recycle()
-                        outRef?.takeIf { !it.isRecycled }?.recycle()
-                    }
-                }
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            BatchOutcome.ProcessingFailed("处理异常：${e.message ?: "未知错误"}")
+    val listState = rememberLazyListState()
+    var selectedIndex by rememberSaveable { mutableIntStateOf(-1) }
+    val outcomes = viewModel.outcomes
+    val counts = viewModel.counts
+    val finished = viewModel.finished
+    LaunchedEffect(viewModel) { viewModel.start(paths, settings) }
+    DisposableEffect(viewModel) {
+        onDispose {
+            if ((context as? Activity)?.isChangingConfigurations != true) viewModel.cancel()
         }
-
-        val workers = (
-            if ((context.getSystemService(android.content.Context.ACTIVITY_SERVICE)
-                    as? android.app.ActivityManager)?.isLowRamDevice == true
-            ) {
-                1
-            } else {
-                2
-            }
-            ).coerceAtMost(paths.size.coerceAtLeast(1))
-        val queue = paths.withIndex().toMutableList()
-        val lock = Any()
-        coroutineScope {
-            repeat(workers) {
-                launch(Dispatchers.IO) {
-                    while (isActive) {
-                        val next = synchronized(lock) {
-                            if (queue.isEmpty()) null else queue.removeAt(0)
-                        } ?: break
-                        val (i, path) = next
-                        withContext(Dispatchers.Main) {
-                            states = states.toMutableList().also { it[i] = 1 to "" }
-                        }
-                        val outcome = processOne(i, path)
-                        // P0-2.2：成败只看强类型结果，不再用 note 的文案前缀判断
-                        tally.record(outcome)
-                        val snapshot = tally.snapshot()
-                        withContext(Dispatchers.Main) {
-                            states = states.toMutableList().also {
-                                it[i] = outcome.statusCode() to outcome.note
-                            }
-                            counts = snapshot
-                        }
-                    }
-                }
-            }
-        }
-        counts = tally.snapshot()
-        finished = true
     }
 
+    // 详情是当前批次的子页。保持 BatchScreen 在组合中，返回不会重启批量识别。
+    if (selectedIndex in paths.indices) {
+        val solved = outcomes.getOrNull(selectedIndex) as? BatchOutcome.Solved
+        ResultScreen(
+            imagePath = paths[selectedIndex],
+            demoRegion = null,
+            cachedSolve = solved?.solve,
+            cachedEngine = solved?.engineDetail,
+            cachedDisplayPath = solved?.displayPath,
+            settings = settings,
+            onBack = { selectedIndex = -1 },
+            onRetake = onRetake,
+        )
+        return
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -206,22 +112,28 @@ fun BatchScreen(
                 .padding(padding),
         ) {
             Text(
-                com.starcam.astro.ui.I18n.Batch.summary(
-                    paths.size, counts.solved, counts.saved, counts.failed, finished,
+                I18n.Batch.reviewSummary(
+                    paths.size, counts.solved, counts.failed, finished,
                 ),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 12.dp),
             ) {
-                itemsIndexed(states) { i, (status, note) ->
+                itemsIndexed(paths) { i, path ->
+                    val outcome = outcomes.getOrNull(i)
+                    val isProcessing = i in viewModel.processing
+                    val canOpen = finished && outcome != null
+                    val note = outcome?.note.orEmpty()
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 4.dp)
+                            .clickable(enabled = canOpen) { selectedIndex = i },
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface,
                         ),
@@ -233,13 +145,22 @@ fun BatchScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            BatchThumbnail(path)
+                            Spacer(Modifier.size(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    File(paths[i]).name,
+                                    File(path).name,
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleSmall,
                                     maxLines = 1,
                                 )
+                                if (canOpen) {
+                                    Text(
+                                        if (outcome?.solved == true) I18n.Batch.viewResult else I18n.Batch.retryPhoto,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                                 if (note.isNotEmpty()) {
                                     Text(
                                         note,
@@ -249,17 +170,16 @@ fun BatchScreen(
                                 }
                             }
                             Text(
-                                when (status) {
-                                    0 -> com.starcam.astro.ui.I18n.Batch.queued
-                                    1 -> com.starcam.astro.ui.I18n.Batch.processing
-                                    2 -> com.starcam.astro.ui.I18n.Batch.exported
-                                    4 -> com.starcam.astro.ui.I18n.Batch.solvedNotExported
-                                    else -> "✗"
+                                when {
+                                    isProcessing -> I18n.Batch.processing
+                                    outcome == null -> I18n.Batch.queued
+                                    outcome.solved -> I18n.Batch.solved
+                                    else -> I18n.Batch.failed
                                 },
-                                color = when (status) {
-                                    2 -> MaterialTheme.colorScheme.primary
-                                    3 -> MaterialTheme.colorScheme.error
-                                    4 -> MaterialTheme.colorScheme.tertiary
+                                modifier = Modifier.padding(start = 8.dp),
+                                color = when {
+                                    outcome?.solved == true -> MaterialTheme.colorScheme.primary
+                                    outcome != null -> MaterialTheme.colorScheme.error
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                             )
@@ -270,7 +190,7 @@ fun BatchScreen(
                     if (finished) {
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            com.starcam.astro.ui.I18n.Batch.exportNotice,
+                            I18n.Batch.reviewNotice,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 4.dp),
@@ -283,13 +203,28 @@ fun BatchScreen(
     }
 }
 
-/**
- * 列表状态码（P0-2.2）：成败判定与文案解耦后，状态由**结果类型**决定，不再靠
- * `note` 前缀字符串。
- * 0=排队 1=识别中 2=已导出 3=失败 4=已识别·未导出（保存失败但成果可用）
- */
-private fun BatchOutcome.statusCode(): Int = when (this) {
-    is BatchOutcome.Saved -> 2
-    is BatchOutcome.SolvedButSaveFailed -> 4
-    is BatchOutcome.SolveFailed, is BatchOutcome.ProcessingFailed -> 3
+@Composable
+private fun BatchThumbnail(path: String) {
+    var bitmap by remember(path) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(path) {
+        bitmap = try {
+            ThumbnailCache.load(path, 160)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+    val modifier = Modifier.size(56.dp).clip(MaterialTheme.shapes.small)
+    val image = bitmap
+    if (image != null) {
+        Image(
+            bitmap = image.asImageBitmap(),
+            contentDescription = null,
+            modifier = modifier,
+            contentScale = ContentScale.Crop,
+        )
+    } else {
+        Spacer(modifier)
+    }
 }

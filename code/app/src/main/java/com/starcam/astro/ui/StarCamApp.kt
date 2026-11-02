@@ -136,8 +136,10 @@ fun StarCamApp(viewModel: AppViewModel = viewModel()) {
 
         is Screen.Batch -> BatchScreen(
             paths = s.paths,
+            sessionId = s.sessionId,
             settings = settings,
             onBack = { viewModel.goBack() },
+            onRetake = { viewModel.navigate(Screen.Camera) },
         )
         }
     }

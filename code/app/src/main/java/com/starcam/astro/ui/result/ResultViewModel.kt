@@ -67,8 +67,9 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         cachedSolve: SolveResult?,
         cachedEngine: String?,
         settings: SettingsRepository,
+        cachedDisplayPath: String? = null,
     ) {
-        val key = "$imagePath-${demoRegion?.name}-${cachedSolve != null}"
+        val key = "$imagePath-${demoRegion?.name}-$cachedSolve-$cachedDisplayPath"
         if (key == lastInitiatedKey && solveJob != null && solveJob?.isActive == true) {
             return
         }
@@ -76,7 +77,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
         lastInitiatedKey = key
-        startSolve(imagePath, demoRegion, cachedSolve, cachedEngine, settings)
+        startSolve(imagePath, demoRegion, cachedSolve, cachedEngine, settings, cachedDisplayPath)
     }
 
     private fun startSolve(
@@ -85,6 +86,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         cachedSolve: SolveResult?,
         cachedEngine: String?,
         settings: SettingsRepository,
+        cachedDisplayPath: String? = null,
     ) {
         solveToken?.cancel()
         solveJob?.cancel()
@@ -100,7 +102,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 if (cachedSolve != null) {
                     val display = withContext(Dispatchers.IO) {
-                        ImageUtils.decodeSampledBitmap(imagePath, 2200)
+                        ImageUtils.decodeSampledBitmap(cachedDisplayPath ?: imagePath, 2200)
                     }
                     if (display == null) {
                         state = ResultUiState.Error(I18n.Result.cannotReadImage)

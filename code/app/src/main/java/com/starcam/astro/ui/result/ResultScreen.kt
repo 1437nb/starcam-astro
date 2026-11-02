@@ -199,6 +199,7 @@ fun ResultScreen(
     demoRegion: SkyRegion?,
     cachedSolve: SolveResult? = null,
     cachedEngine: String? = null,
+    cachedDisplayPath: String? = null,
     settings: SettingsRepository,
     onBack: () -> Unit,
     onRetake: () -> Unit,
@@ -213,18 +214,19 @@ fun ResultScreen(
         onBack()
     }
 
-    androidx.compose.runtime.DisposableEffect(imagePath, demoRegion, cachedSolve) {
+    androidx.compose.runtime.DisposableEffect(imagePath, demoRegion, cachedSolve, cachedDisplayPath) {
         onDispose {
             viewModel.onLeaveScreen()
         }
     }
 
-    LaunchedEffect(imagePath, demoRegion, cachedSolve) {
+    LaunchedEffect(imagePath, demoRegion, cachedSolve, cachedDisplayPath) {
         viewModel.initiateSolve(
             imagePath = imagePath,
             demoRegion = demoRegion,
             cachedSolve = cachedSolve,
             cachedEngine = cachedEngine,
+            cachedDisplayPath = cachedDisplayPath,
             settings = settings,
         )
     }

@@ -1,5 +1,7 @@
 package com.starcam.astro.ui.batch
 
+import com.starcam.astro.astro.SolveResult
+
 /**
  * 单张批处理的**强类型结果**（P0-2.2，外部审计 2026-10-06）。
  *
@@ -9,6 +11,7 @@ package com.starcam.astro.ui.batch
  * [note] 只负责显示，不参与任何判断。
  *
  * 拆分依据是**失败发生在哪一步**（决定用户该做什么）：
+ *  - [Solved]：仅识别完成，用户在结果页自行选择导出（§0.131 起的默认流程）；
  *  - [Saved]：识别 + 存相册都成功；
  *  - [SolvedButSaveFailed]：识别成功、存相册失败（成果在，但没落到相册）；
  *  - [SolveFailed]：识别本身没解出来（亮星不足 / 视场不支持）；
@@ -17,6 +20,15 @@ package com.starcam.astro.ui.batch
 sealed interface BatchOutcome {
     /** 展示文案。**仅供界面显示**，不得用于控制流判断。 */
     val note: String
+
+    /** 识别完成，等待用户逐张查看和选择导出；只保存定标数据，不持有大位图。 */
+    data class Solved(
+        val solve: SolveResult,
+        val engineDetail: String,
+        /** 在线结果的像素基准副本；原图仍用于读取拍摄时间与位置。 */
+        val displayPath: String? = null,
+        override val note: String = "",
+    ) : BatchOutcome
 
     /** 已识别且已导出到相册。 */
     data class Saved(override val note: String) : BatchOutcome
@@ -30,8 +42,8 @@ sealed interface BatchOutcome {
     /** 处理失败（解码 / 渲染 / 未知异常）。 */
     data class ProcessingFailed(override val note: String) : BatchOutcome
 
-    /** 是否识别成功（[Saved] 与 [SolvedButSaveFailed] 都算）。 */
-    val solved: Boolean get() = this is Saved || this is SolvedButSaveFailed
+    /** 是否识别成功（待用户导出、已导出与保存失败均算）。 */
+    val solved: Boolean get() = this is Solved || this is Saved || this is SolvedButSaveFailed
 
     /** 是否已成功导出到相册。 */
     val exported: Boolean get() = this is Saved
@@ -61,6 +73,7 @@ class BatchTally {
                 savedC.incrementAndGet()
             }
 
+            is BatchOutcome.Solved,
             is BatchOutcome.SolvedButSaveFailed -> solvedC.incrementAndGet()
             is BatchOutcome.SolveFailed,
             is BatchOutcome.ProcessingFailed,

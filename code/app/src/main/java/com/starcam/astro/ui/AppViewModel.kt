@@ -21,8 +21,11 @@ sealed interface Screen {
     /** 离线演示（§0.39）：内置 8 张已验证可离线识别的真实星空照片 */
     data object OfflineDemo : Screen
 
-    /** 批量识别导出页；paths 为缓存目录中的照片路径列表 */
-    data class Batch(val paths: List<String>) : Screen
+    /** 批量识别页；独立会话标识确保重新选择同组照片仍启动新批次。 */
+    data class Batch(
+        val paths: List<String>,
+        val sessionId: String = java.util.UUID.randomUUID().toString(),
+    ) : Screen
 
     /** 识别结果页；demoRegion 非空表示离线演示模式；cachedSolve 非空直接呈现历史识别结果（免重复求解） */
     data class Result(

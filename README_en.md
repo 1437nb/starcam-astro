@@ -12,6 +12,8 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 ## Download
 
+**Local development build v1.5.92 (versionCode 112, §0.131)** lets you open each completed batch photo in the full result viewer, reuse its solution, select layers, and export only the photos you choose. Batch solving no longer saves all annotated photos automatically. Debug build only; see the [validation checklist](docs/114-验证报告增补-§0.131-批量逐张查看与手动导出v1.5.92.md).
+
 **Local optimization build v1.5.91 (versionCode 111, §0.130)** adds a unified import panel, background copying with progress and cancellation, clearer offline status, solving phases and elapsed time, shared grayscale preprocessing, an 8 MiB thumbnail cache, and reusable AR label layout buffers. Upload deduplication and server validation are also improved. This is a local delivery; the public download below remains the published build. See the [validation report](docs/113-验证报告增补-§0.130-导入与识别体验性能优化v1.5.91.md) for scope and verification.
 
 Latest release: **[v1.5.87](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.87)**
@@ -39,7 +41,7 @@ Latest release: **[v1.5.87](https://github.com/1437nb/starcam-astro/releases/tag
 ### 2. Rich Celestial Overlays & Clean Export
 - **Complete Sky Layers**: Official 88 modern constellations (aligned with Stellarium v23.4), 3,800+ traditional Chinese and Western proper star names, 44 Messier deep-sky objects, and **real-time Sun, Moon, and planet positions** computed from EXIF timestamp + GPS (with topocentric parallax correction);
 - **Smart De-overlap & Interactive Cards**: Automatically suppresses overlapping star labels inside Messier objects (e.g., Alcyone in M45, Hatysa in M42) and clamps edge labels inside safe inward quadrants; tap any object for a bilingual info card;
-- **Flexible Export & Batch Mode**: Toggle individual layers via FilterChips, compare with the original photo in the full-screen zoomable viewer, export either `📐 Lines Only` or custom-annotated images, and batch-solve up to 9 photos concurrently.
+- **Flexible Export & Batch Mode**: Toggle individual layers via FilterChips, compare with the original photo in the full-screen zoomable viewer, export either `📐 Lines Only` or custom-annotated images, and batch-solve up to 9 photos concurrently, then open each result and export manually.
 
 ### 3. AR Live Star Map & Target Navigation
 - **Zero-Latency Sensor Fusion**: Driven by rotation vector + gyroscope complementary filtering for jitter-free panning, including an **All-Sky Mode** (renders the lower hemisphere and an 8-point horizon compass when pointing downward);
@@ -63,8 +65,8 @@ Latest release: **[v1.5.87](https://github.com/1437nb/starcam-astro/releases/tag
 │       ├── main/assets/offline_photos/      # 12 public night-sky demo photos
 │       ├── main/jniLibs/arm64-v8a/          # Prebuilt libstellar_solver.so native solver
 │       ├── main/cpp/astro_bridge.c          # JNI bridge source
-│       └── test/java/com/starcam/astro/     # Standard suite: 43 classes / 319 tests, including public-photo truth checks
-├── docs/                   # Architecture & 100+ validation reports (through §0.130)
+│       └── test/java/com/starcam/astro/     # Standard suite: 44 classes / 323 tests, including public-photo truth checks
+├── docs/                   # Architecture & 100+ validation reports (through §0.131)
 ├── tools/                  # Catalog generators, truth calibration & release scripts
 └── LICENSE                 # GNU General Public License v2.0
 ```

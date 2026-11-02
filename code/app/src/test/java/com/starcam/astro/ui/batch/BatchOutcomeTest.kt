@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.starcam.astro.astro.SolveResult
+import com.starcam.astro.astro.WcsTransform
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -19,6 +21,35 @@ import java.util.concurrent.TimeUnit
  *     不计入 saved；旧实现无条件自增，汇总会说"成功并导出 N 张"的假话。
  */
 class BatchOutcomeTest {
+
+    private fun pendingExport(displayPath: String? = null): BatchOutcome.Solved {
+        val solve = SolveResult(
+            raDeg = 120.0, decDeg = 30.0, pixScaleArcsec = 60.0,
+            orientationDeg = 12.0, parity = -1, imageWidth = 1500, imageHeight = 2200,
+            wcs = WcsTransform(750.5, 1100.5, 120.0, 30.0, -0.01, 0.002, 0.002, 0.01),
+        )
+        return BatchOutcome.Solved(solve, "Offline · 25 matches", displayPath)
+    }
+
+    @Test
+    fun reviewedPhotoIsSolvedWithoutBeingExported() {
+        val photo = pendingExport()
+        val tally = BatchTally()
+        tally.record(photo)
+        assertTrue(photo.solved)
+        assertFalse("识别完成不代表用户已选择保存", photo.exported)
+        assertEquals(BatchCounts(1, 0, 0), tally.snapshot())
+    }
+
+    @Test
+    fun manualBatchCountsSuccessAndFailureWithoutExports() {
+        val tally = BatchTally()
+        repeat(7) { tally.record(pendingExport()) }
+        tally.record(solveFailed())
+        tally.record(processingFailed())
+        assertEquals(BatchCounts(7, 0, 2), tally.snapshot())
+        assertEquals(9, tally.done)
+    }
 
     private fun saved(note: String = "Pictures/StarCam/a.jpg") = BatchOutcome.Saved(note)
     private fun saveFailed(note: String = "已识别但保存相册失败") = BatchOutcome.SolvedButSaveFailed(note)

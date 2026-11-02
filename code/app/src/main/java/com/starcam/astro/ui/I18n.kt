@@ -214,6 +214,18 @@ object I18n {
 
     // ==================== 批量识别 (BatchScreen) ====================
     object Batch {
+        val solved: String get() = if (isEn) "✓ Solved" else "✓ 已识别"
+        val viewResult: String get() = if (isEn) "View result and choose export ›" else "查看结果 / 选择导出 ›"
+        val retryPhoto: String get() = if (isEn) "Open and retry this photo ›" else "打开并单独重试 ›"
+        val failed: String get() = if (isEn) "Failed" else "识别失败"
+        val solveFailed: String get() = if (isEn) "Not solved (too few stars or unsupported field)" else "未能识别（亮星不足或视场不支持）"
+        fun processingFailed(message: String?): String = if (isEn) "Processing error: ${message ?: "Unknown error"}" else "处理异常：${message ?: "未知错误"}"
+        val reviewNotice: String get() = if (isEn) "Tap any photo to view it. Solved photos open directly; failed photos can be retried individually. Choose layers and save only the photos you want. Nothing is exported automatically." else "点击任意照片查看：成功照片直接打开结果，失败照片可单独重试。进入后可选择图层并手动保存标注图；不会自动导出到相册。"
+        fun reviewSummary(total: Int, solved: Int, failed: Int, finished: Boolean): String = if (isEn) {
+            "Selected $total · Solved $solved · Failed $failed" + if (finished) " · Tap a photo to view" else " · Processing…"
+        } else {
+            "已选 $total 张 · 识别成功 $solved 张 · 失败 $failed 张" + if (finished) " · 点击照片查看" else " · 处理中…"
+        }
         val title: String get() = if (isEn) "Batch Solving" else "批量识别"
         val queued: String get() = if (isEn) "Queued" else "排队"
         val processing: String get() = if (isEn) "Solving…" else "识别中…"
