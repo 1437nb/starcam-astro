@@ -12,7 +12,7 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 ## Download
 
-**Local development build v1.5.94 (versionCode 114, §0.133)** unifies normal images, RAW and FITS under Import Photo, with mixed selection of up to 9 files. Original-gallery and compatible-gallery modes remain under Choose from gallery / More methods. Debug validation is complete; this version has no Release build yet. See the [unified import report](docs/118-验证报告增补-§0.133-照片RAW与FITS统一导入v1.5.94.md).
+**Local signed build v1.5.94 (versionCode 114, §0.133)** unifies normal images, RAW and FITS under Import Photo, with mixed selection of up to 9 files. Original-gallery and compatible-gallery modes remain under Choose from gallery / More methods. Its official signed Release APK has been built and verified locally with the same certificate as v1.5.93, allowing in-place upgrades. It has not been published. See the [unified import and build report](docs/118-验证报告增补-§0.133-照片RAW与FITS统一导入v1.5.94.md).
 
 **Local signed build v1.5.93 (versionCode 113, §0.132)** adds preview-size or original-size annotated export; RAW uses the full embedded JPEG preview. Its official signed Release APK was built and verified locally but has not been published. See the [scope and build verification](docs/116-验证报告增补-§0.132-原图尺寸导出v1.5.93.md). The public download remains v1.5.92.
 

@@ -5,14 +5,16 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-11-03（v1.5.94 完整本机 JVM 补跑 56 类 / 357 项全通过、无跳过；另有 60 项模拟器验收通过，见 docs/118）
-**当前基线**：v1.5.94（versionCode 114，§0.133 统一导入；本地最近签名 Release 为 v1.5.93，最近公开 Release 仍为 v1.5.92 / tag `v1.5.92`）
+**最后更新**：2026-11-03（v1.5.94 官方签名 Release 构建 / 验签 / 归档完成；357 项 JVM 与 60 项模拟器验收通过记录见 docs/118）
+**当前基线**：v1.5.94（versionCode 114，§0.133 统一导入；本地最近签名 Release 为 v1.5.94，最近公开 Release 仍为 v1.5.92 / tag `v1.5.92`）
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
 **构建环境**：本机拥有全套高配构建环境，Kotlin 编译、单元测试与 APK 打包均在本机完成。最新完整 JVM 报告为 56 类 / 357 项、0 失败 / 0 错误 / 0 跳过（不设置 skipPhotoTests，含 46 类 / 336 项常规套件和 10 类 / 21 项本机素材回归）；公开 JPEG 与本机 gray12 均 12/12 真解。窄场观察台 12 解出 / 0 错解 / 20 未解出，测试通过不代表所有素材均能解出。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
 
 ---
 
 ## 一、下一步（建议优先级，待开发者拍板）
+
+> **2026-11-03 v1.5.94 Release 已构建**：按「跑 release」完成本机 R8 官方签名 APK，assembleRelease 与 lintVitalRelease 通过（2m 33s），16,657,790 字节，与 v1.5.93 同签名可覆盖升级。归档 `apk/StarCam-v1.5.94-unified-photo-import-release.apk` 和 `.apk.sha256`，SHA-256 `C3178E75E79B726CAF8244A29B594EDAF1200C5492EE34AF0D5507696E1DC8BD`。包内容、Debug 测试入口排除、索引和 native 对齐已校验。未推送 / 发布 GitHub；下一步实体手机运行验收，推送 / 公开发布按后续明确指令执行。
 
 > **2026-11-03 已补跑完整 JVM 回归**：首轮统一导入交付只跑了模拟器用例，开发者追问后已补齐无 skipPhotoTests 的完整任务，`--rerun-tasks --no-build-cache --offline`，7m 41s、56 类 / 357 项、0 失败 / 错误 / 跳过；其中常规 336 项和本机照片 / FITS / 窄场 21 项全部执行。公开 JPEG 与 gray12 均 12/12，窄场观察仍有 20/32 未解出。逐类计数见 docs/compatibility/20261103-v1.5.94-jvm-full.json，范围见 docs/118。下一步实体手机及真实混合格式选择器验收；未构建 v1.5.94 Release、未推送。
 
@@ -118,6 +120,11 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-11-03（v1.5.94 本地签名 Release）**：
+  - 基线 `a6908a8`，本机 assembleRelease（2 GiB 堆、offline、R8），BUILD SUCCESSFUL in 2m 33s，lintVitalRelease 通过；版本保持 1.5.94 / 114 / unified-photo-import。
+  - 官方证书 CN=StarCam，与 v1.5.93 同签名；APK 16,657,790 字节，归档及校验文件见上，构建输出与归档一致。8 个离线 FITS 索引逐字节匹配，非 debuggable；无 Debug / androidTest Activity、验收 Provider / 路径配置及私人素材，native ZIP / 求解器 ELF 对齐和 zipalign 通过。
+  - 同步中英文 README 与 docs/118，凭据检查通过；既有 357 项完整 JVM、60 项模拟器用例不重复计为新执行。未推送或公开发布，实体手机与本版 Release 运行验收仍待执行。
 
 - **2026-11-03（v1.5.94 完整本机 JVM 测试补跑）**：
   - 在 `91988a7` 上强制重编并执行完整 testDebugUnitTest，不设置 skipPhotoTests；BUILD SUCCESSFUL in 7m 41s，56 类 / 357 项、0 失败 / 错误 / 跳过，包含常规 336 项及全部 10 类本机照片 / FITS / 窄场回归台。
