@@ -14,7 +14,7 @@
 
 ## 一、下一步（建议优先级，待开发者拍板）
 
-> **2026-11-03 F-Droid 上架准备完成（v1.5.96 / §0.135）**：按开发者拍板将项目许可证升级为 **GPL-3.0-or-later**（解决原生库静态链接 GSL 的 GPL-3 传染性及 Apache-2.0 依赖兼容性），新增 `THIRD_PARTY_NOTICES.md` 明确引擎、星表、索引与 12 张作者实拍演示照片许可；`build.gradle.kts` 关闭 `dependenciesInfo` 与 `vcsInfo`；`tools/build_native.py` 支持 Linux / Windows 跨平台与系统 CMake / Ninja 及 Python 3.10+ 安全解压；补齐 `fastlane/metadata/android/{zh-CN,en-US}/` 与 `docs/fdroid/com.starcam.astro.yml` 配方。本机跨平台脚本重编 `.so` 与仓库逐字节一致，49 类 / 352 项常规单测、Debug APK 构建与凭据检查全部通过（详见 docs/120）。本机 WSL 因当前非管理员会话无法启用 Windows 可选功能，需管理员终端运行一次 `wsl --install`。下一步待开发者明确授权后推送 GitHub 并打 `v1.5.96` tag，即可向 `fdroiddata` 提交 MR。
+> **2026-11-03 F-Droid 上架准备完成（v1.5.96 / §0.135）**：按开发者拍板将项目许可证升级为 **GPL-3.0-or-later**（解决原生库静态链接 GSL 的 GPL-3 传染性及 Apache-2.0 依赖兼容性），新增 `THIRD_PARTY_NOTICES.md` 明确引擎、星表、索引与 12 张作者实拍演示照片许可；`build.gradle.kts` 关闭 `dependenciesInfo` 与 `vcsInfo`；`tools/build_native.py` 支持 Linux / Windows 跨平台与系统 CMake 3.22~4.x / Ninja 及 Python 3.10+ 安全解压；补齐 `fastlane/metadata/android/{zh-CN,en-US}/` 与 `docs/fdroid/com.starcam.astro.yml` 配方。本机 Windows 与 WSL2 Ubuntu 26.04（CMake 4.2.3 + Linux NDK r26d）双端从源码重编 `.so` 均一次通过全部 ELF / 16 KB 对齐 / 6 导出符号断言；49 类 / 352 项常规单测、Debug APK 构建与凭据检查全部通过（详见 docs/120）。下一步待开发者明确授权后推送 GitHub 并打 `v1.5.96` tag，即可向 `fdroiddata` 提交 MR。
 
 > **2026-11-03 稳定性收尾完成（v1.5.95 / §0.134）**：取消与预算贯穿、流式大 FITS / RAW 内存提示、导入隔离、失败项重试回写、在线缓存方向、竞速报告与共享位图收尾已修复；缺失原生依赖已由固定源码本机 NDK / CMake 构建替代。原生接受门槛、真实 CRPIX / FITS 方向与灰度诊断写盘问题已按实测修复。完整 JVM 59 类 / 373 项、零失败 / 错误 / 跳过；两系统各跑 native 与 JVM 回退，共 152 项功能 / UI 执行通过；C 桥 7 场景 / 28 断言通过，lintDebug 0 错误 / 9 警告。默认 Debug 已恢复仅 arm64 求解库。下一步 ARM 真机相机 / AR、取消与大图压力验收，清单见 docs/119；本轮没有构建 Release 或推送。
 
@@ -128,7 +128,7 @@
 - **2026-11-03（§0.135 / v1.5.96：F-Droid 上架准备与 GPL-3.0-or-later 许可收敛）**：
   - 替换 `LICENSE` 为 GPL-3.0 正文，同步中英文 README、AGENTS、交接说明；新增 `THIRD_PARTY_NOTICES.md` 集中声明 `astrometry.net` 0.97、GSL、qfits、CFITSIO 3.47、Tycho-2 4100 索引、BSC5 星表、Stellarium 连线及 12 张作者实拍离线演示照片的来源与许可。
   - `code/app/build.gradle.kts` 升级至 v1.5.96（versionCode 116，updateDesc `fdroid-readiness`），禁用 `dependenciesInfo` 加密依赖块与 `vcsInfo`。
-  - `tools/build_native.py` 增加 `--ndk` / `--cmake` / `--ninja` 参数、环境变量与 PATH 自动探测及 Python 3.10+ 安全 tar 解压，本机实测产出与仓库 `.so` SHA-256 完全一致（`7935d134...`）。
+  - `tools/build_native.py` 增加 `--ndk` / `--cmake` / `--ninja` 参数、环境变量与 PATH 自动探测、CMake 4.x 兼容补丁（`cfitsio-3.47` 最低版本升至 3.5）及 Python 3.10+ 安全 tar 解压；Windows 本机（SHA `7935d134...`）与 WSL2 Ubuntu 26.04 + Linux NDK r26d（SHA `6a6c99fd...`）双端从源码构建均通过全部断言。
   - 新增 `fastlane/metadata/android/{zh-CN,en-US}/`（标题、短/长描述、116 更新日志、512×512 图标、4 张模拟器实测截图）与 `docs/fdroid/com.starcam.astro.yml` 构建配方。
   - 49 类 / 352 项常规单测全绿，`assembleDebug` 构建通过，`check_secrets.py` 扫描 416 文件 0 泄露；详见 `docs/120-F-Droid上架准备-§0.135.md`。仅本地修改，未构建 Release、未推送。
 

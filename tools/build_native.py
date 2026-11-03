@@ -154,6 +154,10 @@ def main():
     network_source = network_driver.read_text(encoding="utf-8")
     assert network_source.count("fprintf(stderr,urlname);") == 1
     network_driver.write_text(network_source.replace("fprintf(stderr,urlname);", 'fprintf(stderr,"%s",urlname);'), encoding="utf-8")
+    cfits_cmake = cfits / "CMakeLists.txt"
+    cfits_cmake_src = cfits_cmake.read_text(encoding="utf-8")
+    assert "CMAKE_MINIMUM_REQUIRED" in cfits_cmake_src
+    cfits_cmake.write_text(re.sub(r"CMAKE_MINIMUM_REQUIRED\s*\([^\)]*\)", "cmake_minimum_required(VERSION 3.5)", cfits_cmake_src, count=1), encoding="utf-8")
     (astro / "include/astrometry/os-features-config.h").write_text("#define HAVE_NETPBM 0\n", encoding="utf-8")
     gsl = astro / "gsl-an"
     config = (gsl / "config.h.in").read_text()
@@ -200,7 +204,7 @@ def main():
     cmake = resolve_tool(args.sdk, args.cmake, "cmake/3.22.1/bin", "cmake")
     ninja = resolve_tool(args.sdk, args.ninja, "cmake/3.22.1/bin", "ninja")
     ndk = resolve_ndk(args.sdk, args.ndk)
-    run([cmake, "-G", "Ninja", "-S", build, "-B", binary, "-DCMAKE_TOOLCHAIN_FILE="+str(ndk / "build/cmake/android.toolchain.cmake"), "-DANDROID_ABI="+args.abi, "-DANDROID_PLATFORM=android-26", "-DCMAKE_MAKE_PROGRAM="+str(ninja)])
+    run([cmake, "-G", "Ninja", "-S", build, "-B", binary, "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DCMAKE_TOOLCHAIN_FILE="+str(ndk / "build/cmake/android.toolchain.cmake"), "-DANDROID_ABI="+args.abi, "-DANDROID_PLATFORM=android-26", "-DCMAKE_MAKE_PROGRAM="+str(ninja)])
     command = [str(cmake), "--build", str(binary), "--target", "stellar_solver", "--parallel", "8"]
     with (build / "build.log").open("w", encoding="utf-8") as log:
         result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)

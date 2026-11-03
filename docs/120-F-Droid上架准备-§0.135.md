@@ -38,9 +38,15 @@
 
 ---
 
-## 四、关于本机 WSL 安装与后续提交流程
+## 四、WSL Ubuntu 26.04 Linux 原生从源码构建实测与提交流程
 
-- **本机 WSL 状态说明**：当前终端运行在非管理员权限（`admin: False`），且 Windows 可选功能 `Microsoft-Windows-Subsystem-Linux` 处于未启用状态（`InstallState = 2`），`winget install Microsoft.WSL` 因错误码 `0x80073d28`（需要管理员特权）被系统拦截，无法在无管理员提权的终端内直接静默启用。如需在本机开启 WSL，请以**管理员身份**打开 PowerShell 执行一次 `wsl --install` 并重启系统。
+- **WSL2 Linux 构建实测（完全模拟 F-Droid 构建容器）**：
+  1. 在本机 WSL2（`Ubuntu 26.04.1 LTS`，Linux 6.18.54.1-microsoft-standard-WSL2，`cmake 4.2.3`、`ninja 1.13.2`、`Python 3.14.4`、Linux 版 `android-ndk-r26d`）中按 `docs/fdroid/com.starcam.astro.yml` 的 `prebuild` 命令执行：
+     ```bash
+     python3 tools/build_native.py --ndk /opt/android-ndk/android-ndk-r26d --abi arm64-v8a --output /tmp/starcam-native-build/libstellar_solver.so
+     ```
+  2. **捕获并修复 CMake 4.x 兼容性问题**：新版 Linux 发行版自带 CMake 4.x 已移除对 `< 3.5` 的兼容，而上游 `cfitsio-3.47/CMakeLists.txt` 声明为 `CMAKE_MINIMUM_REQUIRED(VERSION 2.8.0)`。已在 `tools/build_native.py` 中自动将其补丁升级为 `cmake_minimum_required(VERSION 3.5)` 并传递 `-DCMAKE_POLICY_VERSION_MINIMUM=3.5`，兼顾 CMake 3.22 与 CMake 4.x。
+  3. **实测产物校验通过**：Linux 下全新编译产出 `/tmp/starcam-native-build/libstellar_solver.so`（约 1.3 MiB，SHA-256 `6a6c99fd34f43e7a593a702c76e3ae49f7e310c644078ad2aac71a4b43b50ada`），ELF `arm64` 架构、全部 `PT_LOAD` 段 16 KB 页对齐（`>= 16384`）、桥接源码指纹 `34632f81e631093c9e5dafd239d6a5f62c85f9bf2f7e2241b958835254d02a31` 以及 6 个 JNI 导出符号全部一次通过断言。
 - **F-Droid 正式提交流程（待开发者授权后执行）**：
   1. 开发者下达「推送」指令后，将本地 `main` 分支及 `v1.5.96` tag 推送至 GitHub 公开仓库；
   2. 在 GitLab fork `https://gitlab.com/fdroid/fdroiddata`，将 `docs/fdroid/com.starcam.astro.yml` 复制为 `metadata/com.starcam.astro.yml` 提交 Merge Request。
