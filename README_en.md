@@ -2,7 +2,7 @@
 
 [**English**](README_en.md) | [**简体中文**](README.md)
 
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
+[![License: GPL v3+](https://img.shields.io/badge/License-GPL%20v3%2B-blue.svg)](LICENSE)
 [![Android](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com)
 [![CI](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml/badge.svg)](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml)
 
@@ -73,12 +73,14 @@ Latest release: **[v1.5.92](https://github.com/1437nb/starcam-astro/releases/tag
 │       ├── main/java/com/starcam/astro/     # Astronomical math, solvers, and Compose UI
 │       ├── main/assets/indexes/             # Bundled astrometry.net offline FITS indexes
 │       ├── main/assets/offline_photos/      # 12 public night-sky demo photos
-│       ├── main/jniLibs/arm64-v8a/          # Prebuilt libstellar_solver.so native solver
+│       ├── main/jniLibs/arm64-v8a/          # libstellar_solver.so native solver (rebuildable from source via tools/build_native.py)
 │       ├── main/cpp/astro_bridge.c          # JNI bridge source
 │       └── test/java/com/starcam/astro/     # Standard suite: 46 classes / 336 tests, including public-photo truth checks
 ├── docs/                   # Architecture & 100+ validation reports (through §0.132)
 ├── tools/                  # Catalog generators, truth calibration & release scripts
-└── LICENSE                 # GNU General Public License v2.0
+├── fastlane/metadata/      # F-Droid store metadata (zh-CN / en-US descriptions, changelogs, icon, screenshots)
+├── THIRD_PARTY_NOTICES.md  # Sources and licenses of bundled third-party code, data and media
+└── LICENSE                 # GNU General Public License v3.0 (GPL-3.0-or-later)
 ```
 
 ---
@@ -105,7 +107,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 | Contribution Area | Prerequisites |
 | :--- | :--- |
 | Kotlin / astronomical math / Compose UI / docs & i18n | **JDK 17 + Android SDK 34** (ready out of the box) |
-| Native JNI bridge (`app/src/main/cpp/astro_bridge.c`) | Also requires NDK r26d + `astrometry.net` 0.97 static libs + `cfitsio` 3.47 (see [`docs/75`](docs/75-外部贡献者指南与工程外依赖说明.md)) |
+| Native JNI bridge (`app/src/main/cpp/astro_bridge.c`) | Also requires Python 3.10+, NDK r26d, CMake + Ninja; `python3 tools/build_native.py --fetch` rebuilds from SHA-256-pinned `astrometry.net` 0.97 and `cfitsio` 3.47 sources on Windows or Linux (see [`docs/120`](docs/120-F-Droid上架准备-§0.135.md)) |
 
 ---
 
@@ -119,10 +121,11 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 ## License & Acknowledgements
 
-Licensed under the **[GNU General Public License v2.0](LICENSE)**. Special thanks to:
+Licensed under the **[GNU General Public License v3.0 or later](LICENSE)** (GPL-3.0-or-later) since v1.5.96. Reason: the bundled native solver statically links the GSL copy vendored by `astrometry.net` (GPL-3.0-or-later), and the `astrometry.net` license requires the combined work to be distributed under GPL-3.0 or later. Releases up to v1.5.95 remain under their original GPL-2.0 terms. See **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)** for every component's origin and license. Special thanks to:
 
-- **[astrometry.net](https://astrometry.net/)** (GPL-2.0) — Core blind plate-solving algorithms and FITS index system
+- **[astrometry.net](https://astrometry.net/)** 0.97 (BSD-3-Clause; vendored GSL: GPL-3.0-or-later, qfits: GPL-2.0-or-later) — Core blind plate-solving algorithms and 4100-series FITS indexes (Tycho-2)
+- **[CFITSIO](https://heasarc.gsfc.nasa.gov/fitsio/)** 3.47 (NASA / HEASARC permissive license) — FITS I/O
 - **[StellarSolver](https://github.com/rlancaste/stellarsolver)** (LGPL-2.1 / MIT) — Cross-platform wrapper reference
-- **[Stellarium](https://stellarium.org/)** (GPL-2.0) — 88 constellation line definitions and traditional Chinese star culture data
+- **[Stellarium](https://stellarium.org/)** (GPL-2.0-or-later) — 88 constellation line definitions and traditional Chinese star culture data
 - **[VizieR V/50 Bright Star Catalogue](https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=V/50)** (Public Domain) — Yale Bright Star Catalogue (BSC5)
 - **[Android Jetpack Compose & CameraX](https://developer.android.com/jetpack)** (Apache-2.0) & **[OkHttp](https://github.com/square/okhttp)** (Apache-2.0)

@@ -28,14 +28,14 @@ android {
         applicationId = "com.starcam.astro"
         minSdk = 26
         targetSdk = 34
-        versionCode = 115
-        versionName = "1.5.95"
+        versionCode = 116
+        versionName = "1.5.96"
         testInstrumentationRunner = "com.starcam.astro.DeviceAcceptanceInstrumentation"
     }
 
     // 每版更新内容简述（用户规则：在 APK 文件名上带上更新内容）
     val updateDesc = project.findProperty("updateDesc") as? String
-        ?: "stability-and-memory"
+        ?: "fdroid-readiness"
 
     // APK 产物自动带版本号、更新内容与变体名（用户规则：文件名标注版本与更新内容）
     applicationVariants.all {
@@ -66,7 +66,17 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = keystorePropsFile?.let { signingConfigs.getByName("release") }
+            // §0.135 F-Droid: do not embed VCS metadata (META-INF/version-control-info.textproto);
+            // it varies with checkout state and hurts build reproducibility.
+            vcsInfo.include = false
         }
+    }
+
+    // §0.135 F-Droid: AGP otherwise writes an encrypted dependency-info block into the APK
+    // signing block (readable only by Google). F-Droid's inclusion policy requires it disabled.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     compileOptions {

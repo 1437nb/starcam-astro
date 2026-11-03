@@ -5,14 +5,16 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-11-03（v1.5.95 稳定性收尾完成：373 项完整 JVM、152 项模拟器执行及 C 桥 28 条断言通过；仅 Debug，详见 docs/119）
-**当前基线**：v1.5.95（versionCode 115，§0.134 稳定性收尾，仅 Debug；本地最近签名 Release 为 v1.5.94，最近公开 Release 仍为 v1.5.92 / tag `v1.5.92`）
+**最后更新**：2026-11-03（v1.5.96 F-Droid 上架准备与 GPL-3.0-or-later 许可收敛完成：49 类 / 352 项常规 JVM 单测、原生源码构建及 Debug APK 校验通过；仅 Debug，详见 docs/120）
+**当前基线**：v1.5.96（versionCode 116，§0.135 F-Droid 上架准备，仅 Debug；本地最近签名 Release 为 v1.5.94，最近公开 Release 仍为 v1.5.92 / tag `v1.5.92`）
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
 **构建环境**：本机拥有全套高配构建环境，Kotlin 编译、单元测试与 APK 打包均在本机完成。最新完整 JVM 报告为 59 类 / 373 项、0 失败 / 0 错误 / 0 跳过（不设置 skipPhotoTests，含 49 类 / 352 项常规套件和 10 类 / 21 项本机素材回归）；公开 JPEG 与本机 gray12 均 12/12 真解。窄场观察台 12 解出 / 0 错解 / 20 未解出，测试通过不代表所有素材均能解出。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
 
 ---
 
 ## 一、下一步（建议优先级，待开发者拍板）
+
+> **2026-11-03 F-Droid 上架准备完成（v1.5.96 / §0.135）**：按开发者拍板将项目许可证升级为 **GPL-3.0-or-later**（解决原生库静态链接 GSL 的 GPL-3 传染性及 Apache-2.0 依赖兼容性），新增 `THIRD_PARTY_NOTICES.md` 明确引擎、星表、索引与 12 张作者实拍演示照片许可；`build.gradle.kts` 关闭 `dependenciesInfo` 与 `vcsInfo`；`tools/build_native.py` 支持 Linux / Windows 跨平台与系统 CMake / Ninja 及 Python 3.10+ 安全解压；补齐 `fastlane/metadata/android/{zh-CN,en-US}/` 与 `docs/fdroid/com.starcam.astro.yml` 配方。本机跨平台脚本重编 `.so` 与仓库逐字节一致，49 类 / 352 项常规单测、Debug APK 构建与凭据检查全部通过（详见 docs/120）。本机 WSL 因当前非管理员会话无法启用 Windows 可选功能，需管理员终端运行一次 `wsl --install`。下一步待开发者明确授权后推送 GitHub 并打 `v1.5.96` tag，即可向 `fdroiddata` 提交 MR。
 
 > **2026-11-03 稳定性收尾完成（v1.5.95 / §0.134）**：取消与预算贯穿、流式大 FITS / RAW 内存提示、导入隔离、失败项重试回写、在线缓存方向、竞速报告与共享位图收尾已修复；缺失原生依赖已由固定源码本机 NDK / CMake 构建替代。原生接受门槛、真实 CRPIX / FITS 方向与灰度诊断写盘问题已按实测修复。完整 JVM 59 类 / 373 项、零失败 / 错误 / 跳过；两系统各跑 native 与 JVM 回退，共 152 项功能 / UI 执行通过；C 桥 7 场景 / 28 断言通过，lintDebug 0 错误 / 9 警告。默认 Debug 已恢复仅 arm64 求解库。下一步 ARM 真机相机 / AR、取消与大图压力验收，清单见 docs/119；本轮没有构建 Release 或推送。
 
@@ -122,6 +124,13 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-11-03（§0.135 / v1.5.96：F-Droid 上架准备与 GPL-3.0-or-later 许可收敛）**：
+  - 替换 `LICENSE` 为 GPL-3.0 正文，同步中英文 README、AGENTS、交接说明；新增 `THIRD_PARTY_NOTICES.md` 集中声明 `astrometry.net` 0.97、GSL、qfits、CFITSIO 3.47、Tycho-2 4100 索引、BSC5 星表、Stellarium 连线及 12 张作者实拍离线演示照片的来源与许可。
+  - `code/app/build.gradle.kts` 升级至 v1.5.96（versionCode 116，updateDesc `fdroid-readiness`），禁用 `dependenciesInfo` 加密依赖块与 `vcsInfo`。
+  - `tools/build_native.py` 增加 `--ndk` / `--cmake` / `--ninja` 参数、环境变量与 PATH 自动探测及 Python 3.10+ 安全 tar 解压，本机实测产出与仓库 `.so` SHA-256 完全一致（`7935d134...`）。
+  - 新增 `fastlane/metadata/android/{zh-CN,en-US}/`（标题、短/长描述、116 更新日志、512×512 图标、4 张模拟器实测截图）与 `docs/fdroid/com.starcam.astro.yml` 构建配方。
+  - 49 类 / 352 项常规单测全绿，`assembleDebug` 构建通过，`check_secrets.py` 扫描 416 文件 0 泄露；详见 `docs/120-F-Droid上架准备-§0.135.md`。仅本地修改，未构建 Release、未推送。
 
 - **2026-11-03（§0.134 / v1.5.95：稳定性收尾）**：
   - 取消与单调时钟预算覆盖协程、HTTP、投票线程与 JNI；竞速独立报告、失败诊断合并、共享位图安全收尾；失败项重试回写批量统计，在线缓存缺失恢复上传方向。

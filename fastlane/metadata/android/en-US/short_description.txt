@@ -1,0 +1,1 @@
+Offline-first night sky plate solver, constellation overlay & AR star chart

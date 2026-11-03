@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build the pinned Android solver locally from source, without an external .a bundle.
 
-Requires Python 3.12+ and SDK packages ndk;26.3.11579264 and cmake;3.22.1.
+Requires Python 3.10+, Android NDK r26d (26.3.11579264), and CMake 3.22+ with Ninja.
+Works on both Windows and Linux (F-Droid / CI build environments).
 Verified archives are cached under --sources; --fetch downloads missing fixed archives.
 Every build uses a new directory. No cleanup, credential access, or publishing.
 """
@@ -22,6 +23,70 @@ ARCHIVES = [
     ("astrometry-0.97.tar.gz", "https://codeload.github.com/dstndstn/astrometry.net/tar.gz/refs/tags/0.97", "75a36bb0d0be827c86bedac6bcbf78f110dc19229bab1604eea403d3a0368896"),
     ("cfitsio-3.47.tar.gz", "https://ftp.eso.org/pub/dfs/pipelines/libraries/cfitsio/cfitsio-3.47.tar.gz", "418516f10ee1e0f1b520926eeca6b77ce639bed88804c7c545e74f26b3edf4ef"),
 ]
+
+
+def safe_extract_tar(archive: tarfile.TarFile, dest: Path):
+    """Extract tar safely across Python 3.10+ (uses data filter when available)."""
+    if hasattr(tarfile, "data_filter"):
+        archive.extractall(dest, filter="data")
+        return
+    dest_resolved = dest.resolve()
+    for member in archive.getmembers():
+        if member.name.startswith("/") or ".." in Path(member.name).parts:
+            raise ValueError(f"Unsafe tar member path: {member.name}")
+        if member.issym() or member.islnk() or member.ischr() or member.isblk() or member.isfifo():
+            raise ValueError(f"Unsupported special tar member: {member.name}")
+        target = (dest_resolved / member.name).resolve()
+        if dest_resolved != target and dest_resolved not in target.parents:
+            raise ValueError(f"Tar path traversal blocked: {member.name}")
+    archive.extractall(dest)
+
+
+def default_sdk_path() -> Path:
+    for env_name in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+        val = os.environ.get(env_name)
+        if val:
+            return Path(val)
+    return Path("C:/dev/android-sdk") if os.name == "nt" else Path("/usr/local/lib/android/sdk")
+
+
+def resolve_ndk(sdk: Path, ndk_arg: Path | None) -> Path:
+    if ndk_arg:
+        return ndk_arg.resolve()
+    for env_name in ("ANDROID_NDK_HOME", "ANDROID_NDK_ROOT", "NDK"):
+        val = os.environ.get(env_name)
+        if val and Path(val).is_dir():
+            return Path(val).resolve()
+    pinned = sdk / "ndk/26.3.11579264"
+    if pinned.is_dir():
+        return pinned.resolve()
+    ndk_root = sdk / "ndk"
+    if ndk_root.is_dir():
+        candidates = sorted(d for d in ndk_root.iterdir() if d.is_dir())
+        if candidates:
+            return candidates[-1].resolve()
+    if (sdk / "ndk-bundle").is_dir():
+        return (sdk / "ndk-bundle").resolve()
+    raise FileNotFoundError(f"Android NDK not found under {sdk} or ANDROID_NDK_HOME")
+
+
+def resolve_tool(sdk: Path, explicit: Path | None, sdk_rel: str, binary_name: str) -> Path:
+    if explicit:
+        return explicit.resolve()
+    exe = binary_name + (".exe" if os.name == "nt" else "")
+    sdk_candidate = sdk / sdk_rel / exe
+    if sdk_candidate.is_file():
+        return sdk_candidate.resolve()
+    cmake_root = sdk / "cmake"
+    if cmake_root.is_dir():
+        for d in sorted((p for p in cmake_root.iterdir() if p.is_dir()), reverse=True):
+            cand = d / "bin" / exe
+            if cand.is_file():
+                return cand.resolve()
+    which = shutil.which(exe) or shutil.which(binary_name)
+    if which:
+        return Path(which).resolve()
+    raise FileNotFoundError(f"Required build tool '{binary_name}' not found in SDK ({sdk}) or PATH")
 
 
 def run(args):
@@ -55,7 +120,10 @@ def make_vars(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sdk", type=Path, default=Path("C:/dev/android-sdk"))
+    parser.add_argument("--sdk", type=Path, default=default_sdk_path())
+    parser.add_argument("--ndk", type=Path, help="Explicit Android NDK directory (defaults to ANDROID_NDK_HOME or <sdk>/ndk/26.3.11579264)")
+    parser.add_argument("--cmake", type=Path, help="Explicit cmake binary (defaults to <sdk>/cmake/3.22.1/bin/cmake or PATH)")
+    parser.add_argument("--ninja", type=Path, help="Explicit ninja binary (defaults to <sdk>/cmake/3.22.1/bin/ninja or PATH)")
     parser.add_argument("--sources", type=Path, default=ROOT / "code/app/build/native-deps")
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--proxy")
@@ -76,7 +144,7 @@ def main():
     build.mkdir(parents=True)
     # Always extract fresh, verified sources; stale objects or edited source trees are not reused.
     for name, _, _ in ARCHIVES:
-        with tarfile.open(sources / name) as archive: archive.extractall(build, filter="data")
+        with tarfile.open(sources / name) as archive: safe_extract_tar(archive, build)
     astro = build / "astrometry.net-0.97"; cfits = build / "cfitsio-3.47"
     solver_header = astro / "include/astrometry/solver.h"
     solver_source = solver_header.read_text(encoding="utf-8")
@@ -129,9 +197,9 @@ def main():
               'target_link_libraries(stellar_solver PRIVATE -Wl,--start-group '+" ".join(libraries)+' cfitsio -Wl,--end-group log m dl z)']
     (build / "CMakeLists.txt").write_text("\n".join(lines)+"\n", encoding="utf-8")
     binary = build / "out"
-    cmake = args.sdk / "cmake/3.22.1/bin" / ("cmake.exe" if os.name == "nt" else "cmake")
-    ninja = cmake.with_name("ninja.exe" if os.name == "nt" else "ninja")
-    ndk = args.sdk / "ndk/26.3.11579264"
+    cmake = resolve_tool(args.sdk, args.cmake, "cmake/3.22.1/bin", "cmake")
+    ninja = resolve_tool(args.sdk, args.ninja, "cmake/3.22.1/bin", "ninja")
+    ndk = resolve_ndk(args.sdk, args.ndk)
     run([cmake, "-G", "Ninja", "-S", build, "-B", binary, "-DCMAKE_TOOLCHAIN_FILE="+str(ndk / "build/cmake/android.toolchain.cmake"), "-DANDROID_ABI="+args.abi, "-DANDROID_PLATFORM=android-26", "-DCMAKE_MAKE_PROGRAM="+str(ninja)])
     command = [str(cmake), "--build", str(binary), "--target", "stellar_solver", "--parallel", "8"]
     with (build / "build.log").open("w", encoding="utf-8") as log:

@@ -1,0 +1,37 @@
+# F-Droid build recipe for StarCam / 星空识星 (com.starcam.astro)
+# Target repository: https://gitlab.com/fdroid/fdroiddata (metadata/com.starcam.astro.yml)
+
+Categories:
+  - Science & Education
+  - Multimedia
+License: GPL-3.0-or-later
+AuthorName: 1437nb
+SourceCode: https://github.com/1437nb/starcam-astro
+IssueTracker: https://github.com/1437nb/starcam-astro/issues
+Changelog: https://github.com/1437nb/starcam-astro/releases
+
+AutoName: StarCam
+
+RepoType: git
+Repo: https://github.com/1437nb/starcam-astro.git
+
+Builds:
+  - versionName: 1.5.96
+    versionCode: 116
+    commit: v1.5.96
+    subdir: code/app
+    sudo:
+      - apt-get update
+      - apt-get install -y cmake ninja-build python3 curl
+    gradle:
+      - yes
+    rm:
+      - code/app/src/main/jniLibs/arm64-v8a/libstellar_solver.so
+    prebuild:
+      - python3 ../../tools/build_native.py --fetch --ndk $$NDK$$ --abi arm64-v8a --output src/main/jniLibs/arm64-v8a/libstellar_solver.so
+    ndk: r26d
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 1.5.96
+CurrentVersionCode: 116

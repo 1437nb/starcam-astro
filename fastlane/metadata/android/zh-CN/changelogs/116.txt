@@ -1,0 +1,4 @@
+• 开源许可证升级为 GPL-3.0-or-later，补齐第三方源码、星表与素材清单（THIRD_PARTY_NOTICES.md）
+• 禁用 APK 签名块中的加密依赖元数据（dependenciesInfo）与 VCS 信息，适配 F-Droid 纯源码构建规范
+• 原生求解器构建脚本（tools/build_native.py）支持 Linux / Windows 跨平台与系统 CMake / Ninja 工具链
+• 完善全链路取消与单调时钟预算、分块流式 FITS 解码、照片 / RAW / FITS 统一混合导入及原图尺寸标注导出

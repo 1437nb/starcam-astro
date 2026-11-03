@@ -1,0 +1,4 @@
+• Upgraded project license to GPL-3.0-or-later and added comprehensive THIRD_PARTY_NOTICES.md
+• Disabled AGP encrypted dependency metadata block (dependenciesInfo) and VCS info for F-Droid compliance
+• Made tools/build_native.py cross-platform across Linux and Windows for source-built native solver libraries
+• Included end-to-end cancellation budgets, bounded-memory streaming FITS decoding, unified photo/RAW/FITS import, and original-resolution export

@@ -2,7 +2,7 @@
 
 [**简体中文**](README.md) | [**English**](README_en.md)
 
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
+[![License: GPL v3+](https://img.shields.io/badge/License-GPL%20v3%2B-blue.svg)](LICENSE)
 [![Android](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com)
 [![CI](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml/badge.svg)](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml)
 
@@ -73,12 +73,14 @@
 │       ├── main/java/com/starcam/astro/     # 核心天文算法、求解管线与 Compose UI
 │       ├── main/assets/indexes/             # astrometry.net 离线 FITS 索引（8 档）
 │       ├── main/assets/offline_photos/      # 12 张内置公开星空演示照片
-│       ├── main/jniLibs/arm64-v8a/          # 预编译 libstellar_solver.so 原生求解库
+│       ├── main/jniLibs/arm64-v8a/          # libstellar_solver.so 原生求解库（可由 tools/build_native.py 从源码重建）
 │       ├── main/cpp/astro_bridge.c          # JNI 桥接层源码
 │       └── test/java/com/starcam/astro/     # 常规回归 46 类 / 336 项，含公开照片真值保护
 ├── docs/                   # 架构设计与 100+ 篇验证报告（至 §0.132）
 ├── tools/                  # 星表构建、真值定标、凭据体检与一键发版脚本
-└── LICENSE                 # GNU General Public License v2.0
+├── fastlane/metadata/      # F-Droid 应用商店元数据（中英文简介、更新日志、图标、截图）
+├── THIRD_PARTY_NOTICES.md  # 第三方代码、数据与素材的来源和许可
+└── LICENSE                 # GNU General Public License v3.0（GPL-3.0-or-later）
 ```
 
 ---
@@ -105,7 +107,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 | 贡献方向 | 所需环境 |
 | :--- | :--- |
 | 修改 Kotlin / 天文算法 / Compose UI / 文档与多语言 | **JDK 17 + Android SDK 34**（克隆即编） |
-| 修改 JNI 桥接 `app/src/main/cpp/astro_bridge.c` | 另需 NDK r26d + `astrometry.net` 0.97 静态库 + `cfitsio` 3.47（详见 [`docs/75`](docs/75-外部贡献者指南与工程外依赖说明.md)） |
+| 修改 JNI 桥接 `app/src/main/cpp/astro_bridge.c` | 另需 Python 3.10+、NDK r26d、CMake + Ninja；`python3 tools/build_native.py --fetch` 从固定 SHA-256 的 `astrometry.net` 0.97 与 `cfitsio` 3.47 源码重建（Windows / Linux 均可，详见 [`docs/120`](docs/120-F-Droid上架准备-§0.135.md)） |
 
 ---
 
@@ -119,10 +121,11 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 ## 开源许可证与致谢
 
-本项目采用 **[GNU General Public License v2.0](LICENSE)** 开源，谨向以下开源项目与科学星表致谢：
+本项目自 v1.5.96 起采用 **[GNU General Public License v3.0 或更高版本](LICENSE)**（GPL-3.0-or-later）开源。原因：随包原生求解库静态链接了 `astrometry.net` 自带的 GSL（GPL-3.0-or-later），`astrometry.net` 官方许可要求整体以 GPL-3.0 或更高版本分发。v1.5.95 及更早的 GPL-2.0 历史版本保持原状。各组件来源与许可的完整清单见 **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**。谨向以下开源项目与科学星表致谢：
 
-- **[astrometry.net](https://astrometry.net/)**（GPL-2.0）— 盲解核心算法与 FITS 索引体系
+- **[astrometry.net](https://astrometry.net/)** 0.97（BSD-3-Clause，内含 GSL：GPL-3.0-or-later、qfits：GPL-2.0-or-later）— 盲解核心算法与 4100 系列 FITS 索引（Tycho-2）
+- **[CFITSIO](https://heasarc.gsfc.nasa.gov/fitsio/)** 3.47（NASA / HEASARC 宽松许可）— FITS 读写
 - **[StellarSolver](https://github.com/rlancaste/stellarsolver)**（LGPL-2.1 / MIT）— `astrometry.net` 跨平台封装参考
-- **[Stellarium](https://stellarium.org/)**（GPL-2.0）— 88 星座连线与中国传统星官文化数据
+- **[Stellarium](https://stellarium.org/)**（GPL-2.0-or-later）— 88 星座连线与中国传统星官文化数据
 - **[VizieR V/50 Bright Star Catalogue](https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=V/50)**（Public Domain）— 耶鲁亮星星表（BSC5）数据
 - **[Android Jetpack Compose & CameraX](https://developer.android.com/jetpack)**（Apache-2.0）& **[OkHttp](https://github.com/square/okhttp)**（Apache-2.0）

@@ -17,7 +17,7 @@
 - **当前唯一主力工作区：`C:\starcam`（本地 Windows 11 开发机，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）。**
   `testdata/`、`apk/`、`indexes/` 为机器相关本地目录，不入库。
 - 仓库外的发布签名密钥在 `~/.starcam/` 或 `C:\dev\`；原生依赖现由 `tools/build_native.py` 从固定源码重建，不再依赖已丢失的 `C:\dev\astrometry-local\` 备份。
-- 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），主分支 `main`。
+- 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-3.0-or-later，v1.5.96 起；原生库静态链接 GSL 所致，见 `THIRD_PARTY_NOTICES.md`），主分支 `main`。
 - 辅助机器（配置在 `~/.ssh/config`，凭据绝不入库）：
   - **`ec2-hk`**：AWS EC2（香港，2 核 / 3.8GB），用于海外网络跳板、测试回归与 Git 中转推送；
   - **`huawei`**：Linux 服务器，用于辅助 GitHub Release 发布与官方授权管理。

@@ -1,0 +1,8 @@
+StarCam is an offline-first Android astrophotography and night-sky recognition app. Capture or import a night-sky photo to blind plate-solve its celestial coordinates (RA, Dec, field of view, rotation) directly on your device, overlay constellation lines, star names, Messier deep-sky objects, and solar system bodies, or explore the sky in real time with the AR star chart.
+
+Key Features:
+• Hybrid Offline Plate-Solving Engine: Bundles the native astrometry.net 0.97 solver with 4100-series all-sky FITS indexes alongside a custom 8,400+ bright-star triangle-voting matcher covering 10° narrow fields up to 70°+ wide-angle views completely offline. Optional user-configured nova.astrometry.net online fallback.
+• Rich Sky Overlays & Original-Resolution Export: Plots 88 IAU constellation lines, 3,800+ traditional Chinese and Western star names, 44 Messier objects, and real-time topocentric Sun, Moon, and planet positions. Toggle individual layers, export at preview or original resolution, and batch-solve up to 9 images with per-photo review.
+• Live AR Star Chart & Star Finder: Sensor-fused orientation tracking with full-sky mode, horizon compass, and directional target guidance.
+• Astrophotography Formats & Tonight's Sky: Unified import for standard photos, camera RAW files (embedded preview), and astronomical FITS images (BITPIX 8/16/32/±32/±64). Includes an ephemeris-driven Tonight's Sky card (Moon phase, planetary visibility windows) and four themes including Night-Vision Red and AMOLED Pure Black.
+• Privacy by Design: Works 100% offline by default with zero ads, telemetry, or proprietary tracking SDKs.
