@@ -81,7 +81,8 @@ fun BatchScreen(
 
     // 详情是当前批次的子页。保持 BatchScreen 在组合中，返回不会重启批量识别。
     if (selectedIndex in paths.indices) {
-        val solved = outcomes.getOrNull(selectedIndex) as? BatchOutcome.Solved
+        // Keep detail inputs stable while a successful retry updates its list row.
+        val solved = remember(selectedIndex) { outcomes.getOrNull(selectedIndex) as? BatchOutcome.Solved }
         ResultScreen(
             imagePath = paths[selectedIndex],
             demoRegion = null,
@@ -91,6 +92,7 @@ fun BatchScreen(
             settings = settings,
             onBack = { selectedIndex = -1 },
             onRetake = onRetake,
+            onSolveCompleted = { viewModel.recordRetry(selectedIndex, it.solve, it.engine, it.engineDetail) },
         )
         return
     }

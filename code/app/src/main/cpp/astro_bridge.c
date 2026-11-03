@@ -41,6 +41,13 @@
 #define JSON_BUF 2048
 #define ERR_BUF 512
 
+#ifndef ASTRO_BRIDGE_SRC_SHA256
+#define ASTRO_BRIDGE_SRC_SHA256 "host-test"
+#endif
+/* Exported read-only data survives section GC and stripping; ties the ABI to its source. */
+__attribute__((used, visibility("default")))
+const char starcam_bridge_source_sha256[] = "STARCAM_BRIDGE_SRC_SHA256:" ASTRO_BRIDGE_SRC_SHA256;
+
 /* ---------------- 超时线程封装 ----------------
  *
  * 并发模型：solver_run 放在 worker 线程里跑，调用线程轮询 + 超时置 quit_now。
@@ -151,7 +158,10 @@ static double mono_seconds(void) {
  * **强制**进入 detach 路径（见 cpp/bridge_host_test.c），生产路径不改。 */
 static double g_quit_join_grace_sec = 5.0;
 
-static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked, int counted) {
+typedef int (*cancel_probe_fn)(void*);
+
+static int run_with_cancel(solver_t* sp, double seconds, int* out_leaked, int counted,
+                           cancel_probe_fn cancelled, void* opaque) {
     pthread_t th;
     if (out_leaked) *out_leaked = 0;
     solve_job_t* job = (solve_job_t*)calloc(1, sizeof(solve_job_t));
@@ -166,8 +176,10 @@ static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked, int c
     }
     double deadline = mono_seconds() + seconds;
     int timedout = 0;
+    int was_cancelled = 0;
     while (job->state == JOB_RUNNING) {
-        if (mono_seconds() >= deadline) {
+        was_cancelled = cancelled && cancelled(opaque);
+        if (was_cancelled || mono_seconds() >= deadline) {
             timedout = 1;
             break;
         }
@@ -175,9 +187,16 @@ static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked, int c
     }
     if (timedout) {
         sp->quit_now = TRUE; /* solver 在 quad 循环里轮询此标志 */
-        double grace = mono_seconds() + g_quit_join_grace_sec;
-        while (job->state == JOB_RUNNING && mono_seconds() < grace)
+        double grace = mono_seconds() + (was_cancelled ? fmin(0.25, g_quit_join_grace_sec) : g_quit_join_grace_sec);
+        while (job->state == JOB_RUNNING && mono_seconds() < grace) {
+            /* A user can cancel after the solver timeout, while it is already
+             * in its normal join grace.  Do not make that cancellation wait 5s. */
+            if (!was_cancelled && cancelled && cancelled(opaque)) {
+                was_cancelled = 1;
+                grace = fmin(grace, mono_seconds() + 0.25);
+            }
             usleep(20000);
+        }
         /* 宽限期后仍未完成 ⇒ 把所有权**原子地**让渡给 worker（P0-2.6）。
          * 这个 CAS 与 worker 收尾用的 CAS 是唯一的移交/收尾点，二者互斥：
          *  - 换出 RUNNING  → 让渡成功：worker 退出时负责 solver_free / free(job) /
@@ -203,6 +222,10 @@ static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked, int c
     pthread_join(th, NULL);
     free(job);
     return RUN_OK;
+}
+
+static int run_with_timeout(solver_t* sp, double seconds, int* out_leaked, int counted) {
+    return run_with_cancel(sp, seconds, out_leaked, counted, NULL, NULL);
 }
 
 /* ---------------- 星点提取（simplexy） ---------------- */
@@ -356,10 +379,14 @@ static void run_solver(
     double plim_override, double time_limit_sec,
     int ext_len,
     const float* ext_stars,
-    char* out, size_t outsz) {
+    char* out, size_t outsz, cancel_probe_fn cancelled, void* opaque) {
 
     out[0] = '\0';
     snprintf(out, outsz, "{\"ok\":false,\"error\":\"init\"}");
+    if (cancelled && cancelled(opaque)) {
+        snprintf(out, outsz, "{\"ok\":false,\"error\":\"cancelled\"}");
+        return;
+    }
 
     /* 星点来源优先级：**simplexy 优先，外部星点仅作兜底**。
      *
@@ -441,6 +468,18 @@ static void run_solver(
         return;
     }
 
+    /* solver_new leaves the acceptance threshold at zero.  Stopping at the
+     * first weak candidate makes Kotlin reject it without searching for the
+     * real solution.  Use the same log-odds floor on both sides of JNI. */
+    solver_set_keep_logodds(sp, 25.0);
+
+    /* simplexy and external JVM stars use screen pixels (zero based, Y down).
+     * The returned TAN WCS is consumed as FITS pixels (one based, Y up). */
+    for (int i = 0; i < field->N; i++) {
+        starxy_set_x(field, i, starxy_get_x(field, i) + 1.0);
+        starxy_set_y(field, i, h - starxy_get_y(field, i));
+    }
+
     /* scale 先验：视场宽度（度）→ arcsec/pixel（图像宽度方向） */
     double lo = (fov_lo_deg > 0.0) ? fov_lo_deg * 3600.0 / w : 0.0;
     double hi = (fov_hi_deg > 0.0) ? fov_hi_deg * 3600.0 / w : 0.0;
@@ -484,10 +523,11 @@ static void run_solver(
      * 因此后续 JSON 组装不得再回读 field。 */
     const int nstars = field->N;
     solver_set_field(sp, field); /* 所有权转移 */
+    solver_set_field_bounds(sp, 0.5, w + 0.5, 0.5, h + 0.5);
 
     int leaked = 0;
     /* counted=1：索引记账已在挂索引的临界区内完成（见 g_active_solvers） */
-    int timedout = run_with_timeout(sp, time_limit_sec, &leaked, 1);
+    int timedout = run_with_cancel(sp, time_limit_sec, &leaked, 1, cancelled, opaque);
 
     /* P0-2.6：所有权已让渡给被 detach 的 worker —— 它负责 solver_free(sp)
      * （连带释放 field，其所有权已在 solver_set_field 时转移）。此后本函数
@@ -508,11 +548,13 @@ static void run_solver(
         snprintf(out, outsz,
             "{\"ok\":true,"
             "\"ra\":%.8f,\"dec\":%.8f,"
+            "\"crpix1\":%.8f,\"crpix2\":%.8f,"
             "\"orient\":%.6f,\"pixscale\":%.6f,\"parity\":%d,"
             "\"nmatch\":%d,\"nstars\":%d,\"indexid\":%d,\"logodds\":%.4f,"
             "\"cd00\":%.10e,\"cd01\":%.10e,\"cd10\":%.10e,\"cd11\":%.10e,"
             "\"fieldw_arcmin\":%.4f,\"fieldh_arcmin\":%.4f}",
             wcs->crval[0], wcs->crval[1],
+            wcs->crpix[0], wcs->crpix[1],
             orient, pixscale, mo->parity ? 1 : 0,
             mo->nmatch, nstars, mo->indexid, mo->logodds,
             wcs->cd[0][0], wcs->cd[0][1], wcs->cd[1][0], wcs->cd[1][1],
@@ -577,13 +619,37 @@ static void free_string_array(char** arr, int n) {
 
 /* ---------------- JNI 导出 ---------------- */
 
+typedef struct {
+    JNIEnv* env;
+    jobject token;
+    jmethodID getter;
+} jni_cancel_probe;
+
+/* Only the JNI caller polls Java; detached workers retain no Java references. */
+static int jni_is_cancelled(void* value) {
+    jni_cancel_probe* probe = (jni_cancel_probe*)value;
+    if (!probe->token || !probe->getter) return 0;
+    return (*probe->env)->CallBooleanMethod(probe->env, probe->token, probe->getter) == JNI_TRUE;
+}
+
+static jmethodID cancel_getter(JNIEnv* env, jobject token) {
+    if (!token) return NULL;
+    jclass type = (*env)->GetObjectClass(env, token);
+    jmethodID getter = (*env)->GetMethodID(env, type, "isCancelled", "()Z");
+    (*env)->DeleteLocalRef(env, type);
+    return getter;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_starcam_astro_astro_StellarSolverNative_solve(
     JNIEnv* env, jclass cls,
     jfloatArray gray, jint w, jint h,
     jobjectArray indexPaths,
     jdouble fovLoDeg, jdouble fovHiDeg, jdouble plimOverride, jdouble timeLimitSec,
-    jfloatArray extStars) {
+    jfloatArray extStars, jobject token) {
+
+    jni_cancel_probe probe = { env, token, cancel_getter(env, token) };
+    if ((*env)->ExceptionCheck(env)) return NULL;
 
     int n = 0;
     float* g = jfloat_array_to_c(env, gray, &n);
@@ -599,7 +665,7 @@ Java_com_starcam_astro_astro_StellarSolverNative_solve(
     char out[JSON_BUF];
     run_solver(g, w, h, (const char* const*)paths, np,
                fovLoDeg, fovHiDeg, 0.0, 0.0, 0.0, 0, plimOverride, timeLimitSec,
-               en, es, out, sizeof(out));
+               en, es, out, sizeof(out), jni_is_cancelled, &probe);
     if (es) (*env)->ReleaseFloatArrayElements(env, extStars, es, JNI_ABORT);
 
     (*env)->ReleaseFloatArrayElements(env, gray, g, JNI_ABORT);
@@ -615,7 +681,10 @@ Java_com_starcam_astro_astro_StellarSolverNative_solvePriors(
     jdouble fovLoDeg, jdouble fovHiDeg,
     jdouble raDeg, jdouble decDeg, jdouble radiusDeg,
     jdouble plimOverride, jdouble timeLimitSec,
-    jfloatArray extStars) {
+    jfloatArray extStars, jobject token) {
+
+    jni_cancel_probe probe = { env, token, cancel_getter(env, token) };
+    if ((*env)->ExceptionCheck(env)) return NULL;
 
     int n = 0;
     float* g = jfloat_array_to_c(env, gray, &n);
@@ -634,7 +703,7 @@ Java_com_starcam_astro_astro_StellarSolverNative_solvePriors(
     run_solver(g, w, h, (const char* const*)paths, np,
                fovLoDeg, fovHiDeg,
                raDeg, decDeg, radiusDeg, use_radec,
-               plimOverride, timeLimitSec, en2, es2, out, sizeof(out));
+               plimOverride, timeLimitSec, en2, es2, out, sizeof(out), jni_is_cancelled, &probe);
     if (es2) (*env)->ReleaseFloatArrayElements(env, extStars, es2, JNI_ABORT);
 
     (*env)->ReleaseFloatArrayElements(env, gray, g, JNI_ABORT);

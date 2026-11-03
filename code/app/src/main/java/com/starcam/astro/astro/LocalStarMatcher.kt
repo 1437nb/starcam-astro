@@ -1934,7 +1934,7 @@ object LocalStarMatcher {
         // 多线程投票：每颗照片星的三角形投票相互独立（key 高位含 photoIdx），
         // 按照片星分块并行，各线程本地累加后合并 —— 结果与单线程完全一致。
         if (work.size <= 8) {
-            voteChunk(votes, work, 0, work.size, idx, maxSide, grid)
+            voteChunk(votes, work, 0, work.size, idx, maxSide, grid, ctx.token)
         } else {
             val chunkCount = Runtime.getRuntime().availableProcessors().coerceIn(2, work.size)
             val chunkSize = (work.size + chunkCount - 1) / chunkCount
@@ -1947,14 +1947,27 @@ object LocalStarMatcher {
                 if (from >= to) break
                 futures.add(votePool.submit(Callable {
                     val local = HashMap<Long, Int>()
-                    voteChunk(local, work, from, to, idx, maxSide, grid)
+                    voteChunk(local, work, from, to, idx, maxSide, grid, ctx.token)
                     local
                 }))
             }
-            for (f in futures) {
-                ctx.token?.check()
-                val local = f.get()
-                for ((k, v) in local) votes[k] = (votes[k] ?: 0) + v
+            try {
+                for (f in futures) {
+                    var local: HashMap<Long, Int>? = null
+                    while (local == null) {
+                        ctx.token?.check()
+                        try {
+                            local = f.get(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        } catch (_: java.util.concurrent.TimeoutException) {
+                            // Poll cancellation while worker votes are still running.
+                        } catch (e: java.util.concurrent.ExecutionException) {
+                            throw (e.cause ?: e)
+                        }
+                    }
+                    for ((k, v) in local) votes[k] = (votes[k] ?: 0) + v
+                }
+            } finally {
+                futures.forEach { it.cancel(true) }
             }
         }
 
@@ -2106,12 +2119,15 @@ object LocalStarMatcher {
         idx: StarIndex,
         maxSide: Float,
         grid: Map<Int, List<StarEntry>> = catGrid(),
+        token: SolveToken? = null,
     ) {
         // §0.74 计数器：局部累加、退出时一次性并入原子量。内循环每轮要扫数百万条目，
         // 在那里做 AtomicLong 自增会把生产路径拖慢（实测总时长反升）。
         var cTriangles = 0L; var cBuckets = 0L; var cEntries = 0L
         var cMerged = 0L; var cTaken = 0L
         for (pi in from until to) {
+            token?.check()
+            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException()
             val a = work[pi]
             val nbrs = work.mapIndexed { j, s -> j to dist(a, s) }
                 .filter { it.second in 1.5f..maxSide }
@@ -2119,6 +2135,7 @@ object LocalStarMatcher {
                 .take(14)
             if (nbrs.size < 2) continue
             for (i in nbrs.indices) {
+                token?.check()
                 for (j in i + 1 until nbrs.size) {
                     val bi = nbrs[i].first
                     val ci = nbrs[j].first

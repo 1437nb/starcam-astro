@@ -24,8 +24,9 @@ object ImageUtils {
      *  - 相机 RAW（CR2/NEF/ARW/DNG/ORF/RW2/RAF…）→ [RawPreview] 取内嵌预览 JPEG 再解；
      *  - 其余（JPEG/PNG/WebP…）走原来的 BitmapFactory 路径，行为一字不变。
      */
-    fun decodeSampledBitmap(path: String, maxDim: Int = 2048): Bitmap? {
-        if (FitsImage.isFitsPath(path)) return decodeFits(path, maxDim)
+    fun decodeSampledBitmap(path: String, maxDim: Int = 2048, checkActive: () -> Unit = {}): Bitmap? {
+        checkActive()
+        if (FitsImage.isFitsPath(path)) return decodeFits(path, maxDim, checkActive)
         if (RawPreview.isRawPath(path)) return decodeRawPreview(path, maxDim)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
@@ -39,8 +40,9 @@ object ImageUtils {
      * 而 FITS 本身没有位图概念。8 位量化发生在**拉伸之后**（先浮点拉伸再取整），
      * 与 JPEG 素材的既有链路口径一致。
      */
-    private fun decodeFits(path: String, maxDim: Int): Bitmap? {
-        val frame = FitsImage.decode(path, maxDim) ?: return null
+    private fun decodeFits(path: String, maxDim: Int, checkActive: () -> Unit): Bitmap? {
+        val frame = FitsImage.decode(path, maxDim, checkActive) ?: return null
+        checkActive()
         return grayToBitmap(frame.gray, frame.w, frame.h)
     }
 
@@ -210,7 +212,11 @@ object ImageUtils {
         val cleaned = base.map { c ->
             if (c.isLetterOrDigit() && c.code < 128 || c == '.' || c == '_' || c == '-') c else '_'
         }.joinToString("")
-        return cleaned.trimStart('.').take(96).ifEmpty { "unnamed.bin" }
+        val safe = cleaned.trimStart('.').ifEmpty { "unnamed.bin" }
+        if (safe.length <= 96) return safe
+        val suffix = safe.substringAfterLast('.', "").takeIf { it.length in 1..10 }
+            ?.let { ".$it" }.orEmpty()
+        return safe.take(96 - suffix.length) + suffix
     }
 
     /**

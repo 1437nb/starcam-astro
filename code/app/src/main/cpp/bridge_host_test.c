@@ -87,6 +87,10 @@ MatchObj* solver_get_best_match(solver_t* s) {
 }
 
 void solver_set_field(solver_t* s, starxy_t* field) { (void)s; starxy_free(field); }
+void solver_set_field_bounds(solver_t* s, double xlo, double xhi, double ylo, double yhi) {
+    (void)s; (void)xlo; (void)xhi; (void)ylo; (void)yhi;
+}
+void solver_set_keep_logodds(solver_t* s, double logodds) { (void)s; (void)logodds; }
 void solver_set_radec(solver_t* s, double ra, double dec, double r) {
     (void)s; (void)ra; (void)dec; (void)r;
 }
@@ -266,7 +270,7 @@ static void* run_solver_thread(void* p) {
                0.0, 0.0, 0.0, 0.0, 0.0, 0, /* 无视场/天区先验 */
                0.0, 5.0,                  /* 默认提星阈值、5s 上限（远大于 0.6s 求解） */
                (int)(1 + 3 * 6), a->ext,
-               a->out, sizeof(a->out));
+               a->out, sizeof(a->out), NULL, NULL);
     return NULL;
 }
 
@@ -340,6 +344,47 @@ static void scenario_inflight_solve_blocks_release(void) {
     g_fake_run_sec = 0.0;
 }
 
+static int cancelled_after(void* pointer) {
+    return mono_seconds() >= *(double*)pointer;
+}
+
+static void scenario_cancel_reclaims_worker(void) {
+    printf("\n[场景 6] 用户取消：及时返回并由 worker 回收所有权\n");
+    g_fake_run_sec = 0.8;
+    g_solver_free_calls = 0;
+    int before = g_leaked_threads;
+    double old_grace = g_quit_join_grace_sec;
+    g_quit_join_grace_sec = 0.02;
+    solver_t* sp = solver_new();
+    int leaked = 0;
+    double started = mono_seconds();
+    double cancel_at = started + 0.04;
+    int rc = run_with_cancel(sp, 5.0, &leaked, 0, cancelled_after, &cancel_at);
+    CHECK(rc == RUN_TIMEOUT, "取消应走中止返回路径（rc=%d）", rc);
+    CHECK(leaked == 1, "不可中断 worker 应移交所有权，不能由调用方释放");
+    CHECK(mono_seconds() - started < 0.5, "取消不应等满 5s 原生预算");
+    wait_leaked_back_to(before);
+    CHECK(g_leaked_threads == before, "worker 退出后取消账目归零");
+    CHECK(g_solver_free_calls == 1, "取消后 solver 恰好释放一次");
+    g_quit_join_grace_sec = old_grace;
+    g_fake_run_sec = 0.0;
+}
+
+static void scenario_cancel_during_join_grace(void) {
+    printf("\n[场景 7] 超时宽限期间取消：缩短等待且不重复释放\n");
+    g_fake_run_sec = 0.8;
+    g_solver_free_calls = 0;
+    int before = g_leaked_threads, leaked = 0;
+    solver_t* sp = solver_new();
+    double started = mono_seconds(), cancel_at = started + 0.1;
+    int rc = run_with_cancel(sp, 0.02, &leaked, 0, cancelled_after, &cancel_at);
+    CHECK(rc == RUN_TIMEOUT && leaked == 1, "宽限期间取消仍应安全移交 worker");
+    CHECK(mono_seconds() - started < 0.5, "宽限期间取消不应等满默认宽限期");
+    wait_leaked_back_to(before);
+    CHECK(g_leaked_threads == before && g_solver_free_calls == 1, "取消后账目归零且只释放一次");
+    g_fake_run_sec = 0.0;
+}
+
 int main(void) {
     printf("=== astro_bridge 主机测试（P0-2.6 超时接盘 + §0.106 在飞回收闸门）===\n");
     scenario_normal();
@@ -347,6 +392,8 @@ int main(void) {
     scenario_release_gate();
     scenario_after_detach_regression();
     scenario_inflight_solve_blocks_release();
+    scenario_cancel_reclaims_worker();
+    scenario_cancel_during_join_grace();
     printf("\n==================================================\n");
     if (g_failures) {
         printf("FAILED：%d 项断言未通过\n", g_failures);

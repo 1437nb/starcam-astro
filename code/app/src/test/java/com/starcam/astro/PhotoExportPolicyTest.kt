@@ -18,7 +18,7 @@ class PhotoExportPolicyTest {
         val image = PhotoExportPolicy.estimateBytes(4000, 3000, PhotoSourceKind.IMAGE, 24000000, false)
         val fits = PhotoExportPolicy.estimateBytes(4000, 3000, PhotoSourceKind.FITS, 24000000, false)
         val raw = PhotoExportPolicy.estimateBytes(4000, 3000, PhotoSourceKind.RAW_PREVIEW, 24000000, false)
-        assertTrue(fits > image * 4)
+        assertEquals(4000L * 3000 * 12 + PhotoExportPolicy.RESERVE, fits)
         assertEquals(image + 24000000L * 3, raw)
     }
 

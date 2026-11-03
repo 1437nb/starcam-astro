@@ -41,12 +41,14 @@ class OnlineNovaStep : SolveStep {
         )
 
         val upload = File.createTempFile("starcam-upload-", ".jpg", ctx.context.cacheDir)
+        var onlineDisplay: android.graphics.Bitmap? = null
+        var delivered = false
         try {
             val ok = ImageUtils.compressForUpload(ctx.imagePath, upload) != null
             if (!ok) return StepOutcome.Failure("图片压缩上传失败")
             ctx.token.check()
 
-            val onlineDisplay = ImageUtils.decodeSampledBitmap(upload.absolutePath, 2200)
+            onlineDisplay = ImageUtils.decodeSampledBitmap(upload.absolutePath, 2200)
                 ?: return StepOutcome.Failure("无法解码上传图片副本")
 
             val remainingMs = (ctx.remainingSec * 1000).toLong().coerceAtLeast(1000L)
@@ -83,8 +85,12 @@ class OnlineNovaStep : SolveStep {
                 System.currentTimeMillis() - ctx.logT0,
             )
             StarSolver.writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, "在线识别", detail)
+            ctx.token.check()
+            coroutineContext.ensureActive()
+            delivered = true
             return StepOutcome.Success(EngineResult(solve, engine, detail, onlineDisplay))
         } finally {
+            if (!delivered) onlineDisplay?.takeUnless { it.isRecycled }?.recycle()
             upload.delete()
         }
     }

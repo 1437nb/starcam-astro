@@ -11,6 +11,7 @@
 /* 真身还有 crpix/ctype 等字段；桥只读 crval 与 cd。 */
 typedef struct {
     double crval[2];
+    double crpix[2];
     double cd[2][2];
 } tan_t;
 
@@ -35,6 +36,8 @@ void solver_run(solver_t* sp);
 anbool solver_did_solve(const solver_t* s);
 MatchObj* solver_get_best_match(solver_t* s);
 void solver_set_field(solver_t* s, starxy_t* field);
+void solver_set_field_bounds(solver_t* s, double xlo, double xhi, double ylo, double yhi);
+void solver_set_keep_logodds(solver_t* s, double logodds);
 void solver_set_radec(solver_t* s, double ra, double dec, double radius_deg);
 void solver_set_quad_size_fraction(solver_t* s, double lo, double hi);
 void solver_add_index(solver_t* s, index_t* idx);

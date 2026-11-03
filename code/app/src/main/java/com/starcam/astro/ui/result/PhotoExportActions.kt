@@ -64,6 +64,8 @@ internal fun PhotoExportActions(
                 throw e
             } catch (e: PhotoExportException) {
                 sourceError = exportFailureMessage(e.reason)
+            } catch (_: com.starcam.astro.util.ImageMemoryLimitException) {
+                sourceError = I18n.Export.memoryLimit
             } catch (_: OutOfMemoryError) {
                 sourceError = I18n.Export.memoryLimit
             } catch (_: Exception) {
@@ -92,6 +94,8 @@ internal fun PhotoExportActions(
                 throw e
             } catch (e: PhotoExportException) {
                 saveError = exportFailureMessage(e.reason)
+            } catch (_: com.starcam.astro.util.ImageMemoryLimitException) {
+                saveError = I18n.Export.memoryLimit
             } catch (_: OutOfMemoryError) {
                 saveError = I18n.Export.memoryLimit
             } catch (_: Exception) {

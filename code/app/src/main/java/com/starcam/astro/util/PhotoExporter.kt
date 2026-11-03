@@ -143,7 +143,10 @@ object PhotoExporter {
         try {
             coroutineContext.ensureActive()
             decoded = when (info.kind) {
-                PhotoSourceKind.FITS -> ImageUtils.decodeSampledBitmap(input.path, maxOf(info.width, info.height))
+                PhotoSourceKind.FITS -> {
+                    val workContext = coroutineContext
+                    ImageUtils.decodeSampledBitmap(input.path, maxOf(info.width, info.height)) { workContext.ensureActive() }
+                }
                 PhotoSourceKind.RAW_PREVIEW -> {
                     val jpeg = RawPreview.extractJpeg(input.path) ?: throw PhotoExportException(PhotoExportFailure.CANNOT_READ)
                     BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, options)

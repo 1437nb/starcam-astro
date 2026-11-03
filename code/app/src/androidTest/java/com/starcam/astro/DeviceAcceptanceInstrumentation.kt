@@ -27,6 +27,7 @@ import com.starcam.astro.util.PhotoExportInput
 import com.starcam.astro.util.PhotoExporter
 import com.starcam.astro.util.PhotoSourceKind
 import com.starcam.astro.ui.batch.BatchViewModel
+import com.starcam.astro.ui.batch.BatchOutcome
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -59,6 +60,130 @@ class DeviceAcceptanceInstrumentation : Instrumentation() {
                 put("nativeSolverAvailable", NativeEngineProbe.available)
             })
             val source = jpeg("source.jpg", 1600, 1000)
+            case("long-raw-name-keeps-extension-and-remains-decodable") {
+                val raw = rawPreview(source.readBytes())
+                val named = File(fixtures, "camera_" + "x".repeat(160) + ".dng").apply { writeBytes(raw.readBytes()) }
+                val uri = androidx.core.content.FileProvider.getUriForFile(targetContext, "${targetContext.packageName}.acceptance.files", named)
+                val importer = com.starcam.astro.ui.home.PhotoImportViewModel(targetContext.applicationContext as android.app.Application)
+                try {
+                    runOnMainSync { importer.importPhotos(listOf(uri)) }
+                    await { importer.state.finished }
+                    val path = importer.state.paths.single()
+                    check(path.endsWith(".dng"))
+                    requireNotNull(com.starcam.astro.util.ImageUtils.decodeSampledBitmap(path)).useBitmap { check(it.width == 1600) }
+                } finally { runOnMainSync { importer.cancel() } }
+            }
+            case("cancel-import-then-start-again-keeps-new-state") {
+                val partial = File(fixtures, "cancel-source.bin")
+                java.io.RandomAccessFile(partial, "rw").use { it.setLength(32L * 1024 * 1024) }
+                fun uri(file: File) = androidx.core.content.FileProvider.getUriForFile(targetContext, "${targetContext.packageName}.acceptance.files", file)
+                val importer = com.starcam.astro.ui.home.PhotoImportViewModel(targetContext.applicationContext as android.app.Application)
+                try {
+                    repeat(3) {
+                        runOnMainSync { importer.importPhotos(listOf(uri(partial))) }
+                        SystemClock.sleep(2)
+                        runOnMainSync { importer.cancel() }
+                    }
+                    runOnMainSync { importer.importPhotos(listOf(uri(source))) }
+                    await { importer.state.finished }
+                    check(!importer.state.running && importer.state.failed == 0)
+                    check(File(importer.state.paths.single()).readBytes().contentEquals(source.readBytes()))
+                } finally { runOnMainSync { importer.cancel() } }
+            }
+            case("large-fits-uses-bounded-android-bitmap-decoding") {
+                val file = largeFits()
+                requireNotNull(com.starcam.astro.util.ImageUtils.decodeSampledBitmap(file.path, 2200)).useBitmap {
+                    check(it.width == 2000 && it.height == 1333)
+                }
+            }
+            case("raw-container-over-budget-is-rejected-before-read") {
+                val file = File(fixtures, "oversized-raw.dng")
+                java.io.RandomAccessFile(file, "rw").use { it.setLength(Runtime.getRuntime().maxMemory()) }
+                try { com.starcam.astro.util.RawPreview.extractJpeg(file.path); error("Expected memory preflight") }
+                catch (_: com.starcam.astro.util.ImageMemoryLimitException) { }
+            }
+            case("cached-online-result-rebuilds-rotation-when-cache-is-missing") {
+                val file = jpeg("cached-portrait.jpg", 800, 600)
+                ExifInterface(file).apply { setAttribute(ExifInterface.TAG_ORIENTATION, "6"); saveAttributes() }
+                val solve = SolveResult(66.0, 20.0, 288.0, 0.0, -1, 600, 800, subId = 1,
+                    wcs = WcsTransform(300.5, 400.5, 66.0, 20.0, -.08, 0.0, 0.0, .08))
+                val vm = com.starcam.astro.ui.result.ResultViewModel(targetContext.applicationContext as android.app.Application)
+                try {
+                    runOnMainSync { vm.initiateSolve(file.path, null, solve, "nova.astrometry.net",
+                        com.starcam.astro.data.SettingsRepository(targetContext), File(fixtures,"missing-cache.png").path) }
+                    await { vm.state !is com.starcam.astro.ui.result.ResultUiState.Loading }
+                    val state = vm.state as? com.starcam.astro.ui.result.ResultUiState.Success ?: error(vm.state.toString())
+                    check(state.bitmap.width == 600 && state.bitmap.height == 800 && state.solveUsesUprightPixels == true)
+                    check(Color.red(state.bitmap.getPixel(560,40)) > 180)
+                } finally { runOnMainSync { vm.onLeaveScreen() } }
+            }
+            case("successful-individual-retry-replaces-batch-failure-once") {
+                val file = File(fixtures, "retry-restored.jpg")
+                val app = targetContext.applicationContext as android.app.Application
+                val settings = com.starcam.astro.data.SettingsRepository(targetContext)
+                val batch = BatchViewModel(app)
+                val vm = com.starcam.astro.ui.result.ResultViewModel(app)
+                try {
+                    runOnMainSync { batch.start(listOf(file.path), settings) }
+                    await { batch.finished }
+                    check(batch.counts.failed == 1)
+                    targetContext.assets.open("offline_photos/photo4963.jpg").use { input -> file.outputStream().use { input.copyTo(it) } }
+                    runOnMainSync { vm.initiateSolve(file.path, null, null, null, settings) }
+                    await(150000) { vm.state !is com.starcam.astro.ui.result.ResultUiState.Loading }
+                    val state = vm.state as? com.starcam.astro.ui.result.ResultUiState.Success ?: error(vm.state.toString())
+                    repeat(2) { runOnMainSync { batch.recordRetry(0, state.solve, state.engine, state.engineDetail) } }
+                    check(batch.counts.solved == 1 && batch.counts.failed == 0 && batch.counts.saved == 0)
+                    check((batch.outcomes.single() as BatchOutcome.Solved).solve == state.solve)
+                } finally { runOnMainSync { vm.onLeaveScreen(); batch.cancel() } }
+            }
+            case("racing-engines-do-not-recycle-the-shared-result-bitmap") {
+                Bitmap.createBitmap(4,4,Bitmap.Config.ARGB_8888).useBitmap { bitmap ->
+                    val solve = SolveResult(0.0,0.0,1.0,0.0,0,4,4)
+                    val success = com.starcam.astro.astro.steps.StepOutcome.Success(
+                        com.starcam.astro.astro.EngineResult(solve,com.starcam.astro.astro.SolveEngine.LOCAL_MATCHER,"test",bitmap))
+                    runBlocking {
+                        com.starcam.astro.astro.raceEngineOutcomes(com.starcam.astro.astro.SolveToken(),
+                            { kotlinx.coroutines.delay(20); success },
+                            { kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { kotlinx.coroutines.delay(60); success.copy() } },
+                            sharedBitmap=bitmap)
+                    }
+                    check(!bitmap.isRecycled)
+                    bitmap.getPixel(0,0)
+                }
+            }
+            if (NativeEngineProbe.available) {
+                case("native-jni-polls-the-cancelled-kotlin-token") {
+                    val method = com.starcam.astro.astro.StellarSolverNative::class.java.declaredMethods.single {
+                        it.name == "solve" && java.lang.reflect.Modifier.isNative(it.modifiers)
+                    }.apply { isAccessible = true }
+                    val token = com.starcam.astro.astro.SolveToken().apply { cancel() }
+                    val raw = method.invoke(null, FloatArray(1024), 32, 32, emptyArray<String>(), 10.0, 180.0, 0.0, 10.0, null, token) as String
+                    check(JSONObject(raw).optString("error") == "cancelled")
+                }
+                case("rebuilt-native-solver-solves-a-public-photo-with-truth-check") {
+                    val file = File(fixtures,"native-public.jpg")
+                    targetContext.assets.open("offline_photos/photo4963.jpg").use { input -> file.outputStream().use { input.copyTo(it) } }
+                    requireNotNull(com.starcam.astro.util.ImageUtils.decodeSampledBitmap(file.path,2200)).useBitmap { bitmap ->
+                        val solve = requireNotNull(com.starcam.astro.astro.StellarSolverNative.solveBitmap(targetContext,bitmap,65.0,90.0,15.0,token=com.starcam.astro.astro.SolveToken(timeoutMillis=17000)))
+                        check(kotlin.math.abs(solve.raDeg-78.57)<2 && kotlin.math.abs(solve.decDeg-20.62)<2)
+                        check((solve.logodds ?: 0.0) >= 25.0 && (solve.nMatch ?: 0) >= 2)
+                        val wcs = requireNotNull(solve.wcs)
+                        // Aldebaran's J2000 position must land on the actual bright
+                        // source, catching Y inversion and a fabricated center CRPIX.
+                        val point = wcs.skyToScreen(68.98016,16.5093,bitmap.width,bitmap.height)
+                        var peak = 0
+                        for (y in (point[1].toInt()-12)..(point[1].toInt()+12)) {
+                            for (x in (point[0].toInt()-12)..(point[0].toInt()+12)) {
+                                if (x in 0 until bitmap.width && y in 0 until bitmap.height) {
+                                    val color = bitmap.getPixel(x,y)
+                                    peak = maxOf(peak,(0.299*Color.red(color)+0.587*Color.green(color)+0.114*Color.blue(color)).toInt())
+                                }
+                            }
+                        }
+                        check(peak > 100) { "Native WCS misses Aldebaran: ${point.toList()}, peak=$peak" }
+                    }
+                }
+            }
             case("mixed-photo-raw-fits-import-preserves-formats") {
                 val files = listOf(source, fits(), rawPreview(source.readBytes()))
                 val uris = files.map {
@@ -217,6 +342,27 @@ class DeviceAcceptanceInstrumentation : Instrumentation() {
         result.put("nativeHeapAfterBytes", Debug.getNativeHeapAllocatedSize())
         results.put(result)
         sendStatus(0, Bundle().apply { putString("stream", "${name}: ${result.getString("status")}\n") })
+    }
+
+    private fun await(timeout: Long = 15000, ready: () -> Boolean) {
+        val deadline = SystemClock.elapsedRealtime() + timeout
+        while (!ready() && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(50)
+        check(ready()) { "Android operation timed out" }
+    }
+
+    private fun largeFits(): File {
+        val file = File(fixtures,"large.fits")
+        val cards = listOf("SIMPLE  = T","BITPIX  = 16","NAXIS   = 2","NAXIS1  = 6000","NAXIS2  = 4000","END")
+        file.outputStream().buffered().use { out ->
+            out.write(cards.joinToString(""){it.padEnd(80)}.padEnd(2880).toByteArray(Charsets.US_ASCII))
+            val row = ByteArray(12000)
+            for(y in 0 until 4000) {
+                for(x in 0 until 6000) { val v=(x+y)%32768; row[x*2]=(v ushr 8).toByte(); row[x*2+1]=v.toByte() }
+                out.write(row)
+            }
+            out.write(ByteArray((2880-48_000_000%2880)%2880))
+        }
+        return file
     }
 
     private fun export(file: File, original: Boolean, online: Boolean? = false, flags: LayerFlags = noLayers): ExportedPhoto = runBlocking {

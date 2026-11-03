@@ -30,6 +30,7 @@ import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -95,6 +96,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         solveToken = token
 
         solveJob = viewModelScope.launch {
+            val workContext = kotlin.coroutines.coroutineContext
             state = ResultUiState.Loading(null, I18n.Result.preparingPhoto)
             detectedStars = emptyList()
             detectedStarTotal = 0
@@ -102,7 +104,14 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 if (cachedSolve != null) {
                     val display = withContext(Dispatchers.IO) {
-                        ImageUtils.decodeSampledBitmap(cachedDisplayPath ?: imagePath, 2200)
+                        val check = { workContext.ensureActive(); token.check() }
+                        val cached = cachedDisplayPath?.let { ImageUtils.decodeSampledBitmap(it, 2200, check) }
+                        cached ?: ImageUtils.decodeSampledBitmap(imagePath, 2200, check)?.let {
+                            // Rebuild the same EXIF basis as the online upload after retry/history.
+                            if (cachedSolve.subId != null || cachedEngine?.contains("nova.astrometry.net", true) == true) {
+                                ImageUtils.rotateByExif(imagePath, it)
+                            } else it
+                        }
                     }
                     if (display == null) {
                         state = ResultUiState.Error(I18n.Result.cannotReadImage)
@@ -124,7 +133,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
 
                 if (demoRegion != null) {
                     val display = withContext(Dispatchers.IO) {
-                        ImageUtils.decodeSampledBitmap(imagePath, 2200)
+                        ImageUtils.decodeSampledBitmap(imagePath, 2200) { workContext.ensureActive(); token.check() }
                     }
                     if (display == null) {
                         state = ResultUiState.Error(I18n.Result.cannotReadImage)
@@ -148,7 +157,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
 
                 // 真实照片求解流程
                 val display = withContext(Dispatchers.IO) {
-                    ImageUtils.decodeSampledBitmap(imagePath, 2200)
+                    ImageUtils.decodeSampledBitmap(imagePath, 2200) { workContext.ensureActive(); token.check() }
                 }
                 if (display == null) {
                     state = ResultUiState.Error(I18n.Result.cannotReadImage)
@@ -208,7 +217,12 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
             } catch (e: CancellationException) {
                 // 取消时不弹出错误对话框，静默中止
             } catch (e: Throwable) {
-                state = ResultUiState.Error("求解异常：${e.message}")
+                state = ResultUiState.Error(when (e) {
+                    is OutOfMemoryError -> I18n.Result.imageMemoryLimit
+                    is com.starcam.astro.util.ImageMemoryLimitException -> I18n.Result.imageMemoryLimit
+                    is com.starcam.astro.astro.SolveBudgetExceeded -> I18n.Result.timeBudgetExceeded
+                    else -> if (LocaleState.isEnglish) "Solving failed: ${e.message}" else "求解异常：${e.message}"
+                })
             }
         }
     }

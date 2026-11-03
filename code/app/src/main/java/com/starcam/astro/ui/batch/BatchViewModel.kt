@@ -77,7 +77,8 @@ class BatchViewModel(application: Application) : AndroidViewModel(application) {
         var bitmap: Bitmap? = null
         var onlineBitmap: Bitmap? = null
         try {
-            val display = ImageUtils.decodeSampledBitmap(path, 2200)
+            val workContext = kotlin.coroutines.coroutineContext
+            val display = ImageUtils.decodeSampledBitmap(path, 2200) { workContext.ensureActive(); token.check() }
                 ?: return BatchOutcome.ProcessingFailed(I18n.Result.cannotReadImage)
             bitmap = display
             val result = StarSolver.solve(context, display, path, settings, token = token) { }
@@ -118,7 +119,13 @@ class BatchViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            return BatchOutcome.ProcessingFailed(I18n.Batch.processingFailed(e.message))
+            return BatchOutcome.ProcessingFailed(when (e) {
+                is com.starcam.astro.util.ImageMemoryLimitException -> I18n.Result.imageMemoryLimit
+                is com.starcam.astro.astro.SolveBudgetExceeded -> I18n.Result.timeBudgetExceeded
+                else -> I18n.Batch.processingFailed(e.message)
+            })
+        } catch (_: OutOfMemoryError) {
+            return BatchOutcome.ProcessingFailed(I18n.Result.imageMemoryLimit)
         } finally {
             onlineBitmap?.takeIf { it !== bitmap && !it.isRecycled }?.recycle()
             bitmap?.takeUnless { it.isRecycled }?.recycle()
@@ -128,6 +135,17 @@ class BatchViewModel(application: Application) : AndroidViewModel(application) {
     fun cancel() {
         token.cancel()
         job?.cancel()
+    }
+
+    /** Main-thread retry update; retain only metadata, and recompute rather than increment counts. */
+    fun recordRetry(index: Int, solve: com.starcam.astro.astro.SolveResult,
+                    engine: com.starcam.astro.astro.SolveEngine?, detail: String?) {
+        if (!finished || index !in outcomes.indices || solve.wcs == null) return
+        val label = listOfNotNull(engine?.label(LocaleState.isEnglish), detail?.takeIf { it.isNotBlank() }).joinToString(" · ")
+        outcomes = outcomes.toMutableList().also { it[index] = BatchOutcome.Solved(solve, label) }
+        val tally = BatchTally()
+        outcomes.filterNotNull().forEach(tally::record)
+        counts = tally.snapshot()
     }
 
     override fun onCleared() {

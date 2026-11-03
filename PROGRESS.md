@@ -5,14 +5,16 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-11-03（v1.5.94 官方签名 Release 构建 / 验签 / 归档完成；357 项 JVM 与 60 项模拟器验收通过记录见 docs/118）
-**当前基线**：v1.5.94（versionCode 114，§0.133 统一导入；本地最近签名 Release 为 v1.5.94，最近公开 Release 仍为 v1.5.92 / tag `v1.5.92`）
+**最后更新**：2026-11-03（v1.5.95 稳定性收尾完成：373 项完整 JVM、152 项模拟器执行及 C 桥 28 条断言通过；仅 Debug，详见 docs/119）
+**当前基线**：v1.5.95（versionCode 115，§0.134 稳定性收尾，仅 Debug；本地最近签名 Release 为 v1.5.94，最近公开 Release 仍为 v1.5.92 / tag `v1.5.92`）
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
-**构建环境**：本机拥有全套高配构建环境，Kotlin 编译、单元测试与 APK 打包均在本机完成。最新完整 JVM 报告为 56 类 / 357 项、0 失败 / 0 错误 / 0 跳过（不设置 skipPhotoTests，含 46 类 / 336 项常规套件和 10 类 / 21 项本机素材回归）；公开 JPEG 与本机 gray12 均 12/12 真解。窄场观察台 12 解出 / 0 错解 / 20 未解出，测试通过不代表所有素材均能解出。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
+**构建环境**：本机拥有全套高配构建环境，Kotlin 编译、单元测试与 APK 打包均在本机完成。最新完整 JVM 报告为 59 类 / 373 项、0 失败 / 0 错误 / 0 跳过（不设置 skipPhotoTests，含 49 类 / 352 项常规套件和 10 类 / 21 项本机素材回归）；公开 JPEG 与本机 gray12 均 12/12 真解。窄场观察台 12 解出 / 0 错解 / 20 未解出，测试通过不代表所有素材均能解出。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
 
 ---
 
 ## 一、下一步（建议优先级，待开发者拍板）
+
+> **2026-11-03 稳定性收尾完成（v1.5.95 / §0.134）**：取消与预算贯穿、流式大 FITS / RAW 内存提示、导入隔离、失败项重试回写、在线缓存方向、竞速报告与共享位图收尾已修复；缺失原生依赖已由固定源码本机 NDK / CMake 构建替代。原生接受门槛、真实 CRPIX / FITS 方向与灰度诊断写盘问题已按实测修复。完整 JVM 59 类 / 373 项、零失败 / 错误 / 跳过；两系统各跑 native 与 JVM 回退，共 152 项功能 / UI 执行通过；C 桥 7 场景 / 28 断言通过，lintDebug 0 错误 / 9 警告。默认 Debug 已恢复仅 arm64 求解库。下一步 ARM 真机相机 / AR、取消与大图压力验收，清单见 docs/119；本轮没有构建 Release 或推送。
 
 > **2026-11-03 v1.5.94 Release 已构建**：按「跑 release」完成本机 R8 官方签名 APK，assembleRelease 与 lintVitalRelease 通过（2m 33s），16,657,790 字节，与 v1.5.93 同签名可覆盖升级。归档 `apk/StarCam-v1.5.94-unified-photo-import-release.apk` 和 `.apk.sha256`，SHA-256 `C3178E75E79B726CAF8244A29B594EDAF1200C5492EE34AF0D5507696E1DC8BD`。包内容、Debug 测试入口排除、索引和 native 对齐已校验。未推送 / 发布 GitHub；下一步实体手机运行验收，推送 / 公开发布按后续明确指令执行。
 
@@ -120,6 +122,14 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-11-03（§0.134 / v1.5.95：稳定性收尾）**：
+  - 取消与单调时钟预算覆盖协程、HTTP、投票线程与 JNI；竞速独立报告、失败诊断合并、共享位图安全收尾；失败项重试回写批量统计，在线缓存缺失恢复上传方向。
+  - FITS 改为有界分块三遍扫描与精确分位，不再全图多份排序；128 MiB 独立 JVM 成功预览 6000×4000 合成 FITS，超预算原尺寸与 RAW 明确拒绝；导入取消后旧任务不污染新任务。
+  - 旧 astrometry-local 资产无备份：用固定 SHA-256 上游归档恢复 Windows 源码构建，arm64 / x86_64 均成功；修复低置信候选提前终止、WCS CRPIX / Y 轴和无缓冲灰度诊断耗时。最终库 SHA 与桥指纹见 docs/compatibility/20261103-v1.5.95-native-build.json。
+  - 强制重编完整 JVM：BUILD SUCCESSFUL in 6m 58s，59 类 / 373 项、0 失败 / 错误 / 跳过。公开 JPEG 与 gray12 各 12/12 真解；窄场仍 12 解出 / 0 错解 / 20 未解出。
+  - Android 9 / 14 各完成新 native 模式 30 功能 + 9 UI、默认 JVM 回退 28 功能 + 9 UI，共 152 项执行通过；C 桥 7 场景 / 28 断言通过；lintDebug 0 错误 / 9 警告。默认 Debug APK SHA-256 `35b7e19c4cb397957043b0902704b3a73f070dd9fe2da0f796ab0c57abfe9263`。
+  - 已同步中英文 README、AGENTS、交接说明及 docs/119。只构建 Debug，没有构建新 Release 或推送；ARM 实体手机、相机 / AR、真实相册提供方与长时压力仍待验证。
 
 - **2026-11-03（v1.5.94 本地签名 Release）**：
   - 基线 `a6908a8`，本机 assembleRelease（2 GiB 堆、offline、R8），BUILD SUCCESSFUL in 2m 33s，lintVitalRelease 通过；版本保持 1.5.94 / 114 / unified-photo-import。

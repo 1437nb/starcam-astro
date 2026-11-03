@@ -31,3 +31,7 @@
 -dontwarn com.google.errorprone.annotations.CheckReturnValue
 -dontwarn com.google.errorprone.annotations.Immutable
 -dontwarn com.google.errorprone.annotations.RestrictedApi
+# Polled by the JNI caller thread; preserve the Kotlin Boolean getter name.
+-keepclassmembers class com.starcam.astro.astro.SolveToken {
+    public boolean isCancelled();
+}

@@ -16,7 +16,6 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -67,9 +66,13 @@ class PlateSolveClient(
             globalInFlightKeys.add(key)
         }
         try {
-            solveInner(image, apiKey, timeoutMs, onProgress)
+            kotlinx.coroutines.withTimeout(timeoutMs.coerceAtLeast(1L)) {
+                solveInner(image, apiKey, timeoutMs, onProgress)
+            }
         } finally {
-            globalUploadLock.withLock { globalInFlightKeys.remove(key) }
+            withContext(kotlinx.coroutines.NonCancellable) {
+                globalUploadLock.withLock { globalInFlightKeys.remove(key) }
+            }
         }
     }
 
@@ -79,7 +82,7 @@ class PlateSolveClient(
         timeoutMs: Long,
         onProgress: (String) -> Unit,
     ): SolveResult {
-        val overallDeadline = System.currentTimeMillis() + timeoutMs
+        val overallDeadline = (System.nanoTime() / 1_000_000) + timeoutMs
         onProgress("正在登录识别服务…")
         val session = login(apiKey)
 
@@ -87,15 +90,15 @@ class PlateSolveClient(
         val subId = upload(session, image)
 
         onProgress("排队等待解算…")
-        val waitBudget = (overallDeadline - System.currentTimeMillis()).coerceAtLeast(1000L)
+        val waitBudget = (overallDeadline - (System.nanoTime() / 1_000_000)).coerceAtLeast(1000L)
         val jobId = waitForJob(subId, minOf(WAIT_FOR_JOB_TIMEOUT_MS, waitBudget))
 
-        val remainingBudget = (overallDeadline - System.currentTimeMillis()).coerceAtLeast(1000L)
-        val deadline = System.currentTimeMillis() + minOf(SOLVE_TIMEOUT_MS, remainingBudget)
+        val remainingBudget = (overallDeadline - (System.nanoTime() / 1_000_000)).coerceAtLeast(1000L)
+        val deadline = (System.nanoTime() / 1_000_000) + minOf(SOLVE_TIMEOUT_MS, remainingBudget)
         var lastStatus = ""
         var interval = POLL_INTERVAL_INITIAL_MS
         while (true) {
-            if (System.currentTimeMillis() > deadline) {
+            if ((System.nanoTime() / 1_000_000) > deadline) {
                 throw PlateSolveException(
                     "解算超时（已达预算限制），可能天区恒星较少或服务正忙",
                     PlateSolveException.Kind.TIMEOUT,
@@ -144,37 +147,34 @@ class PlateSolveClient(
         else -> "处理中（$status）…"
     }
 
-    /** 解析 Retry-After（秒数形式；HTTP 日期形式忽略）。 */
-    private fun retryAfterMs(resp: Response): Long? =
-        resp.header("Retry-After")?.trim()?.toLongOrNull()?.times(1000L)
-
     /**
      * POST 并解析 JSON。网络类错误自动重试一次（弱网下体验明显改善），
      * HTTP 429/503 会带上 Retry-After 供调用方退避。
      */
-    private fun postJson(url: String, body: RequestBody): JSONObject =
+    private suspend fun postJson(url: String, body: RequestBody): JSONObject =
         postJsonWithRetry(url, body).first
 
-    private fun postJsonWithRetry(url: String, body: RequestBody): Pair<JSONObject, Long?> {
+    private suspend fun postJsonWithRetry(url: String, body: RequestBody): Pair<JSONObject, Long?> {
         var lastError: IOException? = null
         for (attempt in 0 until MAX_NETWORK_RETRIES) {
             try {
                 val req = Request.Builder().url(url).post(body).build()
-                client.newCall(req).execute().use { resp ->
-                    val text = resp.body?.string().orEmpty()
+                client.newCall(req).awaitText().let { resp ->
+                    val text = resp.text
                     if (resp.code == 429 || resp.code == 503) {
                         throw PlateSolveException(
                             "识别服务繁忙（HTTP ${resp.code}），请稍后重试。",
                             PlateSolveException.Kind.TIMEOUT,
                         )
                     }
-                    if (!resp.isSuccessful) {
+                    if (resp.code !in 200..299) {
                         throw PlateSolveException(
                             "请求失败（HTTP ${resp.code}）",
                             PlateSolveException.Kind.NETWORK,
                         )
                     }
-                    return JSONObject(text) to retryAfterMs(resp)
+                    return JSONObject(text) to resp.retryAfter?.trim()?.toLongOrNull()
+                        ?.coerceIn(0L, POLL_INTERVAL_MAX_MS / 1000)?.times(1000L)
                 }
             } catch (e: IOException) {
                 lastError = e
@@ -187,7 +187,7 @@ class PlateSolveClient(
         )
     }
 
-    private fun login(apiKey: String): String {
+    private suspend fun login(apiKey: String): String {
         val json = JSONObject().put("apikey", apiKey).toString()
         val body = FormBody.Builder().add("request-json", json).build()
         val obj = postJson("$serverUrl/login", body)
@@ -200,7 +200,7 @@ class PlateSolveClient(
         return obj.getString("session")
     }
 
-    private fun upload(session: String, image: File): Long {
+    private suspend fun upload(session: String, image: File): Long {
         val meta = JSONObject()
             .put("session", session)
             .put("publicly_visible", "n") // 隐私：图片不进入公开图库
@@ -226,10 +226,10 @@ class PlateSolveClient(
 
     /** 轮询 submissions/{id} 直到拿到第一个非空 job id */
     private suspend fun waitForJob(subId: Long, maxWaitMs: Long = WAIT_FOR_JOB_TIMEOUT_MS): Long {
-        val deadline = System.currentTimeMillis() + maxWaitMs
+        val deadline = (System.nanoTime() / 1_000_000) + maxWaitMs
         var interval = POLL_INTERVAL_INITIAL_MS
         while (true) {
-            if (System.currentTimeMillis() > deadline) {
+            if ((System.nanoTime() / 1_000_000) > deadline) {
                 throw PlateSolveException(
                     "任务未进入解算队列（等待 ${maxWaitMs / 1000} 秒），请稍后重试",
                     PlateSolveException.Kind.TIMEOUT,
@@ -247,12 +247,12 @@ class PlateSolveClient(
         }
     }
 
-    private fun jobStatus(jobId: Long): Pair<String, Long?> {
+    private suspend fun jobStatus(jobId: Long): Pair<String, Long?> {
         val (obj, retryAfter) = postJsonWithRetry("$serverUrl/jobs/$jobId", emptyBody())
         return obj.optString("status", "processing") to retryAfter
     }
 
-    private fun fetchCalibration(jobId: Long, image: File): SolveResult {
+    private suspend fun fetchCalibration(jobId: Long, image: File): SolveResult {
         val obj = postJson("$serverUrl/jobs/$jobId/calibration", emptyBody())
         if (obj.optString("status") != "success") {
             throw PlateSolveException("定标数据缺失，请重试", PlateSolveException.Kind.SOLVE_ERROR)

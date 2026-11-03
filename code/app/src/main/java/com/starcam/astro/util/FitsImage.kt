@@ -78,9 +78,20 @@ object FitsImage {
         return ext == "fit" || ext == "fits" || ext == "fts"
     }
 
-    fun decode(path: String, maxDim: Int = 2200): Decoded? = try {
-        decodeBytes(java.io.File(path).readBytes(), maxDim)
+    fun decode(path: String, maxDim: Int = 2200, checkActive: () -> Unit = {}): Decoded? = try {
+        val image = java.io.FileInputStream(path).use { findImageHdu(it, checkActive) }
+        image?.let {
+            val meta = metaOf(it.hdu, it.primary)
+            java.io.RandomAccessFile(path, "r").use { pixels ->
+                FitsPixels.read(pixels, it.offset, meta.naxis1, meta.naxis2, meta.bitpix,
+                    meta.bscale, meta.bzero, maxDim, checkActive)?.let { gray ->
+                    val factor = (maxOf(meta.naxis1, meta.naxis2).toLong() / (maxDim.toLong() + 1) + 1).toInt()
+                    Decoded(meta.naxis1 / factor, meta.naxis2 / factor, gray, meta)
+                }
+            }
+        }
     } catch (e: Exception) {
+        if (e is java.util.concurrent.CancellationException || e is ImageMemoryLimitException) throw e
         null
     }
 
@@ -125,6 +136,24 @@ object FitsImage {
         return v.toDoubleOrNull()
     }
 
+    private fun paddedDataBytes(cards: Map<String, String>): Long? { return try {
+        val bitpix = cards["BITPIX"]?.trim()?.toLongOrNull() ?: return null
+        val axes = cards["NAXIS"]?.trim()?.toIntOrNull() ?: return null
+        if (axes !in 0..999 || bitpix !in setOf(8L, 16L, 32L, 64L, -32L, -64L)) return null
+        val groups = cards["GCOUNT"]?.trim()?.toLongOrNull() ?: 1L
+        val parameters = cards["PCOUNT"]?.trim()?.toLongOrNull() ?: 0L
+        if (groups <= 0 || parameters < 0) return null
+        if (axes == 0) return 0L
+        var pixels = 1L
+        for (axis in 1..axes) {
+            val size = cards["NAXIS$axis"]?.trim()?.toLongOrNull() ?: return null
+            if (size < 0) return null
+            pixels = Math.multiplyExact(pixels, size)
+        }
+        val bytes = Math.multiplyExact(Math.multiplyExact(Math.addExact(pixels, parameters), groups), kotlin.math.abs(bitpix) / 8)
+        Math.multiplyExact(Math.addExact(bytes, BLOCK - 1L) / BLOCK, BLOCK.toLong())
+    } catch (_: ArithmeticException) { null } }
+
     /** 解析从 [start] 处开始的 HDU 头；非法返回 null。 */
     private fun parseHdu(bytes: ByteArray, start: Int): Hdu? {
         if (start + BLOCK > bytes.size) return null
@@ -156,18 +185,7 @@ object FitsImage {
         val headerBytes = blocks * BLOCK
         val bitpix = cards["BITPIX"]?.trim()?.toIntOrNull() ?: return null
         val naxis = cards["NAXIS"]?.trim()?.toIntOrNull() ?: 0
-        val gcount = cards["GCOUNT"]?.trim()?.toIntOrNull() ?: 1
-        val pcount = cards["PCOUNT"]?.trim()?.toIntOrNull() ?: 0
-        var dataLen = 0L
-        if (naxis > 0) {
-            var n = 1L
-            for (k in 1..naxis) {
-                n *= (cards["NAXIS$k"]?.trim()?.toLongOrNull() ?: 0L)
-            }
-            dataLen = (kotlin.math.abs(bitpix) / 8L) * gcount * (n + pcount)
-            // 数据必须补齐到 2880 的整数倍（FITS 标准）
-            dataLen = ((dataLen + BLOCK - 1) / BLOCK) * BLOCK
-        }
+        val dataLen = paddedDataBytes(cards) ?: return null
         return Hdu(cards, headerBytes, dataLen)
     }
 
@@ -199,8 +217,14 @@ object FitsImage {
         return noComment.trim()
     }
 
-    private fun readMetaStream(stream: java.io.InputStream): FitsMeta? {
+    private data class ImageHdu(val hdu: Hdu, val primary: Hdu?, val offset: Long)
+
+    private fun readMetaStream(stream: java.io.InputStream): FitsMeta? =
+        findImageHdu(stream)?.let { metaOf(it.hdu, it.primary) }
+
+    private fun findImageHdu(stream: java.io.InputStream, checkActive: () -> Unit = {}): ImageHdu? {
         val blockBuf = ByteArray(BLOCK)
+        var offset = 0L
         var guard = 0
         var primaryHdu: Hdu? = null
         while (guard++ < 64) {
@@ -208,9 +232,11 @@ object FitsImage {
             var blocks = 0
             var sawEnd = false
             while (!sawEnd) {
+                checkActive()
                 if (blocks >= 200) return null
                 if (!readFully(stream, blockBuf)) return null
                 blocks++
+                offset = Math.addExact(offset, BLOCK.toLong())
                 for (i in 0 until BLOCK / CARD) {
                     val cardStart = i * CARD
                     val key = String(blockBuf, cardStart, 8, Charsets.US_ASCII).trim()
@@ -233,17 +259,7 @@ object FitsImage {
             val naxis1 = cards["NAXIS1"]?.trim()?.toIntOrNull() ?: 0
             val naxis2 = cards["NAXIS2"]?.trim()?.toIntOrNull() ?: 0
             val headerBytes = blocks * BLOCK
-            val gcount = cards["GCOUNT"]?.trim()?.toIntOrNull() ?: 1
-            val pcount = cards["PCOUNT"]?.trim()?.toIntOrNull() ?: 0
-            var dataLen = 0L
-            if (naxis > 0) {
-                var n = 1L
-                for (k in 1..naxis) {
-                    n *= (cards["NAXIS$k"]?.trim()?.toLongOrNull() ?: 0L)
-                }
-                dataLen = (kotlin.math.abs(bitpix) / 8L) * gcount * (n + pcount)
-                dataLen = ((dataLen + BLOCK - 1) / BLOCK) * BLOCK
-            }
+            val dataLen = paddedDataBytes(cards) ?: return null
             val hdu = Hdu(cards, headerBytes, dataLen)
             if (guard == 1 && naxis == 0) {
                 primaryHdu = hdu
@@ -251,11 +267,12 @@ object FitsImage {
             val xtension = cards["XTENSION"]
             val isImageHdu = (xtension == null || xtension == "IMAGE")
             if (isImageHdu && naxis == 2 && naxis1 > 0 && naxis2 > 0) {
-                return metaOf(hdu, primaryHdu)
+                return ImageHdu(hdu, primaryHdu, offset)
             }
             if (dataLen <= 0L && naxis == 0 && guard > 1) return null
             if (dataLen > 0L) {
                 skipFully(stream, dataLen)
+                offset = Math.addExact(offset, dataLen)
             }
         }
         return null
@@ -332,7 +349,9 @@ object FitsImage {
     /** 读像素 → 物理值（BSCALE/BZERO）→ 翻转行序 → NaN 清零。 */
     private fun readGray(bytes: ByteArray, dataStart: Int, hdu: Hdu, w: Int, h: Int): FloatArray? {
         val bitpix = hdu.int("BITPIX")
-        val n = w * h
+        val count = w.toLong() * h
+        if (count <= 0 || count > Int.MAX_VALUE) return null
+        val n = count.toInt()
         val bytesPer = kotlin.math.abs(bitpix) / 8
         if (bytesPer <= 0 || dataStart + n.toLong() * bytesPer > bytes.size) return null
         val raw = FloatArray(n)

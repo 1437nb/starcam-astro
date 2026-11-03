@@ -112,6 +112,8 @@ object I18n {
 
     // ==================== 结果页 (ResultScreen) ====================
     object Result {
+        val imageMemoryLimit: String get() = if (isEn) "Not enough memory to read this image. Try a smaller file or close other apps." else "当前内存不足以读取这张图片，请使用较小的文件或关闭其他应用后重试。"
+        val timeBudgetExceeded: String get() = if (isEn) "Solving reached its time limit. Try again or increase the time budget in Settings." else "识别已达到时间上限，可重试或在设置中增加时间预算。"
         val title: String get() = if (isEn) "Solving Results" else "识别结果"
         val preparing: String get() = if (isEn) "Preparing…" else "准备中…"
         val preparingPhoto: String get() = if (isEn) "Preparing photo…" else "准备照片…"

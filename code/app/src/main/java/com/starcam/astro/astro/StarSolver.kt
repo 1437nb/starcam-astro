@@ -21,12 +21,7 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -304,13 +299,19 @@ object StarSolver {
         context: Context,
         display: Bitmap,
         matched: LocalMatchResult,
+        token: SolveToken? = null,
+        remainingSec: Double = CROSS_CHECK_TIME_LIMIT_SEC,
     ): LocalAcceptVerdict {
+        token?.check()
         if (matched.inlierCount >= CROSS_CHECK_MIN_INLIERS) return LocalAcceptVerdict.AcceptLocal
+        if (remainingSec <= 0.5) return LocalAcceptVerdict.AcceptLocal
         val fov = maxOf(matched.solve.fieldWidthDeg, matched.solve.fieldHeightDeg)
         val (lo, hi) = FovEstimate.fovRange(fov)
         val native = try {
-            StellarSolverNative.solveBitmap(context, display, lo, hi, CROSS_CHECK_TIME_LIMIT_SEC)
+            StellarSolverNative.solveBitmap(context, display, lo, hi,
+                minOf(CROSS_CHECK_TIME_LIMIT_SEC, remainingSec), token = token)
         } catch (t: Throwable) {
+            if (t is CancellationException) throw t
             null
         }
         if (native == null) {
@@ -436,91 +437,36 @@ object StarSolver {
      */
     internal suspend fun raceSteps(
         ctx: StepContext,
-        localStep: LocalMatcherStep,
-        nativeStep: NativeSolveStep,
-    ): StepOutcome = coroutineScope {
-        val localToken = SolveToken()
-        val nativeToken = SolveToken()
-
-        val channel = Channel<StepOutcome>(Channel.UNLIMITED)
-
-        val cancelChecker = launch {
-            while (isActive) {
-                if (ctx.token.isCancelled) {
-                    localToken.cancel()
-                    nativeToken.cancel()
-                    break
-                }
-                delay(100)
+        localStep: SolveStep,
+        nativeStep: SolveStep,
+    ): StepOutcome {
+        val localReport = org.json.JSONObject(ctx.report.toString())
+        val nativeReport = org.json.JSONObject(ctx.report.toString())
+        val baseSteps = ctx.report.optJSONArray("steps")?.length() ?: 0
+        val prefix = if (com.starcam.astro.ui.theme.LocaleState.isEnglish) "Parallel engine solving · " else "双引擎并发识别中 · "
+        suspend fun execute(step: SolveStep, token: SolveToken, report: org.json.JSONObject): StepOutcome =
+            step.execute(ctx.copy(
+                token = token, report = report, recordSuccess = false,
+                onProgress = { if (!token.isCancelled) ctx.onProgress("$prefix$it") },
+                onPhase = { if (!token.isCancelled) ctx.onPhase(SolvePhase.RACING) },
+                onStarsDetected = { stars, total -> if (!token.isCancelled) ctx.onStarsDetected(stars, total) },
+            ))
+        val outcome = raceEngineOutcomes(ctx.token,
+            { execute(localStep, it, localReport) },
+            { execute(nativeStep, it, nativeReport) }, sharedBitmap = ctx.display)
+        val steps = ctx.report.optJSONArray("steps") ?: org.json.JSONArray().also { ctx.report.put("steps", it) }
+        for (report in listOf(localReport, nativeReport)) {
+            report.optJSONArray("steps")?.let { array ->
+                for (i in baseSteps until array.length()) steps.put(array.get(i))
             }
         }
-
-        val isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish
-        val racingPrefix = if (isEn) "Parallel engine solving · " else "双引擎并发识别中 · "
-
-        val localJob = launch(Dispatchers.Default) {
-            try {
-                val outcome = localStep.execute(
-                    ctx.copy(
-                        token = localToken,
-                        onProgress = { msg -> ctx.onProgress("$racingPrefix$msg") },
-                        onPhase = { ctx.onPhase(SolvePhase.RACING) },
-                    ),
-                )
-                channel.send(outcome)
-            } catch (e: Throwable) {
-                if (e is CancellationException) {
-                    // 取消
-                } else {
-                    channel.send(StepOutcome.Failure(if (isEn) "Local catalog error: ${e.message}" else "内置星表异常: ${e.message}"))
-                }
-            }
+        for (key in listOf("stars", "starCount")) {
+            if (localReport.has(key)) ctx.report.put(key, localReport.get(key))
         }
-
-        val nativeJob = launch(Dispatchers.Default) {
-            try {
-                val outcome = nativeStep.execute(
-                    ctx.copy(
-                        token = nativeToken,
-                        onProgress = { msg -> ctx.onProgress("$racingPrefix$msg") },
-                        onPhase = { ctx.onPhase(SolvePhase.RACING) },
-                    ),
-                )
-                channel.send(outcome)
-            } catch (e: Throwable) {
-                if (e is CancellationException) {
-                    // 取消
-                } else {
-                    channel.send(StepOutcome.Failure(if (isEn) "Native engine error: ${e.message}" else "官方引擎异常: ${e.message}"))
-                }
-            }
+        if (outcome is StepOutcome.Success) {
+            writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, outcome.result.engine.labelZh, outcome.result.detail)
         }
-
-        var completedCount = 0
-        var firstFailure: StepOutcome.Failure? = null
-        var winningOutcome: StepOutcome? = null
-
-        while (completedCount < 2) {
-            val outcome = channel.receive()
-            completedCount++
-            if (outcome is StepOutcome.Success) {
-                winningOutcome = outcome
-                localToken.cancel()
-                nativeToken.cancel()
-                localJob.cancel()
-                nativeJob.cancel()
-                break
-            } else if (outcome is StepOutcome.Failure) {
-                if (firstFailure == null) {
-                    firstFailure = outcome
-                }
-            }
-        }
-
-        cancelChecker.cancel()
-        winningOutcome ?: firstFailure ?: StepOutcome.Failure(
-            if (isEn) "Parallel solve yielded no result" else "双引擎并发识别均未命中"
-        )
+        return outcome
     }
 
     /**
@@ -543,6 +489,26 @@ object StarSolver {
         onStarsDetected: (List<SolveDiagnostics.DiagStar>, Int) -> Unit = { _, _ -> },
         onPhase: (SolvePhase) -> Unit = {},
         onProgress: (String) -> Unit,
+    ): EngineResult? {
+        val operationToken = SolveToken(token, settings.solveBudgetSec.toLong() * 1000L)
+        return withContext(Dispatchers.IO) {
+            withSolveCancellation(operationToken) {
+                solveInternal(context, display, imagePath, settings, operationToken,
+                    onDiagnostics, onStarsDetected, onPhase, onProgress)
+            }
+        }
+    }
+
+    private suspend fun solveInternal(
+        context: Context,
+        display: Bitmap,
+        imagePath: String,
+        settings: SettingsRepository,
+        token: SolveToken,
+        onDiagnostics: (SolveDiagnostics) -> Unit,
+        onStarsDetected: (List<SolveDiagnostics.DiagStar>, Int) -> Unit,
+        onPhase: (SolvePhase) -> Unit,
+        onProgress: (String) -> Unit,
     ): EngineResult? = withContext(Dispatchers.IO) {
         coroutineContext.ensureActive()
         token.check()
@@ -557,7 +523,7 @@ object StarSolver {
         if (steps.isEmpty()) return@withContext null
 
         val budgetSec = settings.solveBudgetSec.toDouble()
-        val deadlineMs = System.currentTimeMillis() + (budgetSec * 1000).toLong()
+        val deadlineMs = System.nanoTime() / 1_000_000 + (budgetSec * 1000).toLong()
 
         val enginesTried = ArrayList<String>()
         var lastLocalStars: List<DetectedStar>? = null
@@ -620,7 +586,7 @@ object StarSolver {
             enginesTried.add("内置星表")
             enginesTried.add("官方引擎")
 
-            val raceTimeout = (deadlineMs - System.currentTimeMillis()).coerceAtLeast(1000L)
+            val raceTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
             val raceOutcome = kotlinx.coroutines.withTimeoutOrNull(raceTimeout) {
                 raceSteps(ctx, localStep, nativeStep)
             } ?: run {
@@ -647,7 +613,7 @@ object StarSolver {
                 token.check()
                 if (!ctx.isBudgetDepleted) {
                     enginesTried.add("在线识别")
-                    val onlineTimeout = (deadlineMs - System.currentTimeMillis()).coerceAtLeast(1000L)
+                    val onlineTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
                     val onlineOutcome = kotlinx.coroutines.withTimeoutOrNull(onlineTimeout) {
                         onlineStep.execute(ctx.copy(fovOverride = fovOverride))
                     } ?: run {
@@ -672,7 +638,7 @@ object StarSolver {
                 val step = stepMap[engine] ?: continue
                 enginesTried.add(engine.labelZh)
 
-                val stepTimeout = (deadlineMs - System.currentTimeMillis()).coerceAtLeast(1000L)
+                val stepTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
                 val outcome = kotlinx.coroutines.withTimeoutOrNull(stepTimeout) {
                     step.execute(ctx.copy(fovOverride = fovOverride))
                 } ?: run {

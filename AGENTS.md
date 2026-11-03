@@ -16,7 +16,7 @@
 
 - **当前唯一主力工作区：`C:\starcam`（本地 Windows 11 开发机，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）。**
   `testdata/`、`apk/`、`indexes/` 为机器相关本地目录，不入库。
-- 仓库外的本地资产（发布签名密钥在 `~/.starcam/` 或 `C:\dev\`，astrometry 交叉静态库在 `C:\dev\astrometry-local\`）。
+- 仓库外的发布签名密钥在 `~/.starcam/` 或 `C:\dev\`；原生依赖现由 `tools/build_native.py` 从固定源码重建，不再依赖已丢失的 `C:\dev\astrometry-local\` 备份。
 - 远端：`https://github.com/1437nb/starcam-astro.git`（GPL-2.0），主分支 `main`。
 - 辅助机器（配置在 `~/.ssh/config`，凭据绝不入库）：
   - **`ec2-hk`**：AWS EC2（香港，2 核 / 3.8GB），用于海外网络跳板、测试回归与 Git 中转推送；
@@ -78,36 +78,35 @@ AGENTS.md  本文件
 
 ```powershell
 cd C:\starcam\code
-.\gradlew.bat :app:cleanTestDebugUnitTest :app:testDebugUnitTest --no-build-cache -PskipPhotoTests=true   # 纯净重跑全量单测（37 类 / 288 项全绿，仅 ~27 秒）
-.\gradlew.bat :app:testDebugUnitTest --rerun-tasks -PskipPhotoTests=true                                   # 深度全量回归（强制推翻全量编译与全部 Task，约 2.5 分钟）
+.\gradlew.bat :app:cleanTestDebugUnitTest :app:testDebugUnitTest --no-build-cache -PskipPhotoTests=true   # 重跑常规单测；skipPhotoTests 会排除本机素材台，不是完整回归
+.\gradlew.bat :app:testDebugUnitTest --rerun-tasks -PskipPhotoTests=true                                   # 重编译常规回归；完整回归必须去掉 skipPhotoTests
 .\gradlew.bat :app:assembleDebug                                                                          # 构建 debug APK（约 7 秒~2 分钟）
 ```
 
 - **环境**：OpenJDK 17（`C:\dev\jdk-17`）、Android SDK 34（`C:\dev\android-sdk`，`code/local.properties` 写 `sdk.dir=C:/dev/android-sdk`，该文件机器相关不入库）、Gradle 8.12.1。
 - **Shell 环境**：本机终端命令与脚本执行**严禁使用 Windows PowerShell 5 (`powershell.exe`)**，一律走 **PowerShell 7 (`pwsh`)**。
-- ⚠️ **重跑单测防穿透**：`cleanTestDebugUnitTest + --no-build-cache` 即可保证 288 项单测 100% 真实全量重跑（27s）；`--rerun-tasks` 会额外强制重编 33,000 行 Kotlin。
+- ⚠️ **重跑单测防穿透**：`cleanTestDebugUnitTest + --no-build-cache` 可强制重新执行测试；不要将带 skipPhotoTests 的结果称为完整回归；`--rerun-tasks` 会额外强制重编 33,000 行 Kotlin。
 - ⚠️ **测试与打包要分两条命令串行执行**，不要放进同一次 gradle 调用：两者读写同一 class 缓存，并行会互锁。
 - ⚠️ **判成败看两处**：① 输出里的 `BUILD SUCCESSFUL`；② `code/app/build/test-results/testDebugUnitTest/*.xml` 的 `failures="0" errors="0"`。
-- native 仅 arm64-v8a；x86 模拟器走 JVM 引擎回退。
+- 默认 native 仅 arm64-v8a；x86 模拟器走 JVM 引擎回退。显式测试选项见 §2.1。
+- 完整回归：`.\gradlew.bat :app:testDebugUnitTest --rerun-tasks --no-build-cache --offline --console=plain`（不设置 skipPhotoTests；最新范围以 PROGRESS 为准）。
 
 ### 2.1 native 库（`.so`）本机构建
 
 ```powershell
 cd C:\starcam
-tools\build_so.bat                            # 重建 libstellar_solver.so（<1 分钟）
+tools\build_so.bat                            # 从固定源码重建 libstellar_solver.so
 tools\build_so.bat <自定义输出路径>            # 可选
 ```
 
-产物 `code/app/src/main/jniLibs/arm64-v8a/libstellar_solver.so`（约 5.07MB，6 个 JNI 导出符号）。改动 `code/app/src/main/cpp/astro_bridge.c` 后必须重跑它。
+产物 `code/app/src/main/jniLibs/arm64-v8a/libstellar_solver.so`，6 个 JNI 导出符号，包含桥接源码 SHA-256 指纹。改动 `code/app/src/main/cpp/astro_bridge.c` 后必须重跑。
 
-依赖放在工程外（不入库）：
-```
-C:\dev\astrometry-local\
-  ├── src\include\astrometry\   astrometry 0.97 头文件
-  ├── lib\…\*.a                 8 个静态库（solver/util×3/catalogs/libkd/qfits-an/gsl-an）
-  ├── cross\{lib,include}\      cfitsio 3.47 交叉产物
-  └── out\                      构建产物临时目录
-C:\dev\android-ndk-r26d\        NDK r26d（Windows 原生 clang 17）
+本机依赖为 Android SDK 内的 `ndk;26.3.11579264` 与 `cmake;3.22.1`（位于 `C:\dev\android-sdk\`）。构建脚本校验 astrometry.net 0.97、CFITSIO 3.47 源码归档的固定 SHA-256，下载缓存及逐次构建目录在被忽略的 `code/app/build/`；不读取凭据、不执行目录清理。详见 docs/119 和 docs/75 的更新说明。
+
+模拟器原生测试库可单独生成，默认不会进入 APK；仅显式 `-PnativeEmulatorTests=true` 时加入 Debug，Release 不受影响：
+
+```powershell
+python tools/build_native.py --fetch --abi x86_64 --output code/app/build/native-emulator/x86_64/libstellar_solver.so
 ```
 
 ### 2.2 发版（release）必读

@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
 
 /** Shared, byte-bounded cache. Eviction drops ownership without recycling a bitmap still on screen. */
 object ThumbnailCache {
@@ -16,11 +17,12 @@ object ThumbnailCache {
     private val stripes = Array(16) { Mutex() }
 
     suspend fun load(path: String, maxDim: Int = 256): Bitmap? = withContext(Dispatchers.IO) {
+        val workContext = kotlin.coroutines.coroutineContext
         val file = File(path)
         if (!file.isFile) return@withContext null
         val key = "$path:${file.length()}:${file.lastModified()}:$maxDim"
         stripes[(key.hashCode() and Int.MAX_VALUE) % stripes.size].withLock {
-            cache.get(key)?.takeUnless { it.isRecycled } ?: ImageUtils.decodeSampledBitmap(path, maxDim)?.also {
+            cache.get(key)?.takeUnless { it.isRecycled } ?: ImageUtils.decodeSampledBitmap(path, maxDim) { workContext.ensureActive() }?.also {
                 cache.put(key, it)
             }
         }

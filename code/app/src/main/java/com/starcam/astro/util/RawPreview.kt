@@ -40,8 +40,13 @@ object RawPreview {
 
     /** 读文件并提取最大的内嵌 JPEG；失败返回 null。 */
     fun extractJpeg(path: String): ByteArray? = try {
-        extractJpegBytes(java.io.File(path).readBytes())
+        val file = java.io.File(path)
+        val runtime = Runtime.getRuntime()
+        val headroom = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
+        if (file.length() > (headroom - 16L * 1024 * 1024).coerceAtLeast(0) / 3) throw ImageMemoryLimitException()
+        extractJpegBytes(file.readBytes())
     } catch (e: Exception) {
+        if (e is ImageMemoryLimitException || e is java.util.concurrent.CancellationException) throw e
         null
     }
 

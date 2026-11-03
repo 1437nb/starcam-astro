@@ -28,14 +28,14 @@ android {
         applicationId = "com.starcam.astro"
         minSdk = 26
         targetSdk = 34
-        versionCode = 114
-        versionName = "1.5.94"
+        versionCode = 115
+        versionName = "1.5.95"
         testInstrumentationRunner = "com.starcam.astro.DeviceAcceptanceInstrumentation"
     }
 
     // 每版更新内容简述（用户规则：在 APK 文件名上带上更新内容）
     val updateDesc = project.findProperty("updateDesc") as? String
-        ?: "unified-photo-import"
+        ?: "stability-and-memory"
 
     // APK 产物自动带版本号、更新内容与变体名（用户规则：文件名标注版本与更新内容）
     applicationVariants.all {
@@ -76,6 +76,11 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    // Optional native x86_64 builds are test assets, never part of Release.
+    if (project.findProperty("nativeEmulatorTests") == "true") {
+        sourceSets.getByName("debug").jniLibs.srcDir(layout.buildDirectory.dir("native-emulator"))
     }
 
     testOptions {

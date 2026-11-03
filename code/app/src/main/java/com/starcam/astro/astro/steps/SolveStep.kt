@@ -33,10 +33,11 @@ data class StepContext(
     val onStarsDetected: (List<SolveDiagnostics.DiagStar>, Int) -> Unit = { _, _ -> },
     val pixels: SolvePixels = SolvePixels(display.width, display.height) { LocalStarMatcher.bitmapToGray(display) },
     val onPhase: (SolvePhase) -> Unit = {},
+    val recordSuccess: Boolean = true,
 ) {
     /** 距离全局死线剩余秒数 */
     val remainingSec: Double
-        get() = (deadlineMs - System.currentTimeMillis()) / 1000.0
+        get() = (deadlineMs - System.nanoTime() / 1_000_000) / 1000.0
 
     /** 是否已接近预算耗尽（剩余时间 ≤ 0.5 秒） */
     val isBudgetDepleted: Boolean

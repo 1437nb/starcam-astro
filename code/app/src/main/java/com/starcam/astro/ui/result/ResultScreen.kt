@@ -206,6 +206,7 @@ fun ResultScreen(
     settings: SettingsRepository,
     onBack: () -> Unit,
     onRetake: () -> Unit,
+    onSolveCompleted: (ResultUiState.Success) -> Unit = {},
     viewModel: ResultViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
         key = "$imagePath-${cachedSolve != null}-${demoRegion?.name}",
         factory = ResultViewModel.factory(LocalContext.current.applicationContext as android.app.Application),
@@ -235,6 +236,10 @@ fun ResultScreen(
     }
 
     val state = viewModel.state
+    LaunchedEffect(state) {
+        val success = state as? ResultUiState.Success
+        if (success != null && !success.isDemo && cachedSolve == null) onSolveCompleted(success)
+    }
     val detectedStars = viewModel.detectedStars
     val detectedStarTotal = viewModel.detectedStarTotal
 

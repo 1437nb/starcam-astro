@@ -166,7 +166,8 @@ class LocalMatcherStep : SolveStep {
 
         if (matched != null) {
             ctx.onPhase(com.starcam.astro.astro.SolvePhase.VERIFYING)
-            val verdict = StarSolver.evaluateLocalSolve(ctx.context, ctx.display, matched)
+            val verdict = StarSolver.evaluateLocalSolve(ctx.context, ctx.display, matched, ctx.token, ctx.remainingSec)
+            ctx.token.check()
             when (verdict) {
                 is StarSolver.LocalAcceptVerdict.AcceptLocal -> {
                     val domainTag = if (matched.catalogDomain == CatalogDomain.DEEP) {
@@ -184,7 +185,7 @@ class LocalMatcherStep : SolveStep {
                         ("内点=${matched.inlierCount} scale=%.2f$domainTag").format(matched.solve.pixScaleArcsec),
                         System.currentTimeMillis() - ctx.logT0,
                     )
-                    StarSolver.writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, "内置星表", detail)
+                    if (ctx.recordSuccess) StarSolver.writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, "内置星表", detail)
                     return StepOutcome.Success(EngineResult(matched.solve, engine, detail, ctx.display))
                 }
                 is StarSolver.LocalAcceptVerdict.AdoptNative -> {
@@ -206,7 +207,7 @@ class LocalMatcherStep : SolveStep {
                             "logodds=${nativeSolve.logodds} $detail",
                         System.currentTimeMillis() - ctx.logT0,
                     )
-                    StarSolver.writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, "官方引擎", detail)
+                    if (ctx.recordSuccess) StarSolver.writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, "官方引擎", detail)
                     return StepOutcome.Success(
                         EngineResult(nativeSolve, SolveEngine.ASTROMETRY_NATIVE, detail, ctx.display),
                     )

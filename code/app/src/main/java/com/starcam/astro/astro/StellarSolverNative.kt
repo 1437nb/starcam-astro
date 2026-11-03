@@ -84,6 +84,7 @@ object StellarSolverNative {
         plimOverride: Double,
         timeLimitSec: Double,
         extStars: FloatArray?,
+        token: SolveToken?,
     ): String
 
     /**
@@ -107,6 +108,7 @@ object StellarSolverNative {
         plimOverride: Double,
         timeLimitSec: Double,
         extStars: FloatArray?,
+        token: SolveToken?,
     ): String
 
     /**
@@ -259,9 +261,10 @@ object StellarSolverNative {
         fovHiDeg: Double,
         timeLimitSec: Double = 45.0,
         gray: FloatArray? = null,
+        token: SolveToken? = null,
     ): SolveResult? {
         return solveBitmapImpl(context, bitmap, fovLoDeg, fovHiDeg, timeLimitSec,
-            raDeg = NO_PRIOR, decDeg = NO_PRIOR, radiusDeg = -1.0, gray = gray)
+            raDeg = NO_PRIOR, decDeg = NO_PRIOR, radiusDeg = -1.0, gray = gray, token = token)
     }
 
     /**
@@ -280,9 +283,10 @@ object StellarSolverNative {
         radiusDeg: Double,
         timeLimitSec: Double = 45.0,
         gray: FloatArray? = null,
+        token: SolveToken? = null,
     ): SolveResult? {
         return solveBitmapImpl(context, bitmap, fovLoDeg, fovHiDeg, timeLimitSec,
-            raDeg, decDeg, radiusDeg, gray = gray)
+            raDeg, decDeg, radiusDeg, gray = gray, token = token)
     }
 
     /** 无天区先验哨兵值 */
@@ -322,7 +326,7 @@ object StellarSolverNative {
             val pixels = IntArray(w * h)
             bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
             val grayFile = java.io.File(dir, "local_fail_latest.gray")
-            java.io.DataOutputStream(java.io.FileOutputStream(grayFile)).use { o ->
+            java.io.DataOutputStream(java.io.FileOutputStream(grayFile).buffered(128 * 1024)).use { o ->
                 o.writeInt(w)
                 o.writeInt(h)
                 for (c in pixels) {
@@ -372,7 +376,9 @@ object StellarSolverNative {
         radiusDeg: Double,
         plimOverride: Double = 0.0,
         gray: FloatArray? = null,
+        token: SolveToken? = null,
     ): SolveResult? {
+        token?.check()
         // §0.107（二期审计 2026-10-14）：**先清空上一次的失败诊断**。
         // 桥只在 star-extraction-failed 时输出 rc/gmean/gmax；提星成功但未解出
         // （no-solution / timeout）的 JSON 里没有这几个键，而下面解析用的是
@@ -397,15 +403,17 @@ object StellarSolverNative {
         var json = try {
             if (raDeg > NO_PRIOR / 2.0) {
                 solvePriors(effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg,
-                    raDeg, decDeg, radiusDeg, plimOverride, timeLimitSec, extStars)
+                    raDeg, decDeg, radiusDeg, plimOverride, timeLimitSec, extStars, token)
             } else {
-                solve(effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg, plimOverride, timeLimitSec, extStars)
+                solve(effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg, plimOverride, timeLimitSec, extStars, token)
             }
         } catch (e: UnsatisfiedLinkError) {
             return null
         } catch (e: Throwable) {
+            if (e is java.util.concurrent.CancellationException) throw e
             return null
         }
+        token?.check()
         var parsed = parseJson(json, w, h)
         // 官方解质量门槛（服务器 12 张标定：真解 logodds 26~907、nmatch≥15；
         // 噪声星点下的随机假解 logodds<10、nmatch=1）——宁可 FAILED 也不报错误天区
@@ -429,6 +437,7 @@ object StellarSolverNative {
             }
 
             if (needRetryWithExtStars) {
+                token?.check()
                 extStars = try {
                     com.starcam.astro.astro.LocalStarMatcher.detectStarsGray(w, h, effectiveGray, 200)
                         .takeIf { it.size >= 4 }?.let { stars ->
@@ -450,17 +459,18 @@ object StellarSolverNative {
                         if (raDeg > NO_PRIOR / 2.0) {
                             solvePriors(
                                 effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg,
-                                raDeg, decDeg, radiusDeg, plimOverride, timeLimitSec, extStars,
+                                raDeg, decDeg, radiusDeg, plimOverride, timeLimitSec, extStars, token,
                             )
                         } else {
                             solve(
                                 effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg,
-                                plimOverride, timeLimitSec, extStars,
+                                plimOverride, timeLimitSec, extStars, token,
                             )
                         }
                     } catch (_: Throwable) {
                         json
                     }
+                    token?.check()
                     parsed = parseJson(json, w, h)
                     if (parsed != null && parsed.logodds != null &&
                         (parsed.logodds < 25.0 || (parsed.nMatch ?: 99) < 2)
@@ -479,7 +489,7 @@ object StellarSolverNative {
                     context.getExternalFilesDir(null),
                     "gray_dump_latest.gray",
                 )
-                java.io.DataOutputStream(java.io.FileOutputStream(dump)).use { o ->
+                java.io.DataOutputStream(java.io.FileOutputStream(dump).buffered(128 * 1024)).use { o ->
                     o.writeInt(w); o.writeInt(h)
                     for (v in effectiveGray) o.writeFloat(v)
                 }
@@ -512,6 +522,7 @@ object StellarSolverNative {
      * 缺失的索引自动跳过（如窄场索引用户未下载时）。
      * §0.123 修复 P2-1：临时文件解压 + 原子替换 + FITS 完整性自愈。
      */
+    @Synchronized
     private fun ensureIndexes(context: Context): Array<String> {
         val dir = File(context.filesDir, "indexes").apply { mkdirs() }
         val result = ArrayList<String>()
@@ -558,8 +569,8 @@ object StellarSolverNative {
             val orient = o.getDouble("orient")
             val pixscale = o.getDouble("pixscale")
             val parity = o.getInt("parity")
-            val crpix1 = w / 2.0 + 0.5
-            val crpix2 = h / 2.0 + 0.5
+            val crpix1 = o.optDouble("crpix1", w / 2.0 + 0.5)
+            val crpix2 = o.optDouble("crpix2", h / 2.0 + 0.5)
             // 原生库 0.2 起直出官方 CD 矩阵（tan_t.wcstan，度/像素），
             // 与官方求解器结果逐位一致；旧库无 cd 字段时回退 orient/parity 重建
             val wcs = if (o.has("cd00")) {
@@ -581,9 +592,11 @@ object StellarSolverNative {
                         -s * cosTh, s * sinTh, s * sinTh, s * cosTh)
                 }
             }
+            // The native TAN reference point can be far from the image center.
+            val center = wcs.fitsPixelToSky(w / 2.0 + 0.5, h / 2.0 + 0.5)
             SolveResult(
-                raDeg = ra,
-                decDeg = dec,
+                raDeg = center[0],
+                decDeg = center[1],
                 pixScaleArcsec = pixscale,
                 orientationDeg = orient,
                 parity = parity,

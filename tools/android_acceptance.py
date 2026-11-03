@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 import uuid
+import zipfile
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -243,6 +244,10 @@ def main():
                   apk=app.name, apkSha256=hashlib.sha256(app.read_bytes()).hexdigest(),
                   testApkSha256=hashlib.sha256(test.read_bytes()).hexdigest(),
                   sourceCommit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT).decode().strip())
+    report["sourceDirty"] = bool(subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT).strip())
+    with zipfile.ZipFile(app) as package:
+        report["nativeLibraries"] = {name: hashlib.sha256(package.read(name)).hexdigest()
+                                     for name in package.namelist() if name.endswith("/libstellar_solver.so")}
     if args.ui: report["ui"] = ui_smoke(device)
     destination = directory / "acceptance.json"
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

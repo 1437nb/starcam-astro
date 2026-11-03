@@ -1,0 +1,267 @@
+{
+  "device": {
+    "manufacturer": "Google",
+    "model": "sdk_gphone64_x86_64",
+    "api": 34,
+    "android": "14",
+    "abis": [
+      "x86_64",
+      "arm64-v8a"
+    ],
+    "memoryClassMiB": 192,
+    "lowRam": false,
+    "nativeSolverAvailable": true
+  },
+  "tests": [
+    {
+      "name": "long-raw-name-keeps-extension-and-remains-decodable",
+      "status": "passed",
+      "elapsedMs": 93,
+      "nativeHeapAfterBytes": 11437584
+    },
+    {
+      "name": "cancel-import-then-start-again-keeps-new-state",
+      "status": "passed",
+      "elapsedMs": 67,
+      "nativeHeapAfterBytes": 11455184
+    },
+    {
+      "name": "large-fits-uses-bounded-android-bitmap-decoding",
+      "status": "passed",
+      "elapsedMs": 3100,
+      "nativeHeapAfterBytes": 11560144
+    },
+    {
+      "name": "raw-container-over-budget-is-rejected-before-read",
+      "status": "passed",
+      "elapsedMs": 2,
+      "nativeHeapAfterBytes": 11560144
+    },
+    {
+      "name": "cached-online-result-rebuilds-rotation-when-cache-is-missing",
+      "status": "passed",
+      "elapsedMs": 489,
+      "nativeHeapAfterBytes": 15439552
+    },
+    {
+      "name": "successful-individual-retry-replaces-batch-failure-once",
+      "status": "passed",
+      "elapsedMs": 4291,
+      "nativeHeapAfterBytes": 17584688
+    },
+    {
+      "name": "racing-engines-do-not-recycle-the-shared-result-bitmap",
+      "status": "passed",
+      "elapsedMs": 65,
+      "nativeHeapAfterBytes": 17585200
+    },
+    {
+      "name": "native-jni-polls-the-cancelled-kotlin-token",
+      "status": "passed",
+      "elapsedMs": 0,
+      "nativeHeapAfterBytes": 17585200
+    },
+    {
+      "name": "rebuilt-native-solver-solves-a-public-photo-with-truth-check",
+      "status": "passed",
+      "elapsedMs": 1017,
+      "nativeHeapAfterBytes": 8641232
+    },
+    {
+      "name": "mixed-photo-raw-fits-import-preserves-formats",
+      "status": "passed",
+      "elapsedMs": 146,
+      "nativeHeapAfterBytes": 8674704
+    },
+    {
+      "name": "mixed-import-over-limit-rejects-entire-selection",
+      "status": "passed",
+      "elapsedMs": 1,
+      "nativeHeapAfterBytes": 8674800
+    },
+    {
+      "name": "original-size-jpeg-roundtrip",
+      "status": "passed",
+      "elapsedMs": 99,
+      "nativeHeapAfterBytes": 15091344
+    },
+    {
+      "name": "preview-size-is-independent",
+      "status": "passed",
+      "elapsedMs": 30,
+      "nativeHeapAfterBytes": 15092912
+    },
+    {
+      "name": "exif-1-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 54,
+      "nativeHeapAfterBytes": 18950976
+    },
+    {
+      "name": "exif-2-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 66,
+      "nativeHeapAfterBytes": 22815632
+    },
+    {
+      "name": "exif-3-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 52,
+      "nativeHeapAfterBytes": 26680352
+    },
+    {
+      "name": "exif-4-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 59,
+      "nativeHeapAfterBytes": 30544816
+    },
+    {
+      "name": "exif-5-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 42,
+      "nativeHeapAfterBytes": 34410048
+    },
+    {
+      "name": "exif-6-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 61,
+      "nativeHeapAfterBytes": 38274320
+    },
+    {
+      "name": "exif-7-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 46,
+      "nativeHeapAfterBytes": 42138848
+    },
+    {
+      "name": "exif-8-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 45,
+      "nativeHeapAfterBytes": 46012000
+    },
+    {
+      "name": "online-rotated-photo-original-export",
+      "status": "passed",
+      "elapsedMs": 48,
+      "nativeHeapAfterBytes": 49876656
+    },
+    {
+      "name": "layer-flags-change-actual-canvas-output",
+      "status": "passed",
+      "elapsedMs": 426,
+      "nativeHeapAfterBytes": 8664896
+    },
+    {
+      "name": "fits-full-dimensions",
+      "status": "passed",
+      "elapsedMs": 96,
+      "nativeHeapAfterBytes": 9051136
+    },
+    {
+      "name": "raw-embedded-preview-full-dimensions",
+      "status": "passed",
+      "elapsedMs": 75,
+      "nativeHeapAfterBytes": 15464144
+    },
+    {
+      "name": "missing-source-original-is-rejected",
+      "status": "passed",
+      "elapsedMs": 1,
+      "nativeHeapAfterBytes": 15464496
+    },
+    {
+      "name": "missing-source-preview-still-saves",
+      "status": "passed",
+      "elapsedMs": 29,
+      "nativeHeapAfterBytes": 15476704
+    },
+    {
+      "name": "legacy-unknown-pixel-basis-is-rejected",
+      "status": "passed",
+      "elapsedMs": 1,
+      "nativeHeapAfterBytes": 15477056
+    },
+    {
+      "name": "oversized-source-rejected-before-pixel-decode",
+      "status": "passed",
+      "elapsedMs": 4,
+      "nativeHeapAfterBytes": 15477632
+    },
+    {
+      "name": "batch-public-photos-solve-without-auto-export",
+      "status": "passed",
+      "elapsedMs": 4552,
+      "nativeHeapAfterBytes": 8701456
+    }
+  ],
+  "passed": 30,
+  "failed": 0,
+  "scope": "Android Bitmap/Canvas/EXIF/export/storage; no claim of physical camera, AR sensors or native performance validation",
+  "executionKind": "emulator",
+  "api": 34,
+  "apk": "StarCam-v1.5.95-stability-and-memory-debug.apk",
+  "apkSha256": "d5be00c76667e84253c2b15a6541a85bd4d1b15411debcfe9c1d666a24818cb3",
+  "testApkSha256": "24bd18578f4eb7ccf7806bc9cd64d79bf0edec77d91f3e33d86fba408e42e263",
+  "sourceCommit": "7434de3a60a9cdba88436cb1a4b0dc65323aa6ed",
+  "sourceDirty": true,
+  "nativeLibraries": {
+    "lib/arm64-v8a/libstellar_solver.so": "7935d134ac3620264ae76e52c5242b410a3804b7c6b50e3a69f2edb70b5e893b",
+    "lib/x86_64/libstellar_solver.so": "c84832f46f988d6eccd393bddf8bab06daeb3f53021e6d2b7bb3a8fe87c43d36"
+  },
+  "ui": [
+    {
+      "name": "home-primary-actions",
+      "status": "passed",
+      "elapsedMs": 5906,
+      "evidence": "home.png"
+    },
+    {
+      "name": "unified-file-picker-and-return",
+      "status": "passed",
+      "elapsedMs": 12719,
+      "evidence": "unified-file-picker.png"
+    },
+    {
+      "name": "demo-full-result",
+      "status": "passed",
+      "elapsedMs": 10062,
+      "evidence": "result.png"
+    },
+    {
+      "name": "export-size-dialog",
+      "status": "passed",
+      "elapsedMs": 7547,
+      "evidence": "export-size-dialog.png"
+    },
+    {
+      "name": "landscape-export-dialog",
+      "status": "passed",
+      "elapsedMs": 3547,
+      "evidence": "export-landscape.png"
+    },
+    {
+      "name": "original-save-from-ui",
+      "status": "passed",
+      "elapsedMs": 4969,
+      "evidence": "original-saved-from-ui.png"
+    },
+    {
+      "name": "large-font-import-dialog",
+      "status": "passed",
+      "elapsedMs": 9937,
+      "evidence": "import-large-font.png"
+    },
+    {
+      "name": "language-switch-chinese-and-system",
+      "status": "passed",
+      "elapsedMs": 19141,
+      "evidence": "settings-chinese.png"
+    },
+    {
+      "name": "batch-open-individually-and-return",
+      "status": "passed",
+      "elapsedMs": 24188,
+      "evidence": "batch-open-return.png"
+    }
+  ]
+}

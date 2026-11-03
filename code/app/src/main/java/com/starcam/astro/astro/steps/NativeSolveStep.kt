@@ -83,6 +83,7 @@ class NativeSolveStep : SolveStep {
                         sensorHint.raDeg, sensorHint.decDeg, sensorHint.radiusDeg,
                         effectiveTimeLimit,
                         gray = grayBuffer,
+                        token = ctx.token,
                     )
                 } catch (e: Throwable) {
                     if (e is CancellationException) throw e
@@ -116,6 +117,7 @@ class NativeSolveStep : SolveStep {
                         zenithRa, zenithDec, radius,
                         effectiveTimeLimit,
                         gray = grayBuffer,
+                        token = ctx.token,
                     )
                 } catch (e: Throwable) {
                     if (e is CancellationException) throw e
@@ -155,6 +157,7 @@ class NativeSolveStep : SolveStep {
                     StellarSolverNative.solveBitmap(
                         ctx.context, ctx.display, lo, hi, effectiveTimeLimit,
                         gray = grayBuffer,
+                        token = ctx.token,
                     )
                 } catch (e: Throwable) {
                     if (e is CancellationException) throw e
@@ -206,6 +209,7 @@ class NativeSolveStep : SolveStep {
                             StellarSolverNative.solveBitmap(
                                 ctx.context, scaled, lo, hi, effectiveTimeLimit,
                                 gray = scaledGray,
+                                token = ctx.token,
                             )
                         } catch (e: Throwable) {
                             if (e is CancellationException) throw e
@@ -238,7 +242,7 @@ class NativeSolveStep : SolveStep {
                 "index-${nativeSolve.indexId} nmatch=${nativeSolve.nMatch} logodds=${nativeSolve.logodds} $nativeDetail",
                 System.currentTimeMillis() - ctx.logT0,
             )
-            StarSolver.writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, "官方引擎", detail)
+            if (ctx.recordSuccess) StarSolver.writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, "官方引擎", detail)
             return StepOutcome.Success(EngineResult(nativeSolve, engine, detail, ctx.display))
         } else {
             val diag = "nstars=${StellarSolverNative.lastFailNStars} rc=${StellarSolverNative.lastFailRc} gmean=${StellarSolverNative.lastFailGMean}"

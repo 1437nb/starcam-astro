@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-03",
+  "version": "1.5.95",
+  "toolchain": "Android NDK r26d / clang 17.0.2, CMake 3.22.1, Ninja, Android API 26",
+  "builds": [
+    {
+      "abi": "arm64-v8a",
+      "bridgeSha256": "34632f81e631093c9e5dafd239d6a5f62c85f9bf2f7e2241b958835254d02a31",
+      "sources": {
+        "astrometry-0.97.tar.gz": "75a36bb0d0be827c86bedac6bcbf78f110dc19229bab1604eea403d3a0368896",
+        "cfitsio-3.47.tar.gz": "418516f10ee1e0f1b520926eeca6b77ce639bed88804c7c545e74f26b3edf4ef"
+      },
+      "patches": [
+        "atomic-native-quit-flag",
+        "cfitsio347-format-string",
+        "omit-unused-openngc-cli-module"
+      ],
+      "sha256": "7935d134ac3620264ae76e52c5242b410a3804b7c6b50e3a69f2edb70b5e893b"
+    },
+    {
+      "abi": "x86_64",
+      "bridgeSha256": "34632f81e631093c9e5dafd239d6a5f62c85f9bf2f7e2241b958835254d02a31",
+      "sources": {
+        "astrometry-0.97.tar.gz": "75a36bb0d0be827c86bedac6bcbf78f110dc19229bab1604eea403d3a0368896",
+        "cfitsio-3.47.tar.gz": "418516f10ee1e0f1b520926eeca6b77ce639bed88804c7c545e74f26b3edf4ef"
+      },
+      "patches": [
+        "atomic-native-quit-flag",
+        "cfitsio347-format-string",
+        "omit-unused-openngc-cli-module"
+      ],
+      "sha256": "c84832f46f988d6eccd393bddf8bab06daeb3f53021e6d2b7bb3a8fe87c43d36"
+    }
+  ],
+  "ownershipProbe": {
+    "execution": "Android 14 x86_64 emulator, real C bridge with fake solver",
+    "scenarios": 7,
+    "assertionsPassed": 28,
+    "failed": 0
+  },
+  "defaultDebugApk": {
+    "file": "StarCam-v1.5.95-stability-and-memory-debug.apk",
+    "sha256": "35b7e19c4cb397957043b0902704b3a73f070dd9fe2da0f796ab0c57abfe9263",
+    "bytes": 24951282,
+    "solverAbis": [
+      "arm64-v8a"
+    ],
+    "zipalign": "34.0.0 zipalign -c -p 4: PASS",
+    "solverZipAlignmentBytes": 16384
+  },
+  "lintDebug": {
+    "result": "BUILD SUCCESSFUL",
+    "elapsed": "2m 21s",
+    "errors": 0,
+    "warnings": 9
+  }
+}

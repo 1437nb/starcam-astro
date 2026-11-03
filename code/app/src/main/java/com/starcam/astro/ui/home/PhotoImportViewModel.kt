@@ -34,9 +34,11 @@ class PhotoImportViewModel(application: Application) : AndroidViewModel(applicat
     var state by mutableStateOf(PhotoImportState())
         private set
     private var task: Job? = null
+    private var generation = 0L
 
     fun importPhotos(uris: List<Uri>) {
         if (uris.isEmpty() || state.running) return
+        val run = ++generation
         if (uris.size > 9) {
             state = PhotoImportState(finished = true, overLimit = true)
             return
@@ -55,15 +57,21 @@ class PhotoImportViewModel(application: Application) : AndroidViewModel(applicat
                         val imported = ImageUtils.copyUriToCacheKeepingName(getApplication(), uri, prefix) { jobContext.ensureActive() }
                         imported?.also { ownedFiles.add(it) }
                     }
+                    if (run != generation) return@launch
                     state = state.copy(
                         completed = index + 1,
                         failed = state.failed + if (file == null) 1 else 0,
                     )
                 }
+                if (run != generation) return@launch
                 state = state.copy(running = false, finished = true, paths = ownedFiles.map { it.absolutePath })
                 delivered = true
             } catch (e: CancellationException) {
                 throw e
+            } catch (_: Exception) {
+                if (run == generation) state = PhotoImportState(finished = true, failed = inputs.size)
+            } catch (_: OutOfMemoryError) {
+                if (run == generation) state = PhotoImportState(finished = true, failed = inputs.size)
             } finally {
                 if (!delivered) {
                     // Only this import's uniquely named cache files are owned by this task.
@@ -74,6 +82,7 @@ class PhotoImportViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun cancel() {
+        generation++
         task?.cancel()
         state = PhotoImportState()
     }

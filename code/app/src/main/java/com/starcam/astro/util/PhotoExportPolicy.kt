@@ -19,12 +19,12 @@ object PhotoExportPolicy {
         val pixels = w.toLong() * h
         if (pixels > Int.MAX_VALUE) return Long.MAX_VALUE
         val pixelCost = when (kind) {
-            PhotoSourceKind.FITS -> 40L
+            PhotoSourceKind.FITS -> 12L
             else -> if (rotated) 8L else 4L
         }
         val fileCost = when (kind) {
             PhotoSourceKind.IMAGE -> 0L
-            PhotoSourceKind.FITS -> fileBytes
+            PhotoSourceKind.FITS -> 0L
             PhotoSourceKind.RAW_PREVIEW -> if (fileBytes > Long.MAX_VALUE / 3) return Long.MAX_VALUE else fileBytes * 3
         }
         val fixed = pixels * pixelCost + RESERVE
