@@ -151,6 +151,11 @@ python tools/build_native.py --fetch --abi x86_64 --output code/app/build/native
    - 严禁使用任何通配符删除指令（包括但不限于 `*`、`Remove-Item -Recurse`、`rm -rf`、`del *` 等）。
    - 清理临时/测试文件时，必须逐一显式指定具体文件的完整绝对路径，严禁对整个父目录执行一键清空，清理文件时移到回收站而不是直接移除。
    - 凡是涉及删除、覆盖、清理目录的操作，必须先在回复中明确向用户列出目标路径，获得用户确认后方可执行。
+9. **发版与推送全套安全审查铁律（无需开发者追问，汇报前必须全部主动执行并给出结果）**：
+   - ① **凭据与跟踪范围审查**：执行 `python tools/check_secrets.py`，并核验 `git ls-files` 不含 `testdata/`、`apk/`、`local.properties`、`*.jks`、`*.env`、`*.internal.md` 等敏感文件；
+   - ② **签名与同证书升级校验**：用 `apksigner verify --print-certs` 校验 Release APK 为官方 `CN=StarCam`（SHA-256 `b04a854f...`），并与 `apk/` 下历史包比对一致；
+   - ③ **APK 二进制与包内容深度安全审计**：必须用脚本实测校验 Release APK 内 8 个离线 FITS 索引（`index-4112~4119.fits`）与源码树**逐字节一致**、`lib/arm64-v8a/libstellar_solver.so` 未压缩且 ZIP 数据偏移满足 **16 KB 对齐**（`% 16384 == 0`）、包内无 `vcsInfo` 与 `SDKP`（`dependenciesInfo` 加密块）、二进制 `AndroidManifest.xml` 与包条目中**不含** `AutoTestActivity`、`AcceptanceDocumentsProvider`、`debuggable` 及任何 `testdata` 私人素材；
+   - ④ **公开下载回验与线上 CI 核实**：发布 GitHub Release 后必须从公开下载 URL 拉取计算 SHA-256 与本地包比对一致，并检查 GitHub Actions CI 状态，全部主动写入汇报。
 
 ---
 
