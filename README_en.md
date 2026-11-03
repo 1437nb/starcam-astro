@@ -12,7 +12,9 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 ## Download
 
-**Local development build v1.5.95 (versionCode 115, §0.134)** hardens cancellation and time budgets, large-FITS memory use, import isolation, individual retry synchronization, online cache orientation, and raced bitmap ownership. It restores a pinned source build of the native solver and fixes its acceptance threshold and WCS reference pixels / axis direction. Only Debug was built for this version. See the [changes and verifiable checklist](docs/119-验证报告增补-§0.134-稳定性收尾与原生源码重建v1.5.95.md).
+**Latest release v1.5.96 (versionCode 116, §0.135)** prepares StarCam for F-Droid inclusion: upgrades the license to **GPL-3.0-or-later** with a complete [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), disables the AGP encrypted `dependenciesInfo` signing block and `vcsInfo`, makes `tools/build_native.py` build cleanly from SHA-256-pinned sources across Linux (CMake 3.22–4.x) and Windows, and adds Fastlane metadata plus the [F-Droid build recipe](docs/fdroid/com.starcam.astro.yml). See the [release notes](docs/release-notes-v1.5.96.md) and [§0.135 report](docs/120-F-Droid上架准备-§0.135.md).
+
+**v1.5.95 (versionCode 115, §0.134)** hardens cancellation and time budgets, large-FITS memory use, import isolation, individual retry synchronization, online cache orientation, and raced bitmap ownership. It restores a pinned source build of the native solver and fixes its acceptance threshold and WCS reference pixels / axis direction. See the [changes and verifiable checklist](docs/119-验证报告增补-§0.134-稳定性收尾与原生源码重建v1.5.95.md).
 
 **Local signed build v1.5.94 (versionCode 114, §0.133)** unifies normal images, RAW and FITS under Import Photo, with mixed selection of up to 9 files. Original-gallery and compatible-gallery modes remain under Choose from gallery / More methods. Its official signed Release APK has been built and verified locally with the same certificate as v1.5.93, allowing in-place upgrades. It has not been published. See the [unified import and build report](docs/118-验证报告增补-§0.133-照片RAW与FITS统一导入v1.5.94.md).
 
@@ -24,11 +26,11 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 **v1.5.92 (versionCode 112)** lets you open each completed batch photo in the full result viewer, reuse its solution, choose layers, and export only the photos you want. Returning preserves the batch list. **Batch solving no longer saves every annotated photo automatically.** This release also includes import progress and cancellation, solving phases and elapsed time, performance improvements, and bilingual refinements. See the [release notes](docs/release-notes-v1.5.92.md) and [validation checklist](docs/114-验证报告增补-§0.131-批量逐张查看与手动导出v1.5.92.md).
 
-Latest release: **[v1.5.92](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.92)**
+Latest release: **[v1.5.96](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.96)**
 
 | Package | Size | Notes |
 | :--- | :--- | :--- |
-| **[StarCam-v1.5.92-batch-photo-review-export-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.92/StarCam-v1.5.92-batch-photo-review-export-release.apk)** | 15.9 MiB | **Recommended** — R8-minified official signed APK (in-place upgrade) |
+| **[StarCam-v1.5.96-fdroid-readiness-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.96/StarCam-v1.5.96-fdroid-readiness-release.apk)** | 12.3 MiB | **Recommended** — R8-minified official signed APK (in-place upgrade) |
 
 - **Requirements**: Android 8.0 (API 26) or newer on an **arm64-v8a** device (the bundled native `astrometry.net` engine targets arm64; x86_64 emulators gracefully fall back to the pure-JVM catalog solver).
 - **Using batch results**: Select photos and wait for completion → open a photo → choose layers → save the current annotations or constellation lines only. Viewing and returning does not export to your gallery.
@@ -36,7 +38,7 @@ Latest release: **[v1.5.92](https://github.com/1437nb/starcam-astro/releases/tag
   - **v1.5.92**: Individual batch photo viewing and manual export, cached solutions, and preserved batch results on return;
   - **v1.5.91**: Unified import panel, background copy progress and cancellation, clearer offline status, solving phases and elapsed time, shared image preprocessing, thumbnail caching, and rendering buffers;
   - **v1.5.88 – v1.5.90**: Pure black / white themes, full-row settings switches, bilingual solving messages, magnitude labels and history constellation names, plus performance and robustness improvements.
-- **APK SHA-256**: `0E66D4036E319E7B75D5EC3E7B438701826FD7A7AA032B1C28B34AA7BD9DD4AC`.
+- **APK SHA-256**: `44152A718334921791E530F852DA1113BA07FF5AAB1931BE8DF1F9E24D363347`.
 - Full version history and release notes: **[GitHub Releases](https://github.com/1437nb/starcam-astro/releases)** & [`docs/`](docs/).
 
 ---

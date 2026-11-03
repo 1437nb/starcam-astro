@@ -8,7 +8,9 @@
 
 一款**纯离线优先**的 Android 天文摄影与星空识别 App。拍摄或导入夜空照片，在设备本地盲解天区坐标（RA / Dec / 视场 / 旋转），精确叠加星座连线、恒星专名、梅西耶深空天体与日月行星标注，并提供实时 AR 星图与今日天象指引。
 
-**本地开发版 v1.5.95（versionCode 115，§0.134）**：收尾求解取消与时间预算、大 FITS 内存、快速导入隔离、失败项重试同步、在线缓存方向与竞速图片回收；恢复固定源码 native 构建，并修正原生接受门槛及 WCS 参考像素 / 方向。当前仅 Debug，未构建本版签名 Release。[修复范围与可验证清单](docs/119-验证报告增补-§0.134-稳定性收尾与原生源码重建v1.5.95.md)。
+**最新正式版 v1.5.96（versionCode 116，§0.135）**：完成 F-Droid 开源应用商店上架准备，许可证升级为 **GPL-3.0-or-later** 并补齐 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；关闭 AGP 签名块加密依赖信息（`dependenciesInfo`）与 VCS 元数据；原生求解器支持 Windows / Linux（CMake 3.22~4.x）跨平台从固定 SHA-256 源码构建，并随附完整 `fastlane/` 商店元数据与 [F-Droid 构建配方](docs/fdroid/com.starcam.astro.yml)。详见 [更新说明](docs/release-notes-v1.5.96.md) 与 [§0.135 验证报告](docs/120-F-Droid上架准备-§0.135.md)。
+
+**v1.5.95（versionCode 115，§0.134）**：收尾求解取消与时间预算、大 FITS 内存、快速导入隔离、失败项重试同步、在线缓存方向与竞速图片回收；恢复固定源码 native 构建，并修正原生接受门槛及 WCS 参考像素 / 方向。[修复范围与可验证清单](docs/119-验证报告增补-§0.134-稳定性收尾与原生源码重建v1.5.95.md)。
 
 **本地签名版 v1.5.94（versionCode 114，§0.133）**：点击「导入照片」统一选择普通图片、RAW、FITS，支持混合多选，最多 9 个文件；原图相册与兼容模式保留在「从相册选择 / 更多方式」。已完成本地官方签名 Release 构建与验签，可覆盖 v1.5.93 升级；尚未公开发布。详见 [统一导入验证与构建报告](docs/118-验证报告增补-§0.133-照片RAW与FITS统一导入v1.5.94.md)。
 
@@ -24,11 +26,11 @@
 
 ## 下载安装
 
-最新版本：**[v1.5.92](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.92)**
+最新版本：**[v1.5.96](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.96)**
 
 | 安装包 | 大小 | 说明 |
 | :--- | :--- | :--- |
-| **[StarCam-v1.5.92-batch-photo-review-export-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.92/StarCam-v1.5.92-batch-photo-review-export-release.apk)** | 15.9 MiB | **推荐**，R8 压缩官方签名包（可直接覆盖安装升级） |
+| **[StarCam-v1.5.96-fdroid-readiness-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.96/StarCam-v1.5.96-fdroid-readiness-release.apk)** | 12.3 MiB | **推荐**，R8 压缩官方签名包（可直接覆盖安装升级） |
 
 - **系统要求**：Android 8.0（API 26）及以上，推荐 **arm64-v8a** 64 位真机（离线 `astrometry.net` 原生引擎仅包含 arm64 库；x86_64 模拟器自动回退至纯 JVM 星表引擎）。
 - **使用批量结果**：多选照片并等待完成 → 点击照片 → 调整图层 → 选择「保存当前标注」或「仅星座连线」。只查看后返回不会导出到相册。
@@ -36,7 +38,7 @@
   - **v1.5.92**：批量逐张查看和手动导出，成功照片免重复识别，返回保留列表；
   - **v1.5.91**：统一导入入口、后台复制进度与取消、离线能力说明、识别阶段与计时，复用图像预处理、缩略图和绘制缓冲；
   - **v1.5.88 ~ v1.5.90**：纯黑 / 纯白主题、设置整行切换、中英文识别提示、视星等和历史星座名本地化，以及性能与健壮性改进。
-- **安装包 SHA-256**：`0E66D4036E319E7B75D5EC3E7B438701826FD7A7AA032B1C28B34AA7BD9DD4AC`。
+- **安装包 SHA-256**：`44152A718334921791E530F852DA1113BA07FF5AAB1931BE8DF1F9E24D363347`。
 - 历史版本与完整发版日志见 **[GitHub Releases](https://github.com/1437nb/starcam-astro/releases)** 与 [`docs/`](docs/)。
 
 ---

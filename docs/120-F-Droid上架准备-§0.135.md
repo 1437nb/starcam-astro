@@ -31,8 +31,11 @@
 2. **JVM 单元测试回归**：
    - 执行 `.\gradlew.bat :app:cleanTestDebugUnitTest :app:testDebugUnitTest --no-build-cache -PskipPhotoTests=true`；
    - **49 个测试类 / 352 项测试全部通过**（`failures=0, errors=0, skipped=0`）。
-3. **Debug APK 组装构建**：
-   - 执行 `.\gradlew.bat :app:assembleDebug`，产出 `StarCam-v1.5.96-fdroid-readiness-debug.apk`（23,466,186 字节），`BUILD SUCCESSFUL`。
+3. **Debug 与官方签名 Release APK 构建及二进制审计**：
+   - `assembleDebug` 产出 `StarCam-v1.5.96-fdroid-readiness-debug.apk`（23,466,186 字节）；
+   - `assembleRelease` 与 `lintVitalRelease` 均通过（3m 24s），产出官方签名 R8 压缩包 `apk/StarCam-v1.5.96-fdroid-readiness-release.apk`（12,901,673 字节，SHA-256 `44152A718334921791E530F852DA1113BA07FF5AAB1931BE8DF1F9E24D363347`）；
+   - `apksigner verify` 确认证书为官方 `CN=StarCam`（SHA-256 `b04a854fa87c9c717125de0f45800cf4cadb25f36f3bdf739ee72f0d7306986e`），与历史正式版完全一致，可直接覆盖安装；
+   - 二进制审计通过：`lib/arm64-v8a/libstellar_solver.so` 未压缩且 ZIP 数据偏移 `2342912` 满足 16 KB 对齐（`% 16384 == 0`），包内不含 `version-control-info.textproto`（`vcsInfo`）、不含 `SDKP` Google 加密依赖块（`dependenciesInfo`），且不含任何调试测试 Activity。
 4. **凭据扫描**：
    - 执行 `python tools/check_secrets.py`，扫描 416 个文件，0 凭据泄露。
 
