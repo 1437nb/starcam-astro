@@ -1,6 +1,7 @@
 package com.starcam.astro.astro.steps
 
 import com.starcam.astro.astro.CatalogDomain
+import com.starcam.astro.astro.AdaptiveStarDetector
 import com.starcam.astro.astro.DetectedStar
 import com.starcam.astro.astro.DetectorSelection
 import com.starcam.astro.astro.EngineResult
@@ -10,6 +11,8 @@ import com.starcam.astro.astro.SolveDiagnostics
 import com.starcam.astro.astro.SolveEngine
 import com.starcam.astro.astro.StarCatalogData
 import com.starcam.astro.astro.StarSolver
+import com.starcam.astro.astro.SolveToken
+import com.starcam.astro.astro.SolveBudgetExceeded
 import com.starcam.astro.astro.StellarSolverNative
 import com.starcam.astro.data.SolveLogStore
 import java.util.concurrent.CancellationException
@@ -44,6 +47,7 @@ class LocalMatcherStep : SolveStep {
         var lastGraySnapshot: FloatArray? = null
         var lastGrayW = 0
         var lastGrayH = 0
+        var recoveryStars: List<DetectedStar>? = null
 
         val stars = try {
             val extractDiag = StringBuilder()
@@ -126,25 +130,63 @@ class LocalMatcherStep : SolveStep {
         } else null
 
         ctx.onPhase(com.starcam.astro.astro.SolvePhase.MATCHING)
-        val attempt = if (stars != null && stars.size >= 5) {
-            try {
+        val allowDeep = (ctx.fovDeg != null && ctx.fovDeg <= LocalStarMatcher.DEEP_PATH_MAX_FOV_DEG) ||
+            !ctx.scheduledSteps.contains(SolveEngine.ASTROMETRY_NATIVE)
+        val recoveryAllowed = ctx.fovDeg == null || ctx.fovDeg >= 10.0
+        // Reserve part of the existing global budget; otherwise a contaminated primary
+        // list can exhaust it before the independent detector ever gets a chance.
+        val primaryToken = if (recoveryAllowed) SolveToken(ctx.token,
+            timeoutMillis = (ctx.remainingSec * 600).toLong().coerceAtLeast(1)) else ctx.token
+        val primaryAttempt = try {
+            LocalStarMatcher.matchWithDiagnostics(
+                stars ?: emptyList(), ctx.display.width, ctx.display.height, hint,
+                allowDeepRetry = allowDeep, fallbackDetected = sepListForFallback,
+                fovHintDeg = ctx.fovDeg, token = primaryToken,
+            )
+        } catch (e: Throwable) {
+            if (e is CancellationException) throw e
+            ctx.token.check()
+            if (e is SolveBudgetExceeded) ctx.log.line(ctx.context, "内置星表主路径时间片耗尽，保留余量给复杂星空补救")
+            null
+        }
+        ctx.token.check()
+        val attempt = if (primaryAttempt?.result != null || !recoveryAllowed || ctx.isBudgetDepleted) primaryAttempt else {
+            val retry = try {
                 LocalStarMatcher.matchWithDiagnostics(
-                    stars, ctx.display.width, ctx.display.height, hint,
-                    allowDeepRetry = (ctx.fovDeg != null && ctx.fovDeg <= LocalStarMatcher.DEEP_PATH_MAX_FOV_DEG) ||
-                        !ctx.scheduledSteps.contains(SolveEngine.ASTROMETRY_NATIVE),
-                    fallbackDetected = sepListForFallback,
+                    emptyList(), ctx.display.width, ctx.display.height, hint,
+                    allowDeepRetry = allowDeep,
                     fovHintDeg = ctx.fovDeg,
                     token = ctx.token,
+                    recoveryDetected = { recoveryToken ->
+                        ctx.onPhase(com.starcam.astro.astro.SolvePhase.DETECTING)
+                        ctx.onProgress(if (isEn) "Recovering stars against uneven sky background…"
+                            else "复杂星空补救：分析局部背景与星点形态…")
+                        AdaptiveStarDetector.detect(ctx.display.width, ctx.display.height,
+                            ctx.pixels.gray, token = recoveryToken).also {
+                            recoveryStars = it
+                            ctx.onPhase(com.starcam.astro.astro.SolvePhase.MATCHING)
+                        }
+                    },
                 )
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
+                ctx.token.check()
                 null
             }
-        } else null
+            if (retry?.result != null || primaryAttempt == null) retry else primaryAttempt.copy(
+                diagnostics = primaryAttempt.diagnostics.copy(recoveryDetail = retry?.diagnostics?.recoveryDetail))
+        }
+        ctx.token.check()
 
         val matched = attempt?.result
         val diag = attempt?.diagnostics
         val deepRejectReason = diag?.deepRejectedReason
+        diag?.recoveryDetail?.let { ctx.log.line(ctx.context, "内置星表补救：$it") }
+        val matchedStars = if (diag?.usedRecovery == true) recoveryStars else stars
+        if (diag?.usedRecovery == true) {
+            previewStars = recoveryStars
+            lastLocalStarTotal = recoveryStars?.size ?: 0
+        }
 
         if (matched != null && diag?.usedFallback == true) {
             ctx.log.line(
@@ -154,8 +196,8 @@ class LocalMatcherStep : SolveStep {
             )
         }
 
-        if (stars != null) {
-            SolveLogStore.setStars(ctx.report, stars, lastLocalStarTotal)
+        if (matchedStars != null) {
+            SolveLogStore.setStars(ctx.report, matchedStars, lastLocalStarTotal)
             try {
                 lastGraySnapshot = ctx.pixels.gray
                 lastGrayW = ctx.display.width
@@ -173,8 +215,11 @@ class LocalMatcherStep : SolveStep {
                     val domainTag = if (matched.catalogDomain == CatalogDomain.DEEP) {
                         if (isEn) " · Deep fallback" else " · 深域兜底"
                     } else ""
-                    val detail = if (isEn) "Built-in catalog · ${matched.inlierCount} inliers$domainTag"
-                    else "内置星表 · 内点 ${matched.inlierCount} 颗$domainTag"
+                    val recoveryTag = if (diag?.usedRecovery == true) {
+                        if (isEn) " · Adaptive detection" else " · 复杂星空补救"
+                    } else ""
+                    val detail = if (isEn) "Built-in catalog · ${matched.inlierCount} inliers$domainTag$recoveryTag"
+                    else "内置星表 · 内点 ${matched.inlierCount} 颗$domainTag$recoveryTag"
                     ctx.log.line(
                         ctx.context,
                         "内置星表成功：$detail scale=%.2f\" 耗时=%dms"
@@ -182,7 +227,7 @@ class LocalMatcherStep : SolveStep {
                     )
                     SolveLogStore.addStep(
                         ctx.report, "内置星表", "solved",
-                        ("内点=${matched.inlierCount} scale=%.2f$domainTag").format(matched.solve.pixScaleArcsec),
+                        ("内点=${matched.inlierCount} scale=%.2f$domainTag$recoveryTag").format(matched.solve.pixScaleArcsec),
                         System.currentTimeMillis() - ctx.logT0,
                     )
                     if (ctx.recordSuccess) StarSolver.writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, "内置星表", detail)
@@ -232,14 +277,20 @@ class LocalMatcherStep : SolveStep {
             else -> "有解但内点仅 ${matched.inlierCount} 颗，被官方复核拒绝"
         }
 
-        ctx.log.line(ctx.context, "内置星表失败：$why")
-        SolveLogStore.addStep(ctx.report, "内置星表", "unsolved", why, System.currentTimeMillis() - ctx.logT0)
+        val failureReason = diag?.recoveryDetail?.let { "$why；补救：$it" } ?: why
+        ctx.log.line(ctx.context, "内置星表失败：$failureReason")
+        SolveLogStore.addStep(ctx.report, "内置星表", "unsolved", failureReason, System.currentTimeMillis() - ctx.logT0)
 
         if (stars != null) {
-            StellarSolverNative.dumpLocalFail(
-                ctx.context, ctx.display, stars,
-                if (matched == null) "local-unsolved" else "local-inliers-${matched.inlierCount}",
-            )
+            try {
+                StellarSolverNative.dumpLocalFail(
+                    ctx.context, ctx.display, stars,
+                    if (matched == null) "local-unsolved" else "local-inliers-${matched.inlierCount}",
+                )
+            } catch (_: LinkageError) {
+                // Unsupported ABIs still use the Kotlin engine. A failed optional JNI
+                // class initializer must not turn a normal unsolved result into a crash.
+            }
         }
 
         val fovOverride = if (matched != null) {
@@ -247,7 +298,7 @@ class LocalMatcherStep : SolveStep {
         } else null
 
         return StepOutcome.Failure(
-            reason = why,
+            reason = failureReason,
             fovOverride = fovOverride,
             diagStars = previewStars ?: stars,
             diagStarTotal = lastLocalStarTotal,

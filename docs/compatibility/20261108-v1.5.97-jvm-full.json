@@ -1,0 +1,487 @@
+{
+  "date": "2026-11-08",
+  "version": "1.5.97",
+  "versionCode": 117,
+  "sourceCommit": "8d483f8db01b220a13fb81e2660836bdebe40c3d",
+  "sourceDirty": true,
+  "command": ":app:cleanTestDebugUnitTest :app:testDebugUnitTest --no-build-cache --offline --console=plain",
+  "skipPhotoTests": false,
+  "gradleResult": "BUILD SUCCESSFUL",
+  "gradleElapsed": "8m 56s",
+  "classes": 61,
+  "totals": {
+    "tests": 389,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "suites": [
+    {
+      "name": "com.starcam.astro.AdaptiveFieldProbeTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.AdaptiveStarDetectorTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.ArSkyProjectorTest",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.astro.AstroTipsTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.astro.CancellableHttpTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.astro.OverlayRendererTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.astro.PlateSolveClientTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.astro.SolveStabilityTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.astro.SolveStepTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.astro.SolveTokenTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.AstroMathTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.AttitudeFusionTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.CameraMathTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.CancellableStreamsTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.CrossCheckTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.data.HistoryStoreTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.DetectorSelectionTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.ExifPriorsFallbackTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.ExifPriorsGpsTimeRealFileTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.ExifPriorsTimeParseTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.FallbackStarListTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.FitsImageTest",
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.FitsNarrowFieldTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.FitsSolveEndToEndTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.FitsStreamingTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.GateFovSweepTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.LayeredRendererLabelTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.LocalMatcherTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.MatchDiagnosticsTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.NarrowFieldRegressionTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.ObjectInfoTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.OfflinePhotosTruthTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.PhaseTimingBench",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.Photo12RegressionTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.PhotoExportGeometryTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.PhotoExportPolicyTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.QuatMathTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.RaSeamRegressionTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.RawPreviewTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.RealPhotoMatchTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.RendererScratchTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.RescalePortraitTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.ScoredRoundBudgetTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.SepThresholdSemanticsTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.SkyEphemerisTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.SolarSystemEphemerisTest",
+      "tests": 27,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.SolveLogStoreTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.SolvePixelsTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.SolveTimeFormatTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.StarSolverTest",
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.StellariumLinesTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.StellarSolverIndexVerifyTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.SyntheticMidFieldTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.SyntheticRegressionTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.TieredCatalogTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.TonightSkyTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.ui.AppViewModelTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.ui.batch.BatchNavigationTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.ui.batch.BatchOutcomeTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.ui.theme.ThemeTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.starcam.astro.VoteThresholdScaleTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "complexFieldEvidence": [
+    "TRUSTED-CYGNUS result=SolveResult(raDeg=305.00005123054586, decDeg=39.99914966011657, pixScaleArcsec=45.000440551861566, orientationDeg=179.9932815645899, parity=1, imageWidth=1200, imageHeight=1200, subId=null, fieldRadiusArcmin=636.4023334120684, nMatch=null, nStars=null, indexId=null, logodds=null, wcs=com.starcam.astro.astro.WcsTransform@5890e879) diagnostics=MatchDiagnostics(usedFallback=false, deepRejectedReason=null, voteStats=work=45 votedStars=45 topVote=11 avgMargin=1.12, scoredStats=cand=20016 scored=20000 work=45 ms=15806 CUT=cap, scoredBest=26, scoredInFrame=97, shallowVoteStats=null, shallowScoredStats=null, shallowScoredBest=null, shallowScoredInFrame=null, usedRecovery=true, recoveryDetail=局部背景提星=64颗，命中(29内点))",
+    "RECOVERY-NEGATIVE apod5 result=null",
+    "RECOVERY-NEGATIVE pleiades result=null",
+    "COMPLEX-REAL apod3xcheck hits=28/64 recovered=false verdict=TRUE result=130.27265101701892,-43.878914270387064,8.499537466189407 n=28",
+    "COMPLEX-REAL cas15 hits=22/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL crux10 hits=20/64 recovered=false verdict=TRUE result=186.00273292971258,-60.00164421963053,10.001650375348731 n=23",
+    "COMPLEX-REAL cyg15 hits=29/64 recovered=true verdict=TRUE result=305.00005123054586,39.99914966011657,15.00014685062052 n=29",
+    "COMPLEX-REAL cygnus hits=5/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL equator10 hits=15/64 recovered=false verdict=TRUE result=30.00177161496765,-7.11782335964316E-4,9.99986705295691 n=16",
+    "COMPLEX-REAL hdf-05d hits=0/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL leo15 hits=25/64 recovered=false verdict=TRUE result=154.9972197903336,19.995844333018784,14.992718275991331 n=25",
+    "COMPLEX-REAL lmc hits=0/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL m13-05d hits=0/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL m31-1d hits=0/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL m31m33-14 hits=26/64 recovered=false verdict=TRUE result=17.000634215302114,35.000061642687214,14.004280766653322 n=26",
+    "COMPLEX-REAL m42-1d hits=0/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL m45-1d hits=2/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL m51-1d hits=0/63 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL m51-5d hits=3/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL m8182-1d hits=0/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL mid30 hits=39/64 recovered=false verdict=TRUE result=119.99700892604028,29.996612646240198,29.997547712447652 n=9",
+    "COMPLEX-REAL npole12 hits=24/64 recovered=false verdict=TRUE result=149.99824470743494,84.99890926294643,12.001685699029068 n=25",
+    "COMPLEX-REAL orion15 hits=46/64 recovered=false verdict=TRUE result=82.99804789664302,-3.0012722771250178,14.996037005295008 n=50",
+    "COMPLEX-REAL polaris hits=1/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL sco18 hits=13/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL seam0-15 hits=23/64 recovered=false verdict=TRUE result=0.5002123855268223,19.99882106618803,15.000576962276492 n=23",
+    "COMPLEX-REAL seam0 hits=2/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL seam350 hits=24/64 recovered=false verdict=TRUE result=350.00007357677646,60.000005972409205,9.998155062528781 n=24",
+    "COMPLEX-REAL sgr hits=7/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL sgr15 hits=6/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL spole12 hits=22/64 recovered=false verdict=TRUE result=19.986694854074813,-84.99873888179252,12.001161363359381 n=22",
+    "COMPLEX-REAL summer20 hits=17/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL vega hits=2/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL void hits=0/64 recovered=false verdict=MISS result=null",
+    "COMPLEX-REAL void15 hits=29/64 recovered=false verdict=TRUE result=200.00113017948706,62.00020622814477,14.996739790413903 n=29",
+    "COMPLEX-SUMMARY old=12 new=13 wrong=0 total=32",
+    "FAINT old=8 adaptive=4 truth=4/4",
+    "CI-SUMMARY true=12 false=0 miss=0 total=12"
+  ]
+}

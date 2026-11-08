@@ -5,14 +5,16 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-11-03（v1.5.96 F-Droid 上架准备与官方签名 Release 发布完成：中英文 README 与 GitHub Release 已同步公开，详见 docs/120）
-**当前基线**：v1.5.96（versionCode 116，§0.135 F-Droid 上架准备，最新公开 Release 为 v1.5.96 / tag `v1.5.96`）
+**最后更新**：2026-11-08（v1.5.97 复杂星空补救 Debug 完成：完整 JVM 389 项及 Android 9/14 各 30 功能用例通过；Lint 限应用源码，测试源码静态分析未完成）
+**当前基线**：本地 v1.5.97 Debug（versionCode 117，§0.136 复杂星空补救，未发布）；最近已记录的公开 Release 为 v1.5.96 / tag `v1.5.96`。
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
-**构建环境**：本机拥有全套高配构建环境，Kotlin 编译、单元测试与 APK 打包均在本机完成。最新完整 JVM 报告为 59 类 / 373 项、0 失败 / 0 错误 / 0 跳过（不设置 skipPhotoTests，含 49 类 / 352 项常规套件和 10 类 / 21 项本机素材回归）；公开 JPEG 与本机 gray12 均 12/12 真解。窄场观察台 12 解出 / 0 错解 / 20 未解出，测试通过不代表所有素材均能解出。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
+**构建环境**：本机拥有全套高配构建环境，Kotlin 编译、单元测试与 APK 打包均在本机完成。最新完整 JVM 报告为 61 类 / 389 项、0 失败 / 0 错误 / 0 跳过（不设置 skipPhotoTests，含常规 365 项和本机素材 24 项）；公开 JPEG 与本机 gray12 均 12/12 真解。32 场观察台原路径仍为 12 解出，加入本轮补救后 13 解出 / 0 错解 / 19 未解出，测试通过不代表所有素材均能解出；详见 docs/121 的输入口径与范围。辅助机器（`ec2-hk` 用于海外 Git 中转推送，`huawei` 用于 GitHub Release 发布），工具链与规范详见 `AGENTS.md` §0 与 §2。
 
 ---
 
 ## 一、下一步（建议优先级，待开发者拍板）
+
+> **2026-11-08 复杂星空补救已交付本地 Debug（§0.136）**。主路径预留现有总预算的一部分给局部背景/噪声与形态检测补救，补救最多 30 秒、至少 10 内点且与可信视场一致；修复无原生库时失败诊断异常。完整 JVM 61 类 / 389 项全绿，Android 9/14 各 30 功能用例通过，合成复杂背景约 19 秒正确解出；32 场观察 12→13、零错解，仍 19 未解出。应用源码 K1 Lint 0 错误 / 9 警告；默认分析与测试源码 Lint 未完成，详见 docs/121。下一步优先对开发者实际失败原图和 ARM 真机做同图前后对照，另定位本机 Lint 测试源码初始化耗时。批量持久恢复、实体相机/AR 仍未完成。本轮未构建 Release、未推送。
 
 > **2026-11-03 v1.5.96 官方签名 Release 构建与 GitHub 发布完成（§0.135）**：按开发者「跑 release 和更新 readme」指令完成本机 R8 官方签名 APK（`StarCam-v1.5.96-fdroid-readiness-release.apk`，12,901,673 字节，SHA-256 `44152A718334921791E530F852DA1113BA07FF5AAB1931BE8DF1F9E24D363347`），`assembleRelease` 与 `lintVitalRelease` 均通过（3m 24s），与 v1.5.94 同签名可覆盖升级；二进制审计确认 16 KB 对齐、无 `vcsInfo`、无 `dependenciesInfo`（`SDKP`）加密块、无测试 Activity。已同步更新中英文 README、推送 GitHub `main` 与 `v1.5.96` tag，并发布公开 GitHub Release。下一步可直接用 GitLab 账号向 `fdroid/fdroiddata` 提交 `docs/fdroid/com.starcam.astro.yml` 的 MR。
 
@@ -124,6 +126,14 @@
     ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
 
 ## 二、最近完成
+
+- **2026-11-08（§0.136 / v1.5.97：复杂星空补救，本地 Debug）**：
+  - 新增 `AdaptiveStarDetector`，局部背景/稳健噪声、点源形态筛选；原主路径未解出或时间片耗尽后补救，保留总预算，增加 ≥10 内点及可信视场一致门槛。已知 <10° 不追加搜索，可信 ≤20° 优先深域，宽/未知视场浅域优先；正常快速成功不追加检测。
+  - 实际模拟器用例定位并修复主路径耗尽预算导致补救无法启动、可选 JNI 类初始化异常覆盖普通失败两项问题。
+  - 最终完整 JVM：`cleanTestDebugUnitTest + testDebugUnitTest --no-build-cache --offline`、不设置 skipPhotoTests，61 类 / 389 项、0 失败 / 错误 / 跳过（8m 56s）；公开照片 12/12；32 场观察 12→13，新增 cyg15 正确 29 内点，零错解。
+  - Android 9 / 14 默认包 JVM 回退各 30 功能用例通过，共 60 次执行；复杂背景生产步骤分别 19,231 / 19,541 ms，在默认 30 秒内正确解出。原生可用变体、C 桥与 9 项 UI 自动化本轮未重跑，不复用历史 152/28 数字。
+  - Debug APK 24,017,950 字节，SHA-256 `362aa3345eae42703425a8b1ff59842ceb6cd5a221e41e19d0eae8486306d5c6`；与两系统实装包一致，8 FITS 和原生库逐字节校验、ZIP 16 KiB 对齐及私人素材条目检查通过。应用源码 K1 Lint 0 错误 / 9 警告，另 9 信息项；测试源码 Lint 初始化耗时异常未完成。验证与手工清单见 `docs/121-验证报告增补-§0.136-复杂星空识别补救v1.5.97.md`，机器可读证据见 `docs/compatibility/20261108-v1.5.97-*.json`。
+  - 更新中英文 README 与交接说明；未构建 Release / 未推送。ARM 真机与此次失败原图复验仍待补齐。
 
 - **2026-11-03（§0.135 / v1.5.96：F-Droid 上架准备与 GPL-3.0-or-later 许可收敛）**：
   - 替换 `LICENSE` 为 GPL-3.0 正文，同步中英文 README、AGENTS、交接说明；新增 `THIRD_PARTY_NOTICES.md` 集中声明 `astrometry.net` 0.97、GSL、qfits、CFITSIO 3.47、Tycho-2 4100 索引、BSC5 星表、Stellarium 连线及 12 张作者实拍离线演示照片的来源与许可。

@@ -1,0 +1,40 @@
+{
+  "version": "1.5.97",
+  "versionCode": 117,
+  "apk": "code/app/build/outputs/apk/debug/StarCam-v1.5.97-complex-sky-recovery-debug.apk",
+  "bytes": 24017950,
+  "sha256": "362aa3345eae42703425a8b1ff59842ceb6cd5a221e41e19d0eae8486306d5c6",
+  "testApkSha256": "910522ebee9d82937f3579966b767b502355121aee6bc69fb36a4f59ab34e7a3",
+  "indexByteEquality": {
+    "assets/indexes/index-4112.fits": true,
+    "assets/indexes/index-4113.fits": true,
+    "assets/indexes/index-4114.fits": true,
+    "assets/indexes/index-4115.fits": true,
+    "assets/indexes/index-4116.fits": true,
+    "assets/indexes/index-4117.fits": true,
+    "assets/indexes/index-4118.fits": true,
+    "assets/indexes/index-4119.fits": true
+  },
+  "native": {
+    "entry": "lib/arm64-v8a/libstellar_solver.so",
+    "sha256": "7935d134ac3620264ae76e52c5242b410a3804b7c6b50e3a69f2edb70b5e893b",
+    "uncompressed": true,
+    "dataOffset": 12894208,
+    "aligned16KiB": true
+  },
+  "privateTestdataEntries": false,
+  "lint": {
+    "mode": "K1 command-line compatibility; application sources only",
+    "command": ".\\gradlew.bat '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' --max-workers=1 '-Pandroid.lint.useK2Uast=false' :app:lintDebug -x :app:lintAnalyzeDebugAndroidTest -x :app:lintAnalyzeDebugUnitTest --offline --console=plain",
+    "gradleResult": "BUILD SUCCESSFUL",
+    "report": "code/app/build/reports/lint-results-debug.xml",
+    "severityCounts": {
+      "Fatal": 0,
+      "Error": 0,
+      "Warning": 9,
+      "Information": 9
+    },
+    "testSourceLint": "not completed: initialization/file scanning did not finish in normal or compatibility runs",
+    "defaultK2Lint": "not completed: source scanning initialization; project default unchanged"
+  }
+}

@@ -28,14 +28,14 @@ android {
         applicationId = "com.starcam.astro"
         minSdk = 26
         targetSdk = 34
-        versionCode = 116
-        versionName = "1.5.96"
+        versionCode = 117
+        versionName = "1.5.97"
         testInstrumentationRunner = "com.starcam.astro.DeviceAcceptanceInstrumentation"
     }
 
     // 每版更新内容简述（用户规则：在 APK 文件名上带上更新内容）
     val updateDesc = project.findProperty("updateDesc") as? String
-        ?: "fdroid-readiness"
+        ?: "complex-sky-recovery"
 
     // APK 产物自动带版本号、更新内容与变体名（用户规则：文件名标注版本与更新内容）
     applicationVariants.all {
@@ -133,6 +133,7 @@ android {
                 excludeTestsMatching("com.starcam.astro.FitsNarrowFieldTest")
                 // §0.103 闸门真值台读 testdata/gate-sweep（SkyView 实拍 + 合成渲染，均不入库）
                 excludeTestsMatching("com.starcam.astro.GateFovSweepTest")
+                excludeTestsMatching("com.starcam.astro.AdaptiveFieldProbeTest")
             }
         }
     }

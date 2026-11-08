@@ -8,6 +8,8 @@
 
 An **offline-first** Android app for astrophotography plate-solving and night sky identification. Capture or import night-sky photos to perform on-device blind plate-solving (RA, Dec, FOV, orientation, parity), overlay constellation lines, proper star names, Messier deep-sky objects, and real-time Sun/Moon/planet positions, or explore the sky with the sensor-driven AR live star map.
 
+**Local development v1.5.97 (unreleased, §0.136)** adds local-background/noise and compact-source recovery when the primary search remains unsolved. It reserves time within the existing total budget, caps recovery at 30 seconds, retains existing acceptance gates, and additionally requires ten inliers and agreement with a trusted input FOV. It also fixes failure diagnostics when the optional native library is unavailable. It improves some dense or uneven-background fields; severe blur, long trails and thick clouds remain limitations. See the [validation scope and reproducible checklist](docs/121-验证报告增补-§0.136-复杂星空识别补救v1.5.97.md).
+
 ---
 
 ## Download

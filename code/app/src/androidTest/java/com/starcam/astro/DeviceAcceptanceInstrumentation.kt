@@ -60,6 +60,58 @@ class DeviceAcceptanceInstrumentation : Instrumentation() {
                 put("nativeSolverAvailable", NativeEngineProbe.available)
             })
             val source = jpeg("source.jpg", 1600, 1000)
+            case("complex-sky-recovery-runs-through-the-real-local-step") {
+                val w = 700
+                val region = com.starcam.astro.astro.DemoSolver.regions.first()
+                val cd = region.fovDeg/w
+                val wcs = WcsTransform(w/2.0+.5,w/2.0+.5,region.raDeg,region.decDeg,-cd,0.0,0.0,cd)
+                val random = kotlin.random.Random(117)
+                val gray = FloatArray(w*w) { i ->
+                    15f + (i/w)*.08f + random.nextFloat() * if(i%w>550) 80f else 2f
+                }
+                for (star in com.starcam.astro.astro.StarCatalogData.stars) {
+                    if (star.mag > 4.0) continue
+                    val p = wcs.skyToScreen(star.ra,star.dec,w,w)
+                    if (!p[0].isFinite() || !p[1].isFinite()) continue
+                    val x0=p[0].toInt(); val y0=p[1].toInt()
+                    val amplitude=(5.2-star.mag).coerceIn(.6,4.5)*6
+                    for (y in maxOf(0,y0-5)..minOf(w-1,y0+5)) for (x in maxOf(0,x0-5)..minOf(w-1,x0+5)) {
+                        val dx=x-p[0]; val dy=y-p[1]
+                        gray[y*w+x]+=(amplitude*kotlin.math.exp(-(dx*dx+dy*dy)/4.5)).toFloat()
+                    }
+                }
+                Bitmap.createBitmap(w,w,Bitmap.Config.ARGB_8888).useBitmap { bitmap ->
+                    val report = JSONObject()
+                    val phases = mutableListOf<String>()
+                    val ctx = com.starcam.astro.astro.steps.StepContext(
+                        targetContext,bitmap,"acceptance-complex-sky.png",com.starcam.astro.data.SettingsRepository(targetContext),
+                        fovDeg=region.fovDeg, token=com.starcam.astro.astro.SolveToken(timeoutMillis=30000),
+                        deadlineMs=System.nanoTime()/1_000_000+30000, report=report,
+                        log=com.starcam.astro.data.SolveLogStore.beginSolve("acceptance-complex-sky.png"),
+                        logT0=System.currentTimeMillis(), onProgress={ phases+=it },
+                        pixels=com.starcam.astro.astro.SolvePixels(w,w) { gray },recordSuccess=false,
+                    )
+                    val outcome=runBlocking { com.starcam.astro.astro.steps.LocalMatcherStep().execute(ctx) }
+                    check(outcome is com.starcam.astro.astro.steps.StepOutcome.Success) { outcome.toString() }
+                    val solved=outcome.result.solve
+                    check(kotlin.math.abs(solved.raDeg-region.raDeg)<2 && kotlin.math.abs(solved.decDeg-region.decDeg)<2)
+                    check(outcome.result.detail.contains("补救") || outcome.result.detail.contains("Adaptive")) { outcome.result.detail }
+                    check(phases.any { it.contains("补救") || it.contains("Recovering") })
+                }
+            }
+            case("unsolved-frame-is-a-normal-failure-without-optional-native-library") {
+                Bitmap.createBitmap(128,128,Bitmap.Config.ARGB_8888).useBitmap { bitmap ->
+                    val ctx=com.starcam.astro.astro.steps.StepContext(
+                        targetContext,bitmap,"acceptance-empty.png",com.starcam.astro.data.SettingsRepository(targetContext),
+                        fovDeg=65.0,token=com.starcam.astro.astro.SolveToken(timeoutMillis=10000),
+                        deadlineMs=System.nanoTime()/1_000_000+10000,report=JSONObject(),
+                        log=com.starcam.astro.data.SolveLogStore.beginSolve("acceptance-empty.png"),
+                        logT0=System.currentTimeMillis(),onProgress={},recordSuccess=false,
+                    )
+                    val outcome=runBlocking { com.starcam.astro.astro.steps.LocalMatcherStep().execute(ctx) }
+                    check(outcome is com.starcam.astro.astro.steps.StepOutcome.Failure)
+                }
+            }
             case("long-raw-name-keeps-extension-and-remains-decodable") {
                 val raw = rawPreview(source.readBytes())
                 val named = File(fixtures, "camera_" + "x".repeat(160) + ".dng").apply { writeBytes(raw.readBytes()) }

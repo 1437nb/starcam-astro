@@ -1,0 +1,217 @@
+{
+  "device": {
+    "manufacturer": "Google",
+    "model": "Android SDK built for x86_64",
+    "api": 28,
+    "android": "9",
+    "abis": [
+      "x86_64",
+      "x86"
+    ],
+    "memoryClassMiB": 512,
+    "lowRam": false,
+    "nativeSolverAvailable": false
+  },
+  "tests": [
+    {
+      "name": "complex-sky-recovery-runs-through-the-real-local-step",
+      "status": "passed",
+      "elapsedMs": 19231,
+      "nativeHeapAfterBytes": 5008792
+    },
+    {
+      "name": "unsolved-frame-is-a-normal-failure-without-optional-native-library",
+      "status": "passed",
+      "elapsedMs": 28,
+      "nativeHeapAfterBytes": 5086616
+    },
+    {
+      "name": "long-raw-name-keeps-extension-and-remains-decodable",
+      "status": "passed",
+      "elapsedMs": 91,
+      "nativeHeapAfterBytes": 5375480
+    },
+    {
+      "name": "cancel-import-then-start-again-keeps-new-state",
+      "status": "passed",
+      "elapsedMs": 99,
+      "nativeHeapAfterBytes": 5429896
+    },
+    {
+      "name": "large-fits-uses-bounded-android-bitmap-decoding",
+      "status": "passed",
+      "elapsedMs": 2415,
+      "nativeHeapAfterBytes": 5360600
+    },
+    {
+      "name": "raw-container-over-budget-is-rejected-before-read",
+      "status": "passed",
+      "elapsedMs": 0,
+      "nativeHeapAfterBytes": 5361880
+    },
+    {
+      "name": "cached-online-result-rebuilds-rotation-when-cache-is-missing",
+      "status": "passed",
+      "elapsedMs": 159,
+      "nativeHeapAfterBytes": 7839432
+    },
+    {
+      "name": "successful-individual-retry-replaces-batch-failure-once",
+      "status": "passed",
+      "elapsedMs": 1797,
+      "nativeHeapAfterBytes": 16713320
+    },
+    {
+      "name": "racing-engines-do-not-recycle-the-shared-result-bitmap",
+      "status": "passed",
+      "elapsedMs": 90,
+      "nativeHeapAfterBytes": 16654584
+    },
+    {
+      "name": "mixed-photo-raw-fits-import-preserves-formats",
+      "status": "passed",
+      "elapsedMs": 91,
+      "nativeHeapAfterBytes": 16711672
+    },
+    {
+      "name": "mixed-import-over-limit-rejects-entire-selection",
+      "status": "passed",
+      "elapsedMs": 2,
+      "nativeHeapAfterBytes": 16712120
+    },
+    {
+      "name": "original-size-jpeg-roundtrip",
+      "status": "passed",
+      "elapsedMs": 58,
+      "nativeHeapAfterBytes": 14002968
+    },
+    {
+      "name": "preview-size-is-independent",
+      "status": "passed",
+      "elapsedMs": 5,
+      "nativeHeapAfterBytes": 14146648
+    },
+    {
+      "name": "exif-1-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 26,
+      "nativeHeapAfterBytes": 18527752
+    },
+    {
+      "name": "exif-2-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 13,
+      "nativeHeapAfterBytes": 22759368
+    },
+    {
+      "name": "exif-3-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 11,
+      "nativeHeapAfterBytes": 19667816
+    },
+    {
+      "name": "exif-4-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 13,
+      "nativeHeapAfterBytes": 23864616
+    },
+    {
+      "name": "exif-5-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 13,
+      "nativeHeapAfterBytes": 28202152
+    },
+    {
+      "name": "exif-6-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 15,
+      "nativeHeapAfterBytes": 19821928
+    },
+    {
+      "name": "exif-7-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 23,
+      "nativeHeapAfterBytes": 24028328
+    },
+    {
+      "name": "exif-8-bitmap-orientation",
+      "status": "passed",
+      "elapsedMs": 14,
+      "nativeHeapAfterBytes": 28305336
+    },
+    {
+      "name": "online-rotated-photo-original-export",
+      "status": "passed",
+      "elapsedMs": 12,
+      "nativeHeapAfterBytes": 17693432
+    },
+    {
+      "name": "layer-flags-change-actual-canvas-output",
+      "status": "passed",
+      "elapsedMs": 89,
+      "nativeHeapAfterBytes": 14445544
+    },
+    {
+      "name": "fits-full-dimensions",
+      "status": "passed",
+      "elapsedMs": 29,
+      "nativeHeapAfterBytes": 15003688
+    },
+    {
+      "name": "raw-embedded-preview-full-dimensions",
+      "status": "passed",
+      "elapsedMs": 23,
+      "nativeHeapAfterBytes": 22346728
+    },
+    {
+      "name": "missing-source-original-is-rejected",
+      "status": "passed",
+      "elapsedMs": 1,
+      "nativeHeapAfterBytes": 22346728
+    },
+    {
+      "name": "missing-source-preview-still-saves",
+      "status": "passed",
+      "elapsedMs": 5,
+      "nativeHeapAfterBytes": 22346152
+    },
+    {
+      "name": "legacy-unknown-pixel-basis-is-rejected",
+      "status": "passed",
+      "elapsedMs": 1,
+      "nativeHeapAfterBytes": 15001608
+    },
+    {
+      "name": "oversized-source-rejected-before-pixel-decode",
+      "status": "passed",
+      "elapsedMs": 4,
+      "nativeHeapAfterBytes": 15008392
+    },
+    {
+      "name": "batch-public-photos-solve-without-auto-export",
+      "status": "passed",
+      "elapsedMs": 2491,
+      "nativeHeapAfterBytes": 8004984
+    }
+  ],
+  "passed": 30,
+  "failed": 0,
+  "scope": "Android Bitmap/Canvas/EXIF/export/storage; no claim of physical camera, AR sensors or native performance validation",
+  "executionKind": "emulator",
+  "api": 28,
+  "apk": "StarCam-v1.5.97-complex-sky-recovery-debug.apk",
+  "apkSha256": "362aa3345eae42703425a8b1ff59842ceb6cd5a221e41e19d0eae8486306d5c6",
+  "testApkSha256": "910522ebee9d82937f3579966b767b502355121aee6bc69fb36a4f59ab34e7a3",
+  "sourceCommit": "8d483f8db01b220a13fb81e2660836bdebe40c3d",
+  "sourceDirty": true,
+  "nativeLibraries": {
+    "lib/arm64-v8a/libstellar_solver.so": "7935d134ac3620264ae76e52c5242b410a3804b7c6b50e3a69f2edb70b5e893b"
+  },
+  "evidence": {
+    "directory": "code/app/build/device-lab/20261108T152253Z-ceabb5",
+    "files": [
+      "acceptance.json",
+      "instrumentation.txt"
+    ]
+  }
+}
