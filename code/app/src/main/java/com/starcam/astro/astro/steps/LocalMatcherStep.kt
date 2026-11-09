@@ -13,8 +13,10 @@ import com.starcam.astro.astro.StarCatalogData
 import com.starcam.astro.astro.StarSolver
 import com.starcam.astro.astro.SolveToken
 import com.starcam.astro.astro.SolveBudgetExceeded
+import com.starcam.astro.astro.SkyRegionRecovery
 import com.starcam.astro.astro.StellarSolverNative
 import com.starcam.astro.data.SolveLogStore
+import com.starcam.astro.util.FitsImage
 import java.util.concurrent.CancellationException
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.ensureActive
@@ -150,7 +152,23 @@ class LocalMatcherStep : SolveStep {
             null
         }
         ctx.token.check()
-        val attempt = if (primaryAttempt?.result != null || !recoveryAllowed || ctx.isBudgetDepleted) primaryAttempt else {
+        val skyRetry = if (primaryAttempt?.result == null && recoveryAllowed && ctx.remainingSec >= 2.0 &&
+            !FitsImage.isFitsPath(ctx.imagePath) && SkyRegionRecovery.shouldTry(stars, ctx.display.height)
+        ) {
+            ctx.onProgress(if (isEn) "Matching the upper sky…" else "正在尝试识别上方天空…")
+            val skyToken = SolveToken(ctx.token, timeoutMillis = minOf(4_000L, (ctx.remainingSec * 500).toLong()))
+            try {
+                SkyRegionRecovery.solve(ctx.pixels.gray, ctx.display.width, ctx.display.height, ctx.fovDeg, skyToken)
+            } catch (e: RuntimeException) {
+                if (e is CancellationException) throw e
+                ctx.token.check()
+                ctx.log.line(ctx.context, "天空区域补救中止：${e.javaClass.simpleName}")
+                null
+            } catch (_: OutOfMemoryError) {
+                null
+            }
+        } else null
+        val attempt = if (skyRetry != null || primaryAttempt?.result != null || !recoveryAllowed || ctx.isBudgetDepleted) primaryAttempt else {
             val retry = try {
                 LocalStarMatcher.matchWithDiagnostics(
                     emptyList(), ctx.display.width, ctx.display.height, hint,
@@ -178,14 +196,14 @@ class LocalMatcherStep : SolveStep {
         }
         ctx.token.check()
 
-        val matched = attempt?.result
+        val matched = skyRetry?.match ?: attempt?.result
         val diag = attempt?.diagnostics
         val deepRejectReason = diag?.deepRejectedReason
         diag?.recoveryDetail?.let { ctx.log.line(ctx.context, "内置星表补救：$it") }
-        val matchedStars = if (diag?.usedRecovery == true) recoveryStars else stars
-        if (diag?.usedRecovery == true) {
-            previewStars = recoveryStars
-            lastLocalStarTotal = recoveryStars?.size ?: 0
+        val matchedStars = skyRetry?.stars ?: if (diag?.usedRecovery == true) recoveryStars else stars
+        if (skyRetry != null || diag?.usedRecovery == true) {
+            previewStars = matchedStars
+            lastLocalStarTotal = matchedStars?.size ?: 0
         }
 
         if (matched != null && diag?.usedFallback == true) {
@@ -208,14 +226,17 @@ class LocalMatcherStep : SolveStep {
 
         if (matched != null) {
             ctx.onPhase(com.starcam.astro.astro.SolvePhase.VERIFYING)
-            val verdict = StarSolver.evaluateLocalSolve(ctx.context, ctx.display, matched, ctx.token, ctx.remainingSec)
+            val verifySec = if (skyRetry != null) minOf(3.0, ctx.remainingSec * 0.5) else ctx.remainingSec
+            val verdict = StarSolver.evaluateLocalSolve(ctx.context, ctx.display, matched, ctx.token, verifySec)
             ctx.token.check()
             when (verdict) {
                 is StarSolver.LocalAcceptVerdict.AcceptLocal -> {
                     val domainTag = if (matched.catalogDomain == CatalogDomain.DEEP) {
                         if (isEn) " · Deep fallback" else " · 深域兜底"
                     } else ""
-                    val recoveryTag = if (diag?.usedRecovery == true) {
+                    val recoveryTag = if (skyRetry != null) {
+                        if (isEn) " · Upper-sky recovery" else " · 天空区域补救"
+                    } else if (diag?.usedRecovery == true) {
                         if (isEn) " · Adaptive detection" else " · 复杂星空补救"
                     } else ""
                     val detail = if (isEn) "Built-in catalog · ${matched.inlierCount} inliers$domainTag$recoveryTag"
