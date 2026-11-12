@@ -1,8 +1,11 @@
 package com.starcam.astro
 
 import com.starcam.astro.astro.LocalStarMatcher
+import com.starcam.astro.astro.DetectedStar
+import com.starcam.astro.astro.SkyRegionCalibration
 import com.starcam.astro.astro.SkyRegionRecovery
 import com.starcam.astro.astro.SolveToken
+import com.starcam.astro.astro.StarCatalogData
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -44,6 +47,35 @@ class SkyRegionRecoveryTest {
             expected != null && hypot(actual[0] - expected.first, actual[1] - expected.second) <= 5.0
         }
         assertTrue("Catalog positions must still land on the original pixels", reprojected >= 8)
+        val upperSkyErrors = StarCatalogData.stars.filter { it.mag <= 4.0 }.mapNotNull { star ->
+            val expected = SyntheticSkyRenderer.project(star.ra, star.dec, 30.0, 0.0, 65.0 / width, width, width)
+                ?.takeIf { it.second < width * 0.25 } ?: return@mapNotNull null
+            val actual = wcs.skyToScreen(star.ra, star.dec, width, height)
+            hypot(actual[0] - expected.first, actual[1] - expected.second)
+        }
+        assertTrue("The sky edge must align with independent synthetic ground truth",
+            upperSkyErrors.size >= 3 && upperSkyErrors.all { it <= 5.0 })
         assertNull(SkyRegionRecovery.solve(gray, width, height, 20.0, SolveToken()))
+    }
+
+    @Test
+    fun rejectsCalibrationWithNoUpperSkyEvidence() {
+        val width = 900
+        val height = 900
+        val center = doubleArrayOf(30.0, 0.0)
+        val truth = StarCatalogData.stars.filter { it.mag <= 4.0 }.mapNotNull { star ->
+            val (x, y) = SyntheticSkyRenderer.project(star.ra, star.dec, center[0], center[1], 65.0 / width, width, height)
+                ?: return@mapNotNull null
+            DetectedStar(x.toFloat(), y.toFloat(), 1f) to star
+        }
+        val anchors = truth.filter { it.first.y > height * 0.45 }.take(8)
+        assertEquals(8, anchors.size)
+        assertNotNull(SkyRegionCalibration.refine(
+            width, height, height, center, 1, anchors, truth.map { it.first }, SolveToken(),
+        ))
+        val lowerDetections = truth.map { it.first }.filter { it.y > height * 0.4 }
+        assertNull(SkyRegionCalibration.refine(
+            width, height, height, center, 1, anchors, lowerDetections, SolveToken(),
+        ))
     }
 }

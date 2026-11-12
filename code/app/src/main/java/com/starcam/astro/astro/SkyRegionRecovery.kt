@@ -34,12 +34,6 @@ internal object SkyRegionRecovery {
         if (smallerHeight < 64 || smallerHeight >= largerHeight) return null
         val larger = detectAndMatch(largerHeight, minInliers = 8) ?: return null
         val candidate = larger.match.solve
-        val fullFov = maxOf(width, height) * candidate.pixScaleArcsec / 3600.0
-        if (fullFov !in 10.0..180.0) return null
-        if (fovDeg != null) {
-            val (low, high) = FovEstimate.fovRange(fovDeg)
-            if (fullFov !in low..high) return null
-        }
         val smaller = detectAndMatch(smallerHeight, minInliers = 7) ?: return null
         val check = smaller.match.solve
         if (candidate.parity != check.parity || abs(check.pixScaleArcsec / candidate.pixScaleArcsec - 1) > 0.05) {
@@ -60,20 +54,42 @@ internal object SkyRegionRecovery {
             common.maxOf { it.first.y } - common.minOf { it.first.y } < smallerHeight * 0.15
         ) return null
 
-        // Upper crop keeps Android x/y fixed. In FITS coordinates the added rows are below it.
-        val fullWcs = WcsTransform(
-            skyWcs.crpix1, skyWcs.crpix2 + height - largerHeight,
-            skyWcs.crval1, skyWcs.crval2, skyWcs.cd11, skyWcs.cd12, skyWcs.cd21, skyWcs.cd22,
-        )
-        val center = fullWcs.fitsPixelToSky(width / 2.0 + 0.5, height / 2.0 + 0.5)
+        // Upper crop keeps screen coordinates fixed. The old WCS estimates the whole-image
+        // pointing, but its locally fitted scale and rotation must not be used for the overlay.
+        val center = skyWcs.fitsPixelToSky(width / 2.0 + 0.5, largerHeight - height / 2.0 + 0.5)
+        val crop = gray.copyOf(width * largerHeight)
+        val stars = larger.stars + AdaptiveStarDetector.detect(width, largerHeight, crop, 100, token)
+            .filter { point -> larger.stars.none { hypot(point.x - it.x, point.y - it.y) < 3f } }
+        // A previously cropped photo may retain an off-center optical axis.
+        // Evaluate both starting directions using the same fit and validation criteria.
+        val calibration = listOf(center, doubleArrayOf(skyWcs.crval1, skyWcs.crval2))
+            .mapNotNull { origin ->
+                SkyRegionCalibration.refine(
+                    width, height, largerHeight, origin, candidate.parity, larger.match.matchedPairs, stars, token,
+                )
+            }.maxWithOrNull(compareBy<SkyRegionCalibration.Result> { it.pairs.size }.thenBy { -it.checkError })
+            ?: return null
+        val fullWcs = calibration.wcs
+        val scale = calibration.scaleArcsec
+        val fullFov = maxOf(width, height) * scale / 3600.0
+        if (fullFov !in 10.0..180.0) return null
+        if (fovDeg != null) {
+            val (low, high) = FovEstimate.fovRange(fovDeg)
+            if (fullFov !in low..high) return null
+        }
+        val fullCenter = fullWcs.fitsPixelToSky(width / 2.0 + 0.5, height / 2.0 + 0.5)
         val full = candidate.copy(
-            raDeg = center[0],
-            decDeg = center[1],
+            raDeg = fullCenter[0],
+            decDeg = fullCenter[1],
+            pixScaleArcsec = scale,
+            orientationDeg = calibration.orientationDeg,
             imageHeight = height,
-            fieldRadiusArcmin = hypot(width.toDouble(), height.toDouble()) * candidate.pixScaleArcsec / 120.0,
+            fieldRadiusArcmin = hypot(width.toDouble(), height.toDouble()) * scale / 120.0,
             wcs = fullWcs,
         )
         token.check()
-        return larger.copy(match = larger.match.copy(solve = full))
+        return Result(larger.match.copy(
+            solve = full, matchedPairs = calibration.pairs, inlierCount = calibration.pairs.size,
+        ), stars)
     }
 }

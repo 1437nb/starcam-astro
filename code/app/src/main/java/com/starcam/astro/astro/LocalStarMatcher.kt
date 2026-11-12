@@ -2983,7 +2983,7 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
     private fun gaussSolve(m: Array<DoubleArray>): DoubleArray? = gaussSolveN(m)
 
     /** 高斯消元求解 n 元线性方程组（列主元，n×n+1 增广矩阵） */
-    private fun gaussSolveN(m: Array<DoubleArray>): DoubleArray? {
+    internal fun gaussSolveN(m: Array<DoubleArray>): DoubleArray? {
         val n = m.size
         for (col in 0 until n) {
             var pivot = col
