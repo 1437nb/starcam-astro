@@ -7,7 +7,6 @@ import com.starcam.astro.astro.SkyRegionRecovery
 import com.starcam.astro.astro.SolveToken
 import com.starcam.astro.astro.StarCatalogData
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -23,7 +22,7 @@ class SkyRegionRecoveryTest {
         val gray = sky.gray.copyOf(width * height)
         for (i in sky.gray.indices) gray[i] *= 0.3f
         val cleanStars = LocalStarMatcher.detectStarsGray(width, width, sky.gray)
-        assertFalse(SkyRegionRecovery.shouldTry(cleanStars, width))
+        assertNull(SkyRegionRecovery.foregroundEdge(cleanStars, width, width) { sky.gray })
 
         for (y in 975 until height - 8 step 17) {
             for (x in 8 until width - 8 step 21) {
@@ -31,7 +30,7 @@ class SkyRegionRecoveryTest {
             }
         }
         val whole = LocalStarMatcher.detectStarsGray(width, height, gray, maxStars = 100)
-        assertTrue(SkyRegionRecovery.shouldTry(whole, height))
+        assertEquals(SkyRegionRecovery.Edge.BOTTOM, SkyRegionRecovery.foregroundEdge(whole, width, height) { gray })
         val result = SkyRegionRecovery.solve(gray, width, height, null, SolveToken())
         assertNotNull("The foreground fixture must recover from the upper sky", result)
         val solve = result!!.match.solve
@@ -56,6 +55,40 @@ class SkyRegionRecoveryTest {
         assertTrue("The sky edge must align with independent synthetic ground truth",
             upperSkyErrors.size >= 3 && upperSkyErrors.all { it <= 5.0 })
         assertNull(SkyRegionRecovery.solve(gray, width, height, 20.0, SolveToken()))
+
+        for (edge in listOf(SkyRegionRecovery.Edge.LEFT, SkyRegionRecovery.Edge.RIGHT, SkyRegionRecovery.Edge.TOP)) {
+            val rotatedWidth = if (edge == SkyRegionRecovery.Edge.TOP) width else height
+            val rotatedHeight = if (edge == SkyRegionRecovery.Edge.TOP) height else width
+            val rotated = FloatArray(gray.size)
+            for (y in 0 until height) for (x in 0 until width) {
+                val index = when (edge) {
+                    SkyRegionRecovery.Edge.LEFT -> x * rotatedWidth + (height - 1 - y)
+                    SkyRegionRecovery.Edge.RIGHT -> (width - 1 - x) * rotatedWidth + y
+                    else -> (height - 1 - y) * width + (width - 1 - x)
+                }
+                rotated[index] = gray[y * width + x]
+            }
+            val stars = LocalStarMatcher.detectStarsGray(rotatedWidth, rotatedHeight, rotated, maxStars = 100)
+            assertEquals(edge, SkyRegionRecovery.foregroundEdge(stars, rotatedWidth, rotatedHeight) { rotated })
+            val retry = SkyRegionRecovery.solve(rotated, rotatedWidth, rotatedHeight, null, SolveToken(), edge)
+            assertNotNull("Must recover with foreground on $edge", retry)
+            val calibrated = retry!!.match.solve
+            assertEquals(rotatedWidth, calibrated.imageWidth)
+            assertEquals(rotatedHeight, calibrated.imageHeight)
+            assertEquals(solve.parity, calibrated.parity)
+            val error = retry.match.matchedPairs.maxOf { (point, star) ->
+                val (x, y) = wcs.skyToScreen(star.ra, star.dec, width, height)
+                val (expectedX, expectedY) = when (edge) {
+                    SkyRegionRecovery.Edge.LEFT -> height - 1 - y to x
+                    SkyRegionRecovery.Edge.RIGHT -> y to width - 1 - x
+                    else -> width - 1 - x to height - 1 - y
+                }
+                val (px, py) = calibrated.wcs!!.skyToScreen(star.ra, star.dec, rotatedWidth, rotatedHeight)
+                assertTrue(hypot(point.x - px, point.y - py) <= 5.0)
+                hypot(px - expectedX, py - expectedY)
+            }
+            assertTrue("WCS must rotate back to the source frame: $edge error=$error", error < 0.01)
+        }
     }
 
     @Test

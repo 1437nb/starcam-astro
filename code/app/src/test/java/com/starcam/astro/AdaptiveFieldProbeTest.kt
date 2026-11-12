@@ -15,7 +15,7 @@ class AdaptiveFieldProbeTest {
     @Test fun denseFieldComparison() {
         val dir = File("../../testdata/narrowfield")
         val truth = JSONObject(File(dir, "truth.json").readText())
-        var oldOk=0; var newOk=0; var wrong=0; var total=0
+        var primaryOk=0; var solved=0; var wrong=0; var total=0; var targetSolved=0
         for (f in dir.listFiles { f -> f.extension == "gray" }!!.sorted()) {
             val id=f.nameWithoutExtension
             val b = ByteBuffer.wrap(f.readBytes()).order(ByteOrder.LITTLE_ENDIAN)
@@ -37,16 +37,24 @@ class AdaptiveFieldProbeTest {
             val s=result?.solve
             val ok=s!=null && separation(s.raDeg,s.decDeg,t.getDouble("ra"),t.getDouble("dec"))<t.getDouble("fov")*.25 &&
                 kotlin.math.abs(maxOf(s.fieldWidthDeg,s.fieldHeightDeg)/t.getDouble("fov")-1)<.25
-            if(ok && !attempt.diagnostics.usedRecovery) oldOk++
-            if(ok) newOk++
+            if(ok && !attempt.diagnostics.usedRecovery) primaryOk++
+            if(ok) {
+                solved++
+                if (t.getDouble("fov") >= 10.0) targetSolved++
+            }
             if(s!=null && !ok) wrong++
+            if (id == "cas15") {
+                assertNotNull("The narrow-field shortlist must recover the Cassiopeia field", s)
+                assertTrue(separation(s!!.raDeg, s.decDeg, t.getDouble("ra"), t.getDouble("dec")) < .1)
+                assertEquals(t.getDouble("fov"), s.fieldWidthDeg, .1)
+            }
             println("COMPLEX-REAL $id hits=$hits/${stars.size} recovered=${attempt.diagnostics.usedRecovery} verdict=${if(ok) "TRUE" else if(s==null) "MISS" else "WRONG"} result=${s?.let { "${it.raDeg},${it.decDeg},${it.fieldWidthDeg} n=${result.inlierCount}" }}")
             total++
         }
-        println("COMPLEX-SUMMARY old=$oldOk new=$newOk wrong=$wrong total=$total")
+        println("COMPLEX-SUMMARY primary=$primaryOk solved=$solved wrong=$wrong total=$total targetSolved=$targetSolved")
         assertEquals("All 32 observations must execute",32,total)
         assertEquals("Recovery must not add false solves",0,wrong)
-        assertTrue("Must improve at least one real observation",newOk>oldOk)
+        assertTrue("Must improve on the v1.5.99 baseline of 12/16 within scope", targetSolved >= 13)
     }
 
     private fun separation(a:Double,b:Double,c:Double,d:Double):Double {
@@ -58,8 +66,8 @@ class AdaptiveFieldProbeTest {
         val f=File("../../testdata/narrowfield/cyg15.gray")
         val b=ByteBuffer.wrap(f.readBytes()).order(ByteOrder.LITTLE_ENDIAN)
         val w=b.int; val h=b.int; val g=FloatArray(w*h); b.asFloatBuffer().get(g)
-        val stars=LocalStarMatcher.detectStarsGray(w,h,g,100)
-        val attempt=LocalStarMatcher.matchWithDiagnostics(stars,w,h,fovHintDeg=15.0,
+        // Exercise the adaptive path independently, even if the primary search can solve it now.
+        val attempt=LocalStarMatcher.matchWithDiagnostics(emptyList(),w,h,fovHintDeg=15.0,
             recoveryDetected={ AdaptiveStarDetector.detect(w,h,g,token=it) })
         println("TRUSTED-CYGNUS result=${attempt.result?.solve} diagnostics=${attempt.diagnostics}")
         assertNotNull(attempt.result)

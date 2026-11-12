@@ -99,7 +99,7 @@ class DeviceAcceptanceInstrumentation : Instrumentation() {
                     check(phases.any { it.contains("补救") || it.contains("Recovering") })
                 }
             }
-            case("foreground-recovery-keeps-the-full-image-and-correct-star-positions") {
+            case("side-foreground-recovery-keeps-the-full-image-and-correct-star-positions") {
                 val width = 800
                 val skyHeight = 800
                 val height = 1333
@@ -121,24 +121,28 @@ class DeviceAcceptanceInstrumentation : Instrumentation() {
                 for (y in 860 until height - 8 step 17) for (x in 8 until width - 8 step 21) {
                     for (dy in 0..4) for (dx in 0..4) gray[(y + dy) * width + x + dx] = 210f
                 }
-                Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).useBitmap { bitmap ->
+                val sideways = FloatArray(gray.size)
+                for (y in 0 until height) for (x in 0 until width) {
+                    sideways[x * height + height - 1 - y] = gray[y * width + x]
+                }
+                Bitmap.createBitmap(height, width, Bitmap.Config.ARGB_8888).useBitmap { bitmap ->
                     val ctx = com.starcam.astro.astro.steps.StepContext(
                         targetContext, bitmap, "acceptance-foreground.png", com.starcam.astro.data.SettingsRepository(targetContext),
                         fovDeg = null, token = com.starcam.astro.astro.SolveToken(timeoutMillis = 30_000),
                         deadlineMs = System.nanoTime() / 1_000_000 + 30_000, report = JSONObject(),
                         log = com.starcam.astro.data.SolveLogStore.beginSolve("acceptance-foreground.png"),
                         logT0 = System.currentTimeMillis(), onProgress = {},
-                        pixels = com.starcam.astro.astro.SolvePixels(width, height) { gray }, recordSuccess = false,
+                        pixels = com.starcam.astro.astro.SolvePixels(height, width) { sideways }, recordSuccess = false,
                     )
                     val outcome = runBlocking { com.starcam.astro.astro.steps.LocalMatcherStep().execute(ctx) }
                     check(outcome is com.starcam.astro.astro.steps.StepOutcome.Success) { outcome.toString() }
                     val solve = outcome.result.solve
-                    check(outcome.result.displayBitmap === bitmap && solve.imageWidth == width && solve.imageHeight == height)
-                    check(outcome.result.detail.contains("天空区域补救") || outcome.result.detail.contains("Upper-sky recovery"))
+                    check(outcome.result.displayBitmap === bitmap && solve.imageWidth == height && solve.imageHeight == width)
+                    check(outcome.result.detail.contains("天空区域补救") || outcome.result.detail.contains("Sky-region recovery"))
                     val projected = requireNotNull(solve.wcs)
                     check(reference.count { (star, xy) ->
-                        val p = projected.skyToScreen(star.ra, star.dec, width, height)
-                        kotlin.math.hypot(p[0] - xy[0], p[1] - xy[1]) <= 5f
+                        val p = projected.skyToScreen(star.ra, star.dec, height, width)
+                        kotlin.math.hypot(p[0] - (height - 1 - xy[1]), p[1] - xy[0]) <= 5f
                     } >= 8)
                 }
             }

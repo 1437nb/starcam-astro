@@ -153,12 +153,15 @@ class LocalMatcherStep : SolveStep {
         }
         ctx.token.check()
         val skyRetry = if (primaryAttempt?.result == null && recoveryAllowed && ctx.remainingSec >= 2.0 &&
-            !FitsImage.isFitsPath(ctx.imagePath) && SkyRegionRecovery.shouldTry(stars, ctx.display.height)
+            !FitsImage.isFitsPath(ctx.imagePath)
         ) {
-            ctx.onProgress(if (isEn) "Matching the upper sky…" else "正在尝试识别上方天空…")
             val skyToken = SolveToken(ctx.token, timeoutMillis = minOf(4_000L, (ctx.remainingSec * 500).toLong()))
             try {
-                SkyRegionRecovery.solve(ctx.pixels.gray, ctx.display.width, ctx.display.height, ctx.fovDeg, skyToken)
+                val edge = SkyRegionRecovery.foregroundEdge(stars, ctx.display.width, ctx.display.height) { ctx.pixels.gray }
+                edge?.let {
+                    ctx.onProgress(if (isEn) "Matching the sky away from the foreground…" else "正在避开前景识别天空…")
+                    SkyRegionRecovery.solve(ctx.pixels.gray, ctx.display.width, ctx.display.height, ctx.fovDeg, skyToken, it)
+                }
             } catch (e: RuntimeException) {
                 if (e is CancellationException) throw e
                 ctx.token.check()
@@ -235,7 +238,7 @@ class LocalMatcherStep : SolveStep {
                         if (isEn) " · Deep fallback" else " · 深域兜底"
                     } else ""
                     val recoveryTag = if (skyRetry != null) {
-                        if (isEn) " · Upper-sky recovery" else " · 天空区域补救"
+                        if (isEn) " · Sky-region recovery" else " · 天空区域补救"
                     } else if (diag?.usedRecovery == true) {
                         if (isEn) " · Adaptive detection" else " · 复杂星空补救"
                     } else ""

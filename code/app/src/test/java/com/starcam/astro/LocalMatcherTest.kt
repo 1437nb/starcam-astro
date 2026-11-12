@@ -24,6 +24,23 @@ class LocalMatcherTest {
     private val W = 1200
     private val H = 1600
 
+    @Test
+    fun deepCatalogKeysPreserveSignedStarIdsAndPhotoIndices() {
+        val ids = StarCatalogData.stars.map { it.hip }
+        val votes = listOf(0, 17).flatMap { photo ->
+            ids.map { id ->
+                LocalStarMatcher.catalogVoteKey(photo, id).also { key ->
+                    assertEquals(id, LocalStarMatcher.catalogIdFromVote(key))
+                }
+            }
+        }
+        assertEquals(ids.size * 2, votes.toSet().size)
+        val mixed = LocalStarMatcher.triangleKey(-100, -40, 200)
+        assertEquals(mixed, LocalStarMatcher.triangleKey(200, -100, -40))
+        assertTrue(mixed != LocalStarMatcher.triangleKey(-90, -40, 200))
+        assertTrue(LocalStarMatcher.triangleKey(-100, -40, -20) != LocalStarMatcher.triangleKey(-90, -40, -20))
+    }
+
     /** 用与 DemoSolver 相同的 WCS 把星表渲染成灰度星空图（高斯星点 + 背景 + 噪声） */
     private fun renderStarField(
         region: SkyRegion,

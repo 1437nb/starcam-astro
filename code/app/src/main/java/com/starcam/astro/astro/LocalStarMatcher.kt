@@ -203,8 +203,8 @@ object LocalStarMatcher {
         var deepRejectedReason: String? = null
         var usedRecovery: Boolean = false
         var recoveryDetail: String? = null
-        /** Only the extra recovery search uses this inexpensive candidate prefilter. */
-        var recoveryFovRange: Pair<Double, Double>? = null
+        var scoredFovRange: Pair<Double, Double>? = null
+        var narrowFovHint: Double? = null
 
         fun snapshotDiagnostics(): MatchDiagnostics = MatchDiagnostics(
             usedFallback = usedFallback,
@@ -318,6 +318,19 @@ object LocalStarMatcher {
      */
     private const val SCORED_MIN_ALIGN_RATE = 0.20f
     private const val SCORED_MIN_IN_FRAME = 4
+    private const val SCORED_REFINEMENT_LIMIT = 4
+    private const val NARROW_SCORED_MIN_REFINED_INLIERS = 10
+    private const val CATALOG_ID_BITS = 20
+    private const val CATALOG_ID_MASK = (1L shl CATALOG_ID_BITS) - 1
+
+    private data class ScoredSeed(
+        val a: Int, val b: Int, val c: Int, val triangle: TriEntry,
+        val aligned: Int, val inFrame: Int, val scoredAt: Long,
+    )
+
+    private fun passesScoredGate(aligned: Int, inFrame: Int): Boolean =
+        aligned >= minAligned() && inFrame >= SCORED_MIN_IN_FRAME &&
+            aligned.toFloat() / inFrame >= minAlignRate()
 
     /** §0.62 调试：覆盖对齐率门槛（标定用） */
     @Volatile
@@ -802,7 +815,19 @@ object LocalStarMatcher {
 
     // ================= 2. 星表三角形索引 =================
 
-    private class TriEntry(val hipA: Int, val hipB: Int, val hipC: Int, val r2: Float, val r3: Float)
+    private class TriEntry(
+        val hipA: Int, val hipB: Int, val hipC: Int, val r2: Float, val r3: Float,
+        val longestSideDeg: Float,
+        val vertexRanks: Int,
+    )
+
+    // A vertex is identified by the rank of its opposite edge. Pack three ranks in two bits each.
+    private fun vertexRanks(ab: Double, ac: Double, bc: Double): Int {
+        val a = (if (ac < bc) 1 else 0) + (if (ab < bc) 1 else 0)
+        val b = (if (bc <= ac) 1 else 0) + (if (ab < ac) 1 else 0)
+        val c = 3 - a - b
+        return a or (b shl 2) or (c shl 4)
+    }
 
     /**
      * 三角形索引。§0.77 起只剩 [triMap]：归一化角度比键，每三角形只存一个桶（§0.74）。
@@ -1140,7 +1165,7 @@ object LocalStarMatcher {
                     val r2 = (sides[1] / sides[0]).toFloat()
                     val r3 = (sides[2] / sides[0]).toFloat()
                     if (r2 < 0.12f) continue // 排除过扁三角形
-                    val entry = TriEntry(a.hip, b.hip, c.hip, r2, r3)
+                    val entry = TriEntry(a.hip, b.hip, c.hip, r2, r3, sides[0].toFloat(), vertexRanks(dab, dac, dbc))
                     // §0.74：triMap **每三角形只存一个桶**（原为 quantizeKeys 默认的
                     // 9 个相邻桶）。9 桶存储让查询端每扫一条就要重复见到同一对象 9 次
                     // —— 实测一轮投票要扫 6000 万条目、其中九成是这种重复。改单桶后
@@ -1353,6 +1378,9 @@ object LocalStarMatcher {
         recoveryDetected: ((SolveToken) -> List<DetectedStar>)? = null,
     ): LocalMatchResult? {
         ctx.token?.check()
+        // A trusted narrow-field scale lets the scored search prioritize plausible triangles.
+        ctx.narrowFovHint = fovHintDeg?.takeIf { it in 10.0..25.0 }
+        ctx.scoredFovRange = ctx.narrowFovHint?.let { FovEstimate.fovRange(it) }
         // A contaminated primary list is not evidence that the image has no usable stars.
         // Run at most one independent recovery search after the existing paths fail.
         // A child deadline limits the additional latency without consuming the whole solve budget.
@@ -1363,7 +1391,8 @@ object LocalStarMatcher {
             if (fovHintDeg != null && fovHintDeg < 10.0) return null
             val child = SolveToken(ctx.token, timeoutMillis = 30_000)
             val recovery = MatchContext(ctx.catalogMag, ctx.scoredCap, child)
-            recovery.recoveryFovRange = fovHintDeg?.let { FovEstimate.fovRange(it) }
+            recovery.narrowFovHint = ctx.narrowFovHint
+            recovery.scoredFovRange = fovHintDeg?.let { FovEstimate.fovRange(it) }
             return try {
                 child.check()
                 val stars = recoveryDetected(child)
@@ -1553,7 +1582,9 @@ object LocalStarMatcher {
         //  失败/弱解照片识别耗时从 ~2s 涨到 ~9s；本重构降回最多 2 轮，成功率不变）
         val tA = System.currentTimeMillis()
         val primaryPairs = votePairs(ctx, detected, width, height, t1, pointingHint = pointingHint)
-        var best = bestCandidate(detected, width, height, primaryPairs, pointingHint, mag = ctx.catalogMag)
+        fun candidate(pairs: List<Pair<Int, StarEntry>>): LocalMatchResult? =
+            bestCandidate(detected, width, height, pairs, pointingHint, ctx.catalogMag, ctx.scoredFovRange)
+        var best = candidate(primaryPairs)
         msPrimary = System.currentTimeMillis() - tA
         if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
             ctx.phaseTimings = formatPhaseTimings()
@@ -1564,11 +1595,8 @@ object LocalStarMatcher {
         if (best == null) {
             ctx.token?.check()
             val tB = System.currentTimeMillis()
-            best = bestCandidate(
-                detected, width, height,
+            best = candidate(
                 votePairs(ctx, detected, width, height, t1, multi = true, pointingHint = pointingHint),
-                pointingHint,
-                mag = ctx.catalogMag,
             )
             msMulti = System.currentTimeMillis() - tB
             if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
@@ -1593,11 +1621,8 @@ object LocalStarMatcher {
             // 避免亮照片（top 上万）把弱星轮下限抬到 77+ 整片切掉（5057/5087 回归实测）
             val weakT = maxOf(minOf(top * WEAK_FLOOR_RATIO, 25f), anchor20 * 0.25f)
             if (weakT < t1) {
-                best = bestCandidate(
-                    detected, width, height,
+                best = candidate(
                     votePairs(ctx, detected, width, height, weakT, pointingHint = pointingHint),
-                    pointingHint,
-                    mag = ctx.catalogMag,
                 )
                 if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
                     msWeak = System.currentTimeMillis() - tC
@@ -1611,16 +1636,13 @@ object LocalStarMatcher {
             ctx.token?.check()
             val tD = System.currentTimeMillis()
             val backupPairs = votePairs(ctx, detected, width, height, t2, pointingHint = pointingHint)
-            var alt = bestCandidate(detected, width, height, backupPairs, pointingHint, mag = ctx.catalogMag)
+            var alt = candidate(backupPairs)
             msBackup = System.currentTimeMillis() - tD
             if (alt == null) {
                 ctx.token?.check()
                 val tE = System.currentTimeMillis()
-                alt = bestCandidate(
-                    detected, width, height,
+                alt = candidate(
                     votePairs(ctx, detected, width, height, t2, multi = true, pointingHint = pointingHint),
-                    pointingHint,
-                    mag = ctx.catalogMag,
                 )
                 msBackupMulti = System.currentTimeMillis() - tE
             }
@@ -1673,8 +1695,13 @@ object LocalStarMatcher {
         // 用候选变换把星表星投影到像素，再数检测星命中数。
         var bestScore = 0
         var bestInFrame = 0
-        var bestPairs: List<Pair<Int, StarEntry>>? = null
-        val seen = HashSet<Long>()
+        var legacyLeader: ScoredSeed? = null
+        val finalists = ArrayList<ScoredSeed>(SCORED_REFINEMENT_LIMIT + 1)
+        val visitedTriangles = if (ctx.narrowFovHint == null) null else HashSet<Int>()
+        val leaderTriangles = if (visitedTriangles == null) HashSet<Long>() else null
+        // Prefer more evidence among eligible seeds, then the higher fraction of the catalog seen.
+        val rank = compareByDescending<ScoredSeed> { it.aligned }
+            .thenBy { it.inFrame }.thenBy { it.scoredAt }
         val tStart = System.nanoTime()
         val capThisRound = ctx.scoredCap
         var nCand = 0L
@@ -1697,64 +1724,83 @@ object LocalStarMatcher {
                     val ci = nbrs[j].first
                     val b = work[bi]
                     val c = work[ci]
-                    val sides = floatArrayOf(nbrs[i].second, nbrs[j].second, dist(b, c)).sortedDescending()
+                    val lab = nbrs[i].second
+                    val lac = nbrs[j].second
+                    val lbc = dist(b, c)
+                    val sides = floatArrayOf(lab, lac, lbc).sortedDescending()
                     if (sides[0] <= 0f) continue
                     val r2 = sides[1] / sides[0]
                     val r3 = sides[2] / sides[0]
                     if (r2 < 0.12f) continue
+                    val expectedSide = ctx.narrowFovHint?.let { sides[0] * it / max(width, height) }
+                    val pointsByRank = if (expectedSide == null) null else {
+                        val ranks = vertexRanks(lab.toDouble(), lac.toDouble(), lbc.toDouble())
+                        IntArray(3).also {
+                            it[ranks and 3] = pi
+                            it[(ranks shr 2) and 3] = bi
+                            it[ranks shr 4] = ci
+                        }
+                    }
+                    if (pointsByRank != null && visitedTriangles != null) {
+                        val triangle = (pointsByRank[0] * work.size + pointsByRank[1]) * work.size + pointsByRank[2]
+                        if (!visitedTriangles.add(triangle)) continue
+                    }
+                    // Allow for perspective and EXIF uncertainty before doing the exact TAN fit.
+                    val sideMin = expectedSide?.times(0.55) ?: 0.0
+                    val sideMax = expectedSide?.times(1.65) ?: Double.POSITIVE_INFINITY
                     // 打分轮查询：**角度比键**（严格窗 + 宽松窗）。
                     val merged = HashMap<Long, TriEntry>()
                     for (key in quantizeKeys(r2, r3, window = 2)) {
                         idx.triMap[key]?.let { list ->
                             for (t in list) {
-                                if (abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f) merged[triKey(t)] = t
+                                if (t.longestSideDeg >= sideMin && t.longestSideDeg <= sideMax &&
+                                    abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f
+                                ) merged[triKey(t)] = t
                             }
                         }
                     }
                     for (key in quantizeKeys(r2, r3, window = 14)) {
                         idx.triMap[key]?.let { list ->
                             for (t in list) {
-                                if (abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f) merged[triKey(t)] = t
+                                if (t.longestSideDeg >= sideMin && t.longestSideDeg <= sideMax &&
+                                    abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f
+                                ) merged[triKey(t)] = t
                             }
                         }
                     }
                     if (merged.isEmpty()) continue
                     val candidates = merged.values
-                        .sortedWith(compareBy({ abs(it.r2 - r2) + abs(it.r3 - r3) }, { it.hipA }, { it.hipB }, { it.hipC }))
+                        .sortedWith(compareBy({
+                            val scaleError = if (expectedSide != null) 0.10 * abs(it.longestSideDeg / expectedSide - 1.0) else 0.0
+                            abs(it.r2 - r2) + abs(it.r3 - r3) + scaleError
+                        }, { it.hipA }, { it.hipB }, { it.hipC }))
                         .take(candidateCap())
                     nCand += candidates.size
                     for (t in candidates) {
+                        val ia = pointsByRank?.get(t.vertexRanks and 3) ?: pi
+                        val ib = pointsByRank?.get((t.vertexRanks shr 2) and 3) ?: bi
+                        val ic = pointsByRank?.get(t.vertexRanks shr 4) ?: ci
                         nScored++
-                        val sc = scoreHypothesis(work, a, b, c, t, width, height, pointingHint, tbl, ctx.recoveryFovRange)
+                        val sc = scoreHypothesis(work, work[ia], work[ib], work[ic], t, width, height,
+                            pointingHint, tbl, ctx.scoredFovRange)
                         val aligned = sc[0]
                         val inFrame = sc[1]
-                        val key = triKey(t)
-                        if (aligned > bestScore && !seen.contains(key)) {
-                            seen.add(key)
-                            val eA = hipMap[t.hipA]
-                            val eB = hipMap[t.hipB]
-                            val eC = hipMap[t.hipC]
-                            if (eA != null && eB != null && eC != null) {
-                                bestScore = aligned
-                                bestInFrame = inFrame
-                                ctx.scoredWinAt = nScored
-                                bestPairs = listOf(
-                                    workIdx[pi] to eA,
-                                    workIdx[bi] to eB,
-                                    workIdx[ci] to eC,
-                                )
-                                ctx.scoredWinSeed = String.format(
-                                    java.util.Locale.ROOT,
-                                    "a=(%.1f,%.1f)h%d b=(%.1f,%.1f)h%d c=(%.1f,%.1f)h%d",
-                                    a.x, a.y, t.hipA, b.x, b.y, t.hipB, c.x, c.y, t.hipC,
-                                )
-                                // 提前退出：仅在**高置信**真解形态下收工。
-                                if (inFrame >= SCORED_MIN_IN_FRAME &&
-                                    aligned >= SCORED_EARLY_ALIGNED &&
-                                    aligned.toFloat() / inFrame >= SCORED_EARLY_RATE
-                                ) {
-                                    earlyOut = true
-                                }
+                        if (aligned > bestScore && (leaderTriangles == null || leaderTriangles.add(triKey(t)))) {
+                            bestScore = aligned
+                            bestInFrame = inFrame
+                            if (leaderTriangles != null) {
+                                legacyLeader = ScoredSeed(workIdx[ia], workIdx[ib], workIdx[ic], t, aligned, inFrame, nScored)
+                                earlyOut = inFrame >= SCORED_MIN_IN_FRAME &&
+                                    aligned >= SCORED_EARLY_ALIGNED && aligned.toFloat() / inFrame >= SCORED_EARLY_RATE
+                            }
+                        }
+                        if (leaderTriangles == null && passesScoredGate(aligned, inFrame)) {
+                            val seed = ScoredSeed(workIdx[ia], workIdx[ib], workIdx[ic], t, aligned, inFrame, nScored)
+                            finalists.add(seed)
+                            finalists.sortWith(rank)
+                            if (finalists.size > SCORED_REFINEMENT_LIMIT) finalists.removeAt(finalists.lastIndex)
+                            if (aligned >= SCORED_EARLY_ALIGNED && aligned.toFloat() / inFrame >= SCORED_EARLY_RATE) {
+                                earlyOut = true
                             }
                         }
                         if (earlyOut) break
@@ -1780,7 +1826,6 @@ object LocalStarMatcher {
         }
         ctx.scoredBest = bestScore
         ctx.scoredInFrame = bestInFrame
-        ctx.scoredWinPairs = bestPairs?.size
         ctx.scoredStats = "cand=$nCand scored=$nScored work=${work.size} " +
             "ms=${(System.nanoTime() - tStart) / 1_000_000}" +
             (
@@ -1789,24 +1834,31 @@ object LocalStarMatcher {
                 } else ""
                 ) +
             (if (cutByTime) " CUT=time" else "")
-        if (bestPairs == null) {
-            return null
+        // Broad/unknown fields retain their calibrated winner selection. Alternative seeds
+        // require the trusted narrow-field scale to keep false positives under control.
+        val seeds = if (leaderTriangles == null) finalists else listOfNotNull(
+            legacyLeader?.takeIf { passesScoredGate(it.aligned, it.inFrame) },
+        )
+        for (seed in seeds) {
+            ctx.token?.check()
+            val (a, b, c, t) = seed
+            val pairs = listOf(a to hipMap.getValue(t.hipA), b to hipMap.getValue(t.hipB), c to hipMap.getValue(t.hipC))
+            val expanded = expandHypothesisPairs(pairs, detected, width, height, ctx)
+            val result = bestCandidate(detected, width, height, expanded ?: pairs, pointingHint, ctx.catalogMag, ctx.scoredFovRange)
+                ?: continue
+            if (leaderTriangles == null && result.inlierCount < NARROW_SCORED_MIN_REFINED_INLIERS) continue
+            ctx.scoredBest = seed.aligned
+            ctx.scoredInFrame = seed.inFrame
+            ctx.scoredWinAt = seed.scoredAt
+            ctx.scoredWinPairs = pairs.size
+            ctx.scoredExpandedPairs = expanded?.size
+            ctx.scoredWinSeed = pairs.joinToString(" ") { (i, star) ->
+                val point = detected[i]
+                "(${point.x},${point.y})h${star.hip}"
+            }
+            return result
         }
-        if (bestScore < minAligned()) {
-            return null
-        }
-        // 对齐率门槛：伪解（尺度坍缩）会把整片天区压进画面，绝对对齐数不低但
-        // 对齐率极低；真解对齐率明显更高。样本太少时比率不可信，故要求 inFrame 下限。
-        if (bestInFrame < SCORED_MIN_IN_FRAME) {
-            return null
-        }
-        if (bestScore.toFloat() / bestInFrame < minAlignRate()) {
-            return null
-        }
-        // bestCandidate 需要 ≥4 对：用获胜候选的拟合把全部对齐星补进对应集
-        val expanded = expandHypothesisPairs(bestPairs, detected, width, height, ctx)
-        ctx.scoredExpandedPairs = expanded?.size
-        return bestCandidate(detected, width, height, expanded ?: bestPairs, pointingHint, mag = ctx.catalogMag)
+        return null
     }
 
     /**
@@ -1922,12 +1974,16 @@ object LocalStarMatcher {
         pairs: List<Pair<Int, StarEntry>>,
         pointingHint: PointingHint? = null,
         mag: Float = PROD_CATALOG_MAG,
+        fovRange: Pair<Double, Double>? = null,
     ): LocalMatchResult? {
         if (pairs.size < 4) return null
         val normal = fitAndVerify(detected, width, height, pairs, mirrorX = false, mag = mag)
         val mirrored = fitAndVerify(detected, width, height, pairs, mirrorX = true, mag = mag)
         return listOfNotNull(normal, mirrored)
             .filter { it.inlierCount >= 6 && plausibleFov(it.solve.pixScaleArcsec, width, height) }
+            .filter {
+                fovRange == null || maxOf(it.solve.fieldWidthDeg, it.solve.fieldHeightDeg) in fovRange.first..fovRange.second
+            }
             .filter { skySpanConsistent(it, detected) }
             .filter { candidate ->
                 if (pointingHint == null) true
@@ -2014,7 +2070,7 @@ object LocalStarMatcher {
 
         // 1) 照片局部三角形：只用亮度足以进入星表索引的亮星（阈值由调用方
         //    依据双通道方案传入，见 voteThresholds），取前 45 颗参与投票。
-        val votes = HashMap<Long, Int>() // key = photoIdx shl 20 | hip
+        val votes = HashMap<Long, Int>()
         val maxSide = max(width, height) * 0.45f
         // §0.95：改用已有的 lazy [hipMap] —— 原实现每轮投票重建一份 8419 项
         // `StarCatalogData.stars.associateBy { it.hip }`（一次求解最多 6 轮 =
@@ -2067,8 +2123,8 @@ object LocalStarMatcher {
         //    阈值 v≥2 / 1.1×；剩余的错误对应交给 RANSAC 三点采样剔除。
         val byPhoto = HashMap<Int, HashMap<Int, Int>>()
         for ((key, v) in votes) {
-            val photoIdx = (key shr 20).toInt()
-            val hip = (key and 0xFFFFF).toInt()
+            val photoIdx = (key shr CATALOG_ID_BITS).toInt()
+            val hip = catalogIdFromVote(key)
             byPhoto.getOrPut(photoIdx) { HashMap() }[hip] = v
         }
         // §0.70 诊断：投票是否被伪三角形淹没，看这两个数最直接 ——
@@ -2145,14 +2201,14 @@ object LocalStarMatcher {
      * （实测 5057/5087/5092 在不同进程间 SOLVED/UNSOLVED 翻转）。
      * 规范化后同三角形去重为一条，并列只剩真正的几何巧合（罕见）。
      */
-    private fun triKey(t: TriEntry): Long {
-        val a = t.hipA
-        val b = t.hipB
-        val c = t.hipC
+    private fun triKey(t: TriEntry): Long = triangleKey(t.hipA, t.hipB, t.hipC)
+
+    internal fun triangleKey(a: Int, b: Int, c: Int): Long {
         val lo = minOf(a, b, c)
         val hi = maxOf(a, b, c)
         val mid = a + b + c - lo - hi
-        return (lo.toLong() shl 40) or (mid.toLong() shl 20) or hi.toLong()
+        return (packedCatalogId(lo) shl (2 * CATALOG_ID_BITS)) or
+            (packedCatalogId(mid) shl CATALOG_ID_BITS) or packedCatalogId(hi)
     }
 
     /**
@@ -2333,10 +2389,20 @@ object LocalStarMatcher {
         nVerified.addAndGet(cTaken)
     }
 
-private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
-        val key = (photoIdx.toLong() shl 20) or hip.toLong()
+    private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
+        val key = catalogVoteKey(photoIdx, hip)
         votes[key] = (votes[key] ?: 0) + 1
     }
+
+    // Supplementary BSC stars use negative HR numbers. Mask each slot independently so the
+    // sign bits never overwrite another star or the photo-point index.
+    private fun packedCatalogId(id: Int): Long = id.toLong() and CATALOG_ID_MASK
+
+    internal fun catalogVoteKey(photoIndex: Int, id: Int): Long =
+        (photoIndex.toLong() shl CATALOG_ID_BITS) or packedCatalogId(id)
+
+    internal fun catalogIdFromVote(key: Long): Int =
+        (key.toInt() shl (32 - CATALOG_ID_BITS)) shr (32 - CATALOG_ID_BITS)
 
     // ============ 候选三角形几何验证（astrometry 式“第 4 星”校验） ============
 
@@ -2598,16 +2664,16 @@ private fun vote(votes: HashMap<Long, Int>, photoIdx: Int, hip: Int) {
         for (pi in work.indices) {
             if (printed >= 14) break
             val sorted = votes.entries
-                .filter { (it.key shr 20).toInt() == pi }
+                .filter { (it.key shr CATALOG_ID_BITS).toInt() == pi }
                 .sortedByDescending { it.value }
                 .take(5)
             if (sorted.isEmpty()) continue
             printed++
             val trueHip = actual[pi]
-            val trueV = if (trueHip != null) votes[(pi.toLong() shl 20) or trueHip.toLong()] ?: 0 else -1
+            val trueV = if (trueHip != null) votes[catalogVoteKey(pi, trueHip)] ?: 0 else -1
             sb.append("P#$pi b=${String.format(java.util.Locale.ROOT, "%.0f", work[pi].brightness)}" +
                 (if (trueHip != null) " trueHip=$trueHip(trueV=$trueV)" else " noTruth") +
-                " : " + sorted.joinToString { "hip=${it.key and 0xFFFFF}(v=${it.value})" } + "\n")
+                " : " + sorted.joinToString { "hip=${catalogIdFromVote(it.key)}(v=${it.value})" } + "\n")
         }
         return sb.toString()
     }

@@ -8,7 +8,9 @@
 
 An **offline-first** Android app for astrophotography plate-solving and night sky identification. Capture or import night-sky photos to perform on-device blind plate-solving (RA, Dec, FOV, orientation, parity), overlay constellation lines, proper star names, Messier deep-sky objects, and real-time Sun/Moon/planet positions, or explore the sky with the sensor-driven AR live star map.
 
-**Local development v1.5.99 (§0.138)** fixes misplaced constellation overlays near the upper edge after upper-sky recovery. StarCam refits the projection for the whole image and checks it against stars excluded from the fit. [Validation report](docs/123-验证报告增补-§0.138-天空区域投影校准v1.5.99.md)
+**Local development v1.5.100 (§0.139)** fixes supplementary star identifiers in the deep catalog, prioritizes narrow-field candidates using trusted field-of-view estimates, and handles foreground along all four image edges. [Validation report](docs/124-验证报告增补-§0.139-复杂星空匹配与侧向前景v1.5.100.md)
+
+**v1.5.99 (§0.138)** fixes misplaced overlays near the upper edge after upper-sky recovery. StarCam refits the projection for the whole image and checks it against stars excluded from the fit. [Validation report](docs/123-验证报告增补-§0.138-天空区域投影校准v1.5.99.md)
 
 **v1.5.98 (§0.137)** adds an upper-sky retry for photos with strong foreground interference. [Validation report](docs/122-验证报告增补-§0.137-前景干扰与天空区域补救v1.5.98.md)
 
