@@ -28,7 +28,7 @@ data class DetectedStar(val x: Float, val y: Float, val brightness: Float)
  * 浅域（mag≤4.0）是宽场主路径；深域（mag≤6.5）是窄场兜底 —— 调用方据此知道
  * "这个解是高密度星表兜底得到的"，可做更谨慎的呈现/记录（审计 P0-2.5 (d)）。
  */
-enum class CatalogDomain { SHALLOW, DEEP }
+enum class CatalogDomain { SHALLOW, INTERMEDIATE, DEEP }
 
 /** 本地匹配结果 */
 data class LocalMatchResult(
@@ -67,6 +67,7 @@ data class MatchDiagnostics(
     val shallowScoredInFrame: Int?,
     val usedRecovery: Boolean = false,
     val recoveryDetail: String? = null,
+    val usedCompactRecovery: Boolean = false,
 )
 
 /** [LocalStarMatcher.matchWithDiagnostics] 的返回：结果 + 与它同源的留档。 */
@@ -142,6 +143,8 @@ object LocalStarMatcher {
      * 索引体积和内存都要再翻一倍以上，见 PROGRESS §0.75 的分级决策记录。
      */
     private const val DEEP_CATALOG_MAG = 6.5f
+    private const val INTERMEDIATE_CATALOG_MAG = 5.5f
+    private const val INTERMEDIATE_BUDGET_MS = 8_000L
 
     /**
      * §0.103（P0-2.5）深域路径的视场上界（度）与深域准入判据。
@@ -202,9 +205,23 @@ object LocalStarMatcher {
         var shallowPhaseTimings: String? = null
         var deepRejectedReason: String? = null
         var usedRecovery: Boolean = false
+        var usedCompactRecovery: Boolean = false
         var recoveryDetail: String? = null
         var scoredFovRange: Pair<Double, Double>? = null
         var narrowFovHint: Double? = null
+
+        fun copyMatchDiagnostics(from: MatchContext) {
+            voteStats = from.voteStats
+            scoredStats = from.scoredStats
+            scoredBest = from.scoredBest
+            scoredInFrame = from.scoredInFrame
+            phaseTimings = from.phaseTimings
+            scoredWinPairs = from.scoredWinPairs
+            scoredExpandedPairs = from.scoredExpandedPairs
+            scoredWinSeed = from.scoredWinSeed
+            scoredWinAt = from.scoredWinAt
+            expandDetail = from.expandDetail
+        }
 
         fun snapshotDiagnostics(): MatchDiagnostics = MatchDiagnostics(
             usedFallback = usedFallback,
@@ -219,6 +236,7 @@ object LocalStarMatcher {
             shallowScoredInFrame = shallowScoredInFrame,
             usedRecovery = usedRecovery,
             recoveryDetail = recoveryDetail,
+            usedCompactRecovery = usedCompactRecovery,
         )
     }
 
@@ -1033,6 +1051,14 @@ object LocalStarMatcher {
         // 真解则在对齐率上接近 1（实测用户照片 inFrame≈全画面 25~30、对齐 20+）。
         // 循环不变量提到循环外：本函数在打分轮被调用上万次。
         val invDet = 1.0 / det
+        // The similarity maps the tangent origin to (u0, v0). The farthest corner of the
+        // pixel search rectangle bounds its angular extent; allow one pixel for rounding.
+        val u0 = (-s * tx - ss * ty) * invDet
+        val v0 = (ss * tx - s * ty) * invDet * if (useFlip) -1 else 1
+        val farX = maxOf(abs(u0 + 21.0), abs(width + 21.0 - u0))
+        val farY = maxOf(abs(v0 + 21.0), abs(height + 21.0 - v0))
+        val farTangentSquared = det * (farX * farX + farY * farY) / (INV_RAD * INV_RAD)
+        val minCenterDot = 1.0 / sqrt(1.0 + farTangentSquared)
         var hits = 0
         var inFrame = 0
         // 一对一匹配：每颗检测星只能被一颗星表星占用，杜绝"多星压一点"虚增
@@ -1060,13 +1086,13 @@ object LocalStarMatcher {
             hx = 0.0; hy = 0.0; hz = 0.0
         }
         for (i in tbl.entries.indices) {
-            if (pointingHint != null) {
-                val dot = tbl.ux[i] * hx + tbl.uy[i] * hy + tbl.uz[i] * hz
-                if (acos(dot.coerceIn(-1.0, 1.0)) / (PI / 180.0) > hintRadius) continue
-            }
             val uxi = tbl.ux[i]; val uyi = tbl.uy[i]; val uzi = tbl.uz[i]
             val dC = uxi * c0x + uyi * c0y + uzi * c0z
-            if (dC <= 1e-9) continue
+            if (dC <= 1e-9 || dC < minCenterDot) continue
+            if (pointingHint != null) {
+                val dot = uxi * hx + uyi * hy + uzi * hz
+                if (acos(dot.coerceIn(-1.0, 1.0)) / (PI / 180.0) > hintRadius) continue
+            }
             val dE = uxi * exx + uyi * exy + uzi * exz
             val dN = uxi * nx + uyi * ny + uzi * nz
             // 与 tanXY 完全同尺度：xi = dE/dC、eta = dN/dC，再除弧度因子。
@@ -1310,7 +1336,8 @@ object LocalStarMatcher {
         token: SolveToken? = null,
         recoveryDetected: ((SolveToken) -> List<DetectedStar>)? = null,
     ): LocalMatchResult? = matchWithDiagnostics(
-        detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg, token, recoveryDetected,
+        detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg, token,
+        recoveryDetected = recoveryDetected,
     ).result
 
     /**
@@ -1331,6 +1358,7 @@ object LocalStarMatcher {
         fallbackDetected: List<DetectedStar>? = null,
         fovHintDeg: Double? = null,
         token: SolveToken? = null,
+        compactRecoveryDetected: ((SolveToken) -> List<DetectedStar>)? = null,
         recoveryDetected: ((SolveToken) -> List<DetectedStar>)? = null,
     ): MatchAttempt {
         val ctx = MatchContext(
@@ -1339,7 +1367,8 @@ object LocalStarMatcher {
             token = token,
         )
         val result = matchInternalContext(
-            ctx, detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg, recoveryDetected,
+            ctx, detected, width, height, pointingHint, allowDeepRetry, fallbackDetected, fovHintDeg,
+            recoveryDetected, compactRecoveryDetected,
         )
         val diag = ctx.snapshotDiagnostics()
         syncLegacyDiagnostics(ctx)
@@ -1376,11 +1405,31 @@ object LocalStarMatcher {
         fallbackDetected: List<DetectedStar>? = null,
         fovHintDeg: Double? = null,
         recoveryDetected: ((SolveToken) -> List<DetectedStar>)? = null,
+        compactRecoveryDetected: ((SolveToken) -> List<DetectedStar>)? = null,
     ): LocalMatchResult? {
         ctx.token?.check()
         // A trusted narrow-field scale lets the scored search prioritize plausible triangles.
         ctx.narrowFovHint = fovHintDeg?.takeIf { it in 10.0..25.0 }
         ctx.scoredFovRange = ctx.narrowFovHint?.let { FovEstimate.fovRange(it) }
+        val tryIntermediate = allowDeepRetry && !debugDisableDeepCatalog &&
+            debugForceCatalogMag == null && ctx.narrowFovHint != null
+
+        fun intermediate(parent: MatchContext, stars: List<DetectedStar>): LocalMatchResult? {
+            if (!tryIntermediate || stars.size < NARROW_SCORED_MIN_REFINED_INLIERS) return null
+            val trial = MatchContext(INTERMEDIATE_CATALOG_MAG, parent.scoredCap,
+                SolveToken(parent.token, timeoutMillis = INTERMEDIATE_BUDGET_MS))
+            trial.narrowFovHint = parent.narrowFovHint
+            trial.scoredFovRange = parent.scoredFovRange
+            val result = try {
+                matchInternal(trial, stars, width, height, null)
+            } catch (_: SolveBudgetExceeded) {
+                parent.token?.check()
+                null
+            }
+            if (result == null || !acceptableRecovery(result, fovHintDeg)) return null
+            parent.copyMatchDiagnostics(trial)
+            return result.copy(catalogDomain = CatalogDomain.INTERMEDIATE)
+        }
         // A contaminated primary list is not evidence that the image has no usable stars.
         // Run at most one independent recovery search after the existing paths fail.
         // A child deadline limits the additional latency without consuming the whole solve budget.
@@ -1404,8 +1453,22 @@ object LocalStarMatcher {
                 val domains = if (deepAllowed && fovHintDeg != null && fovHintDeg <= 20.0) listOf(DEEP_CATALOG_MAG, ctx.catalogMag).distinct()
                     else if (deepAllowed) listOf(ctx.catalogMag, DEEP_CATALOG_MAG).distinct()
                     else listOf(ctx.catalogMag)
-                var accepted: LocalMatchResult? = null
-                if (stars.size >= 5) for (mag in domains) {
+                var accepted = intermediate(recovery, stars)
+                var selectedCount = stars.size
+                if (accepted == null && tryIntermediate && compactRecoveryDetected != null) {
+                    val compactStars = try {
+                        compactRecoveryDetected(child)
+                    } catch (_: OutOfMemoryError) {
+                        emptyList()
+                    }
+                    val compact = intermediate(recovery, compactStars)
+                    if (compact != null) {
+                        accepted = compact
+                        selectedCount = compactStars.size
+                        ctx.usedCompactRecovery = true
+                    }
+                }
+                if (accepted == null && stars.size >= 5) for (mag in domains) {
                     child.check()
                     recovery.catalogMag = mag
                     val candidate = matchInternal(recovery, stars, width, height, null) ?: continue
@@ -1415,26 +1478,18 @@ object LocalStarMatcher {
                     accepted = if (mag == DEEP_CATALOG_MAG) candidate.copy(catalogDomain = CatalogDomain.DEEP) else candidate
                     break
                 }
-                ctx.recoveryDetail = "局部背景提星=${stars.size}颗，" +
+                val detection = if (ctx.usedCompactRecovery) "局部信噪提星" else "局部背景提星"
+                ctx.recoveryDetail = "$detection=${selectedCount}颗，" +
                     if (accepted != null) "命中(${accepted.inlierCount}内点)" else "未通过匹配/质量门槛"
                 if (accepted != null) {
                     ctx.usedRecovery = true
-                    ctx.voteStats = recovery.voteStats
-                    ctx.scoredStats = recovery.scoredStats
-                    ctx.scoredBest = recovery.scoredBest
-                    ctx.scoredInFrame = recovery.scoredInFrame
+                    ctx.copyMatchDiagnostics(recovery)
                     ctx.deepRejectedReason = recovery.deepRejectedReason
                     ctx.shallowVoteStats = recovery.shallowVoteStats
                     ctx.shallowScoredStats = recovery.shallowScoredStats
                     ctx.shallowScoredBest = recovery.shallowScoredBest
                     ctx.shallowScoredInFrame = recovery.shallowScoredInFrame
-                    ctx.phaseTimings = recovery.phaseTimings
                     ctx.shallowPhaseTimings = recovery.shallowPhaseTimings
-                    ctx.scoredWinPairs = recovery.scoredWinPairs
-                    ctx.scoredExpandedPairs = recovery.scoredExpandedPairs
-                    ctx.scoredWinSeed = recovery.scoredWinSeed
-                    ctx.scoredWinAt = recovery.scoredWinAt
-                    ctx.expandDetail = recovery.expandDetail
                 }
                 accepted
             } catch (_: SolveBudgetExceeded) {
@@ -1525,6 +1580,7 @@ object LocalStarMatcher {
         ctx.shallowScoredBest = ctx.scoredBest
         ctx.shallowScoredInFrame = ctx.scoredInFrame
         ctx.shallowPhaseTimings = ctx.phaseTimings
+        intermediate(ctx, detected)?.let { return it }
         val savedMag = ctx.catalogMag
         ctx.catalogMag = DEEP_CATALOG_MAG
         val deep = try {
@@ -1584,6 +1640,7 @@ object LocalStarMatcher {
         val primaryPairs = votePairs(ctx, detected, width, height, t1, pointingHint = pointingHint)
         fun candidate(pairs: List<Pair<Int, StarEntry>>): LocalMatchResult? =
             bestCandidate(detected, width, height, pairs, pointingHint, ctx.catalogMag, ctx.scoredFovRange)
+                ?.takeIf { ctx.catalogMag != INTERMEDIATE_CATALOG_MAG || it.inlierCount >= NARROW_SCORED_MIN_REFINED_INLIERS }
         var best = candidate(primaryPairs)
         msPrimary = System.currentTimeMillis() - tA
         if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {

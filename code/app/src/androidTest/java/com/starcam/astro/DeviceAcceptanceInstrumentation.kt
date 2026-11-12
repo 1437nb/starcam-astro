@@ -60,6 +60,54 @@ class DeviceAcceptanceInstrumentation : Instrumentation() {
                 put("nativeSolverAvailable", NativeEngineProbe.available)
             })
             val source = jpeg("source.jpg", 1600, 1000)
+            case("trusted-narrow-field-uses-intermediate-catalog-within-default-budget") {
+                val width = 800
+                val expectedFov = 18.0
+                val scale = expectedFov / width
+                val truth = WcsTransform(width / 2.0 + 1, width / 2.0, 35.0, 57.0, -scale, 0.0, 0.0, scale)
+                val gray = FloatArray(width * width) { 8f }
+                val visible = com.starcam.astro.astro.StarCatalogData.stars.filter { it.mag in 4.01..5.5 }.mapNotNull { star ->
+                    val p = truth.skyToScreen(star.ra, star.dec, width, width)
+                    if (p[0] !in 6f..(width - 7f) || p[1] !in 6f..(width - 7f)) return@mapNotNull null
+                    val x0 = p[0].toInt()
+                    val y0 = p[1].toInt()
+                    for (y in y0 - 4..y0 + 4) for (x in x0 - 4..x0 + 4) {
+                        val dx = x - p[0]
+                        val dy = y - p[1]
+                        gray[y * width + x] += (55 * kotlin.math.exp(-(dx * dx + dy * dy) / 4.5)).toFloat()
+                    }
+                    star to p
+                }
+                check(visible.size >= 10) { "Synthetic field contains only ${visible.size} intermediate stars" }
+                Bitmap.createBitmap(width, width, Bitmap.Config.ARGB_8888).useBitmap { bitmap ->
+                    val ctx = com.starcam.astro.astro.steps.StepContext(
+                        targetContext, bitmap, "acceptance-narrow-field.png", com.starcam.astro.data.SettingsRepository(targetContext),
+                        fovDeg = expectedFov, token = com.starcam.astro.astro.SolveToken(timeoutMillis = 30_000),
+                        deadlineMs = System.nanoTime() / 1_000_000 + 30_000, report = JSONObject(),
+                        log = com.starcam.astro.data.SolveLogStore.beginSolve("acceptance-narrow-field.png"),
+                        logT0 = System.currentTimeMillis(), onProgress = {},
+                        pixels = com.starcam.astro.astro.SolvePixels(width, width) { gray }, recordSuccess = false,
+                    )
+                    val outcome = runBlocking { com.starcam.astro.astro.steps.LocalMatcherStep().execute(ctx) }
+                    check(outcome is com.starcam.astro.astro.steps.StepOutcome.Success) { outcome.toString() }
+                    check(outcome.result.detail.contains("中间星等") || outcome.result.detail.contains("Intermediate catalog")) {
+                        outcome.result.detail
+                    }
+                    val solved = outcome.result.solve
+                    check(kotlin.math.abs(solved.raDeg - 35.0) < 0.1 && kotlin.math.abs(solved.decDeg - 57.0) < 0.1) {
+                        "Unexpected field center: ${solved.raDeg}, ${solved.decDeg}"
+                    }
+                    check(kotlin.math.abs(solved.fieldWidthDeg - expectedFov) < 0.1) {
+                        "Unexpected field width: ${solved.fieldWidthDeg}"
+                    }
+                    val wcs = requireNotNull(solved.wcs)
+                    val alignedCount = visible.count { (star, expected) ->
+                        val found = wcs.skyToScreen(star.ra, star.dec, width, width)
+                        kotlin.math.hypot(found[0] - expected[0], found[1] - expected[1]) <= 3f
+                    }
+                    check(alignedCount >= 10) { "Only $alignedCount of ${visible.size} stars align within 3 px" }
+                }
+            }
             case("complex-sky-recovery-runs-through-the-real-local-step") {
                 val w = 700
                 val region = com.starcam.astro.astro.DemoSolver.regions.first()

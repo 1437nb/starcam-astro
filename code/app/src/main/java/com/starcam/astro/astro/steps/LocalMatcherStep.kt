@@ -2,6 +2,7 @@ package com.starcam.astro.astro.steps
 
 import com.starcam.astro.astro.CatalogDomain
 import com.starcam.astro.astro.AdaptiveStarDetector
+import com.starcam.astro.astro.CompactStarDetector
 import com.starcam.astro.astro.DetectedStar
 import com.starcam.astro.astro.DetectorSelection
 import com.starcam.astro.astro.EngineResult
@@ -50,6 +51,7 @@ class LocalMatcherStep : SolveStep {
         var lastGrayW = 0
         var lastGrayH = 0
         var recoveryStars: List<DetectedStar>? = null
+        var compactRecoveryStars: List<DetectedStar>? = null
 
         val stars = try {
             val extractDiag = StringBuilder()
@@ -188,6 +190,16 @@ class LocalMatcherStep : SolveStep {
                             ctx.onPhase(com.starcam.astro.astro.SolvePhase.MATCHING)
                         }
                     },
+                    compactRecoveryDetected = { recoveryToken ->
+                        ctx.onPhase(com.starcam.astro.astro.SolvePhase.DETECTING)
+                        ctx.onProgress(if (isEn) "Recovering compact stars from local noise…"
+                            else "复杂星空补救：按局部信噪提取紧凑星点…")
+                        CompactStarDetector.detect(ctx.display.width, ctx.display.height,
+                            ctx.pixels.gray, recoveryToken).also {
+                            compactRecoveryStars = it
+                            ctx.onPhase(com.starcam.astro.astro.SolvePhase.MATCHING)
+                        }
+                    },
                 )
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
@@ -203,7 +215,11 @@ class LocalMatcherStep : SolveStep {
         val diag = attempt?.diagnostics
         val deepRejectReason = diag?.deepRejectedReason
         diag?.recoveryDetail?.let { ctx.log.line(ctx.context, "内置星表补救：$it") }
-        val matchedStars = skyRetry?.stars ?: if (diag?.usedRecovery == true) recoveryStars else stars
+        val matchedStars = skyRetry?.stars ?: when {
+            diag?.usedCompactRecovery == true -> compactRecoveryStars
+            diag?.usedRecovery == true -> recoveryStars
+            else -> stars
+        }
         if (skyRetry != null || diag?.usedRecovery == true) {
             previewStars = matchedStars
             lastLocalStarTotal = matchedStars?.size ?: 0
@@ -234,11 +250,15 @@ class LocalMatcherStep : SolveStep {
             ctx.token.check()
             when (verdict) {
                 is StarSolver.LocalAcceptVerdict.AcceptLocal -> {
-                    val domainTag = if (matched.catalogDomain == CatalogDomain.DEEP) {
-                        if (isEn) " · Deep fallback" else " · 深域兜底"
-                    } else ""
+                    val domainTag = when (matched.catalogDomain) {
+                        CatalogDomain.SHALLOW -> ""
+                        CatalogDomain.INTERMEDIATE -> if (isEn) " · Intermediate catalog" else " · 中间星等"
+                        CatalogDomain.DEEP -> if (isEn) " · Deep fallback" else " · 深域兜底"
+                    }
                     val recoveryTag = if (skyRetry != null) {
                         if (isEn) " · Sky-region recovery" else " · 天空区域补救"
+                    } else if (diag?.usedCompactRecovery == true) {
+                        if (isEn) " · Compact-star detection" else " · 局部信噪提星"
                     } else if (diag?.usedRecovery == true) {
                         if (isEn) " · Adaptive detection" else " · 复杂星空补救"
                     } else ""

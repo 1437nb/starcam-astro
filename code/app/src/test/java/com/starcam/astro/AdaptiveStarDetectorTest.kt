@@ -1,6 +1,7 @@
 package com.starcam.astro
 
 import com.starcam.astro.astro.AdaptiveStarDetector
+import com.starcam.astro.astro.CompactStarDetector
 import com.starcam.astro.astro.LocalStarMatcher
 import com.starcam.astro.astro.SolveToken
 import com.starcam.astro.astro.SolveBudgetExceeded
@@ -61,7 +62,19 @@ class AdaptiveStarDetectorTest {
     @Test fun uniformAndNonFiniteFramesDoNotProduceStars() {
         for (value in listOf(0f,120f,Float.NaN,Float.POSITIVE_INFINITY)) {
             assertTrue(AdaptiveStarDetector.detect(128,128,FloatArray(128*128){value}).isEmpty())
+            assertTrue(CompactStarDetector.detect(128,128,FloatArray(128*128){value},SolveToken()).isEmpty())
         }
+    }
+
+    @Test fun compactDetectionRanksQuietStarsAheadOfHighVarianceTexture() {
+        val width = 384
+        val height = 256
+        val random = Random(913)
+        val gray = FloatArray(width * height) { i -> 35f + random.nextFloat() * if (i % width >= 180) 100f else 2f }
+        val truth = listOf(46 to 50, 110 to 70, 65 to 134, 138 to 192)
+        for ((x, y) in truth) source(gray, width, x, y, 26f, 1.4)
+        val found = CompactStarDetector.detect(width, height, gray, SolveToken()).take(16)
+        assertTrue(truth.all { (x,y) -> found.any { (it.x-x)*(it.x-x)+(it.y-y)*(it.y-y) < 4 } })
     }
 
     @Test fun cancellationIsCheckedBeforeLargeAllocations() {

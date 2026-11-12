@@ -1,6 +1,8 @@
 package com.starcam.astro
 
 import com.starcam.astro.astro.AdaptiveStarDetector
+import com.starcam.astro.astro.CompactStarDetector
+import com.starcam.astro.astro.DetectedStar
 import com.starcam.astro.astro.LocalStarMatcher
 import com.starcam.astro.astro.StarCatalogData
 import org.junit.Assert.*
@@ -15,6 +17,7 @@ class AdaptiveFieldProbeTest {
     @Test fun denseFieldComparison() {
         val dir = File("../../testdata/narrowfield")
         val truth = JSONObject(File(dir, "truth.json").readText())
+        val regressionFields = setOf("cas15", "sco18", "sgr15", "summer20")
         var primaryOk=0; var solved=0; var wrong=0; var total=0; var targetSolved=0
         for (f in dir.listFiles { f -> f.extension == "gray" }!!.sorted()) {
             val id=f.nameWithoutExtension
@@ -29,9 +32,13 @@ class AdaptiveFieldProbeTest {
             var stars=primary
             // The original search runs first, exactly once. A successful non-recovery result
             // is also the baseline result; avoids repeating the entire expensive search.
-            val attempt=LocalStarMatcher.matchWithDiagnostics(primary,w,h,fovHintDeg=t.getDouble("fov"),recoveryDetected={ token ->
-                AdaptiveStarDetector.detect(w,h,g,token=token).also { stars=it }
-            })
+            var compact: List<DetectedStar>? = null
+            val attempt=LocalStarMatcher.matchWithDiagnostics(
+                primary,w,h,fovHintDeg=t.getDouble("fov"),
+                compactRecoveryDetected={ token -> CompactStarDetector.detect(w,h,g,token).also { compact=it } },
+                recoveryDetected={ token -> AdaptiveStarDetector.detect(w,h,g,token=token).also { stars=it } },
+            )
+            if (attempt.diagnostics.usedCompactRecovery) stars = requireNotNull(compact)
             val result=attempt.result
             val hits=stars.count { s -> positions.any { p -> (p.first-s.x)*(p.first-s.x)+(p.second-s.y)*(p.second-s.y)<9 } }
             val s=result?.solve
@@ -43,8 +50,8 @@ class AdaptiveFieldProbeTest {
                 if (t.getDouble("fov") >= 10.0) targetSolved++
             }
             if(s!=null && !ok) wrong++
-            if (id == "cas15") {
-                assertNotNull("The narrow-field shortlist must recover the Cassiopeia field", s)
+            if (id in regressionFields) {
+                assertNotNull("The narrow-field ladder must recover $id", s)
                 assertTrue(separation(s!!.raDeg, s.decDeg, t.getDouble("ra"), t.getDouble("dec")) < .1)
                 assertEquals(t.getDouble("fov"), s.fieldWidthDeg, .1)
             }
@@ -54,7 +61,7 @@ class AdaptiveFieldProbeTest {
         println("COMPLEX-SUMMARY primary=$primaryOk solved=$solved wrong=$wrong total=$total targetSolved=$targetSolved")
         assertEquals("All 32 observations must execute",32,total)
         assertEquals("Recovery must not add false solves",0,wrong)
-        assertTrue("Must improve on the v1.5.99 baseline of 12/16 within scope", targetSolved >= 13)
+        assertEquals("Every field in the supported range must solve in this observation set",16,targetSolved)
     }
 
     private fun separation(a:Double,b:Double,c:Double,d:Double):Double {
