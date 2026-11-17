@@ -26,8 +26,6 @@ import com.starcam.astro.ui.history.HistoryScreen
 import com.starcam.astro.ui.home.HomeScreen
 import com.starcam.astro.ui.result.ResultScreen
 import com.starcam.astro.ui.settings.SettingsScreen
-import com.starcam.astro.util.ImageUtils
-import java.io.File
 
 /** 应用根组件：按路由切换页面 */
 @Composable
@@ -76,6 +74,7 @@ fun StarCamApp(viewModel: AppViewModel = viewModel()) {
         when (s) {
         is Screen.Home -> HomeScreen(
             hasApiKey = settings.hasApiKey,
+            settings = settings,
             onCapture = { viewModel.navigate(Screen.Camera) },
             onPickImage = { path -> viewModel.navigate(Screen.Result(path)) },
             onPickImages = { paths -> viewModel.navigate(Screen.Batch(paths)) },
