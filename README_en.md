@@ -8,6 +8,8 @@
 
 An **offline-first** Android app for astrophotography plate-solving and night sky identification. Capture or import night-sky photos to perform on-device blind plate-solving (RA, Dec, FOV, orientation, parity), overlay constellation lines, proper star names, Messier deep-sky objects, and real-time Sun/Moon/planet positions, or explore the sky with the sensor-driven AR live star map.
 
+**Local development v1.5.103 (versionCode 123, §0.142)** completes a modular architecture refactoring across the app with zero changes to UI, rendering, JNI signatures, or plate-solving behavior: decomposes monoliths (`LocalStarMatcher` 3,227 → 958 lines, `CameraScreen` 1,686 → 682 lines, `ResultScreen` 1,582 → 352 lines, `StarSolver`, `StellarSolverNative`, and `HomeScreen`) into 17 cohesive modules, unifies `SettingsRepository` encrypted storage and `apiKey` cache sharing across instances, brings every handwritten logic/UI file under 1,000 lines, and passes all 63 test classes / 402 JVM tests. [Validation report](docs/127-验证报告增补-§0.142-App模块化架构与巨石文件解耦重构v1.5.103.md)
+
 **Local signed build v1.5.102 (versionCode 122, §0.141)** resolves 28 audited stability, concurrency, JNI, precision, WCS/EXIF, and Camera2/AR lifecycle defects, rebuilds the native solver library, and passes 62 test classes / 400 JVM tests plus release binary auditing. [Validation report](docs/126-验证报告增补-§0.141-全量缺陷审计与稳定性修复v1.5.102.md)
 
 **Local development v1.5.101 (§0.140)** adds an intermediate catalog for trusted narrow fields and detects compact stars by contrast against local noise. Both paths share the existing solve deadline. [Validation report](docs/125-验证报告增补-§0.140-窄场星表与局部信噪提星v1.5.101.md)

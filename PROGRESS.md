@@ -5,14 +5,16 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-11-13（v1.5.102 全量缺陷审计修复与本地签名 Release 构建，完整 JVM 62 类 / 400 项全绿）
-**当前基线**：本地签名 Release v1.5.102（versionCode 122，§0.141 全量缺陷审计与稳定性修复，`StarCam-v1.5.102-fix-stability-and-audit-defects-release.apk` 已本地归档，未推送 GitHub）。最近已记录的公开 Release 为 v1.5.96 / tag `v1.5.96`。
+**最后更新**：2026-11-18（v1.5.103 全应用模块化架构与巨石文件解耦重构，完整 JVM 63 类 / 402 项全绿）
+**当前基线**：本地开发版 Debug v1.5.103（versionCode 123，§0.142 模块化架构重构，`StarCam-v1.5.103-modular-architecture-refactor-debug.apk` 已构建校验；最近本地签名 Release 为 v1.5.102 / versionCode 122，最近公开 Release 为 v1.5.96 / tag `v1.5.96`，均未自动推送）。
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
-**构建环境**：Kotlin 编译、单元测试与 APK 打包均在本机完成。v1.5.102 完整 JVM 回归 62 类 / 400 项、0 失败 / 0 错误 / 0 跳过（含本机素材与 7 项新增回归单测）；原生求解库 `libstellar_solver.so` 已从 `astro_bridge.c` 重建并绑定 SHA-256（`fb539d8974475f4d...`）。当前本机无在线 Android 真机/模拟器，ARM 真机实测待做。工具链与辅助机器见 `AGENTS.md` §0 与 §2。
+**构建环境**：Kotlin 编译、单元测试与 APK 打包均在本机完成。v1.5.103 完整 JVM 回归 63 类 / 402 项、0 失败 / 0 错误 / 0 跳过（含本机全部 11 个照片/FITS/窄场真值台与新增 `SettingsRepositoryTest`）；应用源码 `lintDebug` 0 错误 / 9 警告；原生求解库 `libstellar_solver.so` 保持 SHA-256 `7848e2118c0519b9...`（16 KB 对齐）。当前本机无在线 Android 真机/模拟器，ARM 真机实测待做。工具链与辅助机器见 `AGENTS.md` §0 与 §2。
 
 ---
 
 ## 一、下一步（建议优先级，待开发者拍板）
+
+> **2026-11-18 v1.5.103 全应用模块化架构与巨石文件解耦重构（§0.142）**。在严格保持现有 UI、渲染管线、JNI 导出签名与盲解算法行为逐位不变的前提下，完成四大模块群拆分与状态层收敛：① `LocalStarMatcher.kt`（3,227 → 958 行）拆出 `StarFieldGeometry` / `StarFieldDetector` / `TriangleStarIndex` / `StarFieldFitter` / `TriangleVoteScorer`，保留全部 `debug*` 反射槽位；② `CameraScreen.kt`（1,686 → 682 行）拆出 `CameraArOverlay`（保持 `remember` 零每帧分配）/ `CameraHudOverlay` / `CameraControlsPanel` / `CameraFrameAnalyzer`；③ `ResultScreen.kt`（1,582 → 352 行）拆出 `ResultLoadingAndError` / `ResultPhotoCanvas` / `SkyObjectInfoCard` / `ResultBitmapRenderer` / `ResultInfoPanel`；④ `StarSolver` 拆出 `SolverPlanning`，`StellarSolverNative` 拆出 `NativeSolverSupport`，`HomeScreen` 拆出 `StarCamBrandIcon`，并将 `SettingsRepository` 改为按 `applicationContext` 共享 `SharedStore`（消除跨实例 Keystore 重复解密与 `apiKeyCache` 割裂，附 `SettingsRepositoryTest`）。全仓手写逻辑与 UI 文件全部降至 1,000 行以内；不带 `skipPhotoTests` 的完整 JVM 回归 63 类 / 402 项全绿，`assembleDebug`（16 KB 对齐 + 8 个 FITS 索引逐字节一致）与 `lintDebug`（0 错误）均通过，并同步刷新 `docs/01-项目架构与代码地图.md`、`交接说明.md` 与中英文 `README`。下一步待连接 ARM 真机验收相机/AR/Pro AE 与原图识别，按开发者明确指令决定是否跑新 Release 与推送 GitHub。详见 `docs/127-验证报告增补-§0.142-App模块化架构与巨石文件解耦重构v1.5.103.md`。
 
 > **2026-11-13 v1.5.102 全量缺陷审计修复与本地 Release（§0.141）**。已完成 28 项审计缺陷修复落地（预算超限诊断/预览保留、JNI 异常与内存空指针防护、ThreadLocal 并行失败诊断、HTTP 429/503 Retry-After 退避、在线 WCS 方向一致与重试回写、Camera2 Pro AE 释放顺序与闪光灯同步、FITS BITPIX=32 Double BZERO 与 CD 矩阵视场、AR 采样帧姿态对齐与画布零分配/边界保护、AttitudeFusion 陀螺积分防重与并发同步、WCS 奇异矩阵/EXIF 负度分秒与空岛过滤、极区 `1/cos(dec)` 网格查询与连通域防栈溢出等）。已完成 `libstellar_solver.so` 重建、62 类 / 400 项全量 JVM 回归及 `tools/release.py` 官方签名打包（12,934,445 字节，SHA-256 `165F81FCDB3FF8E10CABFBCAF09BC623E3ED268202C9B6653CBCD09635F49E80`，与 v1.5.96 同证书可覆盖升级）与二进制安全审计（8 个 FITS 索引一致、`.so` 16 KB 对齐、无 `SDKP`/`vcsInfo`/测试入口）。待真机接入后验收实体相机/AR/Pro AE 与原图识别，再按明确指令执行提交、推送与 GitHub Release 发布。详见 `docs/126-验证报告增补-§0.141-全量缺陷审计与稳定性修复v1.5.102.md`。
 
@@ -128,12 +130,14 @@
     仍未做三条：
     ① **F-Droid 上架**（与项目的隐私定位契合，但前提是构建可复现，
     与 `docs/75` §3.4 的依赖脚本化互为前提）；
-    ② **文档路径与现状收敛** —— 仍有 `C:\starword` 等旧工作区路径；`docs/01` 中
-    919 颗星 / 40 项测试等早期统计与调度描述已滞后，README / 交接说明中的主题与测试统计
-    也未全部跟随最新代码。后续以实际代码、最新验证报告与本文件为准逐项同步；
-    ③ **`astrometry-local` 的从零复现脚本**（`docs/75` §3.4 明确标注的缺口）。
+    ② **文档路径与现状收敛** —— `docs/01`、`交接说明.md` 与中英文 `README` 已于 §0.142 同步至 8,419 颗星与 63 类 / 402 项测试基线；部分早期归档章节仍保留 `C:\starword` 等历史工作区路径，查阅时以实际代码、最新验证报告与本文件为准；
+    ③ ~~**`astrometry-local` 的从零复现脚本**~~（已在 §0.134/§0.135 由 `tools/build_native.py` 结清）。
 
 ## 二、最近完成
+
+- **2026-11-18（v1.5.103 / §0.142 模块化架构与巨石文件解耦重构）**。将 `LocalStarMatcher`（3,227 → 958 行）、`CameraScreen`（1,686 → 682 行）、`ResultScreen`（1,582 → 352 行）、`StarSolver`、`StellarSolverNative` 与 `HomeScreen` 按职责拆分为 17 个内聚模块，统一 `SettingsRepository` 按 `applicationContext` 共享 `SharedStore` 加密存储与 `apiKeyCache`（新增 `SettingsRepositoryTest`），全仓手写逻辑与 UI 文件全部降至 1,000 行以内。保持 UI、渲染管线、JNI 签名与盲解行为逐位不变；完整 JVM 63 类 / 402 项全绿，`lintDebug` 0 错误 / 9 警告，Debug APK（`StarCam-v1.5.103-modular-architecture-refactor-debug.apk`，SHA-256 `387ef13fdf8ccc4a6bcf6bfbb28d023c7dff2d8f73be1a300f1620b22253e6ac`）通过 8 个 FITS 索引逐字节校验与 `libstellar_solver.so` 16 KB 对齐检查。详见 `docs/127-验证报告增补-§0.142-App模块化架构与巨石文件解耦重构v1.5.103.md`。
+
+- **2026-11-13（v1.5.102 / §0.141 全量缺陷审计与稳定性修复）**。落地全部 28 项审计缺陷修复并重建原生求解库（`28029cf`），完整 JVM 62 类 / 400 项全绿，本地签名 Release APK 已归档并通过二进制审计。详见 `docs/126-验证报告增补-§0.141-全量缺陷审计与稳定性修复v1.5.102.md`。
 
 - **2026-11-13（v1.5.101 窄场星表与局部信噪提星）**。对可信视场为 10°–25° 的照片，浅域失败后加入 mag≤5.5 星表；对局部噪声掩盖星点的场景按信噪比补提星。天蝎座 18°、人马座 15°、夏季 20° 新增真解。四个冷启动样本均在桌面 30 秒总预算内解出，耗时 3.11–21.35 秒。完整 JVM 393 项及 Android 14 功能 32 项通过，验收包来自 `6d138ab` 加本轮源码的隔离工作树。Debug 已归档至 `code/app/build/verified-narrow-field/`。基础盲解对照 12/32，仍需复测完整无先验路径及 ARM 真机。详见 docs/125。
 
