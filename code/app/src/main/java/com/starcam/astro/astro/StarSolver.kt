@@ -2,7 +2,6 @@ package com.starcam.astro.astro
 
 import android.content.Context
 import android.graphics.Bitmap
-import androidx.exifinterface.media.ExifInterface
 import com.starcam.astro.astro.steps.LocalMatcherStep
 import com.starcam.astro.astro.steps.NativeSolveStep
 import com.starcam.astro.astro.steps.OnlineNovaStep
@@ -10,16 +9,7 @@ import com.starcam.astro.astro.steps.SolveStep
 import com.starcam.astro.astro.steps.StepContext
 import com.starcam.astro.astro.steps.StepOutcome
 import com.starcam.astro.data.SettingsRepository
-import com.starcam.astro.util.ImageUtils
-import com.starcam.astro.util.LocationHelper
-import java.io.File
 import java.util.concurrent.CancellationException
-import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.acos
-import kotlin.math.cos
-import kotlin.math.min
-import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -123,17 +113,8 @@ object StarSolver {
     const val NATIVE_BLIND_SEG_WIDE_DEG = 120.0
     const val NATIVE_BLIND_SEG_WIDE_TIME = 16.0
 
-    /**
-     * 无 EXIF 视场先验时的官方引擎分段试探方案。
-     * 实测（12 张真实手机照片 + 手机预算模拟 §0.15）：11/12 均由
-     * 40°~120° 宽场段命中（手机主摄/广角普遍 40°+），故**宽场段优先**，
-     * 让广角照片少等一段；窄场照片（望远镜/变焦）随后 3°~40° 段兜底。
-     * 每段限时不变：宽场 16s、窄中 12s（合计 28s ≤ 已知视场单段 30s）。
-     */
-    fun blindSegments(): List<Triple<Double, Double, Double>> = listOf(
-        Triple(NATIVE_BLIND_SEG_MID_DEG, NATIVE_BLIND_SEG_WIDE_DEG, NATIVE_BLIND_SEG_WIDE_TIME),
-        Triple(NATIVE_BLIND_SEG_LO_DEG, NATIVE_BLIND_SEG_MID_DEG, NATIVE_BLIND_SEG_MID_TIME),
-    )
+    /** 无 EXIF 视场先验时的官方引擎分段试探方案（实现见 [SolverPlanning.blindSegments]）。 */
+    fun blindSegments(): List<Triple<Double, Double, Double>> = SolverPlanning.blindSegments()
 
     /** 降采样重试轮：目标长边像素 */
     const val NATIVE_DOWNSAMPLE_RETRY_LONG_EDGE = 1100
@@ -147,22 +128,9 @@ object StarSolver {
     /** 本地解官方复核：单次求解限时（秒，只在低内点时触发一次） */
     const val CROSS_CHECK_TIME_LIMIT_SEC = 10.0
 
-    /**
-     * 本地解官方复核决策（§0.29 遗留项落地，§0.32）：
-     * - 内点 ≥ [CROSS_CHECK_MIN_INLIERS]：自研解高置信，直接接受；
-     * - 内点不足时用官方引擎（自带 logodds/nMatch 质量门槛）在自研视场
-     *   ±35% 范围内复核：
-     *   - 官方无解（复核失败/引擎不可用）→ 不拦截（宁放过不误杀）；
-     *   - 官方有解且天区/视场与自研一致（天区 Δ<3°、视场比 0.5~2）→ 接受；
-     *   - 官方有解但不一致 → 拒绝（防"宽场误判窄场特写"类假解，§0.28/§0.30）。
-     */
     /** 天球角距（度） */
-    internal fun angularSepDeg(ra1: Double, dec1: Double, ra2: Double, dec2: Double): Double {
-        val r = PI / 180.0
-        val s = sin(dec1 * r) * sin(dec2 * r) +
-            cos(dec1 * r) * cos(dec2 * r) * cos((ra1 - ra2) * r)
-        return acos(s.coerceIn(-1.0, 1.0)) / r
-    }
+    internal fun angularSepDeg(ra1: Double, dec1: Double, ra2: Double, dec2: Double): Double =
+        SolverPlanning.angularSepDeg(ra1, dec1, ra2, dec2)
 
     internal fun crossCheckAccept(
         localRaDeg: Double,
@@ -170,117 +138,28 @@ object StarSolver {
         localFovDeg: Double,
         localInliers: Int,
         native: SolveResult?,
-    ): Boolean {
-        if (localInliers >= CROSS_CHECK_MIN_INLIERS) return true
-        if (native == null) return true
-        val sep = angularSepDeg(localRaDeg, localDecDeg, native.raDeg, native.decDeg)
-        val fovRatio = localFovDeg / native.fieldWidthDeg
-        return sep < 3.0 && fovRatio in 0.5..2.0
-    }
+    ): Boolean = SolverPlanning.crossCheckAccept(localRaDeg, localDecDeg, localFovDeg, localInliers, native)
 
-    /**
-     * 官方引擎盲解（无 EXIF 视场先验）全段失败后的降采样重试决策。
-     *
-     * 服务器实测依据（2026-08-28）：12 张真实手机照片中，变焦/星点肥大照片
-     * （5057，41° 视场）在原始分辨率下官方引擎解不出，加 `--downsample 2`
-     * 后秒解（log-odds 248）；原因是大星点 + 噪声在提星阶段污染 quad 匹配，
-     * 降采样后星点归一、形状更稳。
-     *
-     * 规则：仅"无视场先验的盲解"且图像长边仍偏大时触发；
-     * 有 EXIF 焦距先验的路径已按 FOV 对准 scale，不需要（也省时间）。
-     * 返回（目标长边像素, 重试分段），不满足条件返回 null。
-     */
     fun downsampleRetryPlan(
         fovDeg: Double?,
         longEdgePx: Int,
-    ): Pair<Int, List<Triple<Double, Double, Double>>>? {
-        if (fovDeg != null) return null
-        if (longEdgePx <= NATIVE_DOWNSAMPLE_RETRY_LONG_EDGE + 100) return null
-        return NATIVE_DOWNSAMPLE_RETRY_LONG_EDGE to blindSegments()
-    }
+    ): Pair<Int, List<Triple<Double, Double, Double>>>? =
+        SolverPlanning.downsampleRetryPlan(fovDeg, longEdgePx)
 
-    /**
-     * 把基于缩放图（[fromW]×[fromH]）定标的求解结果换算回原图（[toW]×[toH]）。
-     *
-     * astro_bridge 的 CRPIX 恒为图像中心（w/2+0.5），整体缩放时中心对齐：
-     *  - crpix 按放大比例（to/from）外推；
-     *  - CD 矩阵与 pixscale 按缩小比例（from/to）换算（同一天体尺度在更多像素上，度/像素变小）；
-     *  - 天球坐标（crval/ra/dec）与 parity/orientation 不变；
-     *  - fieldRadiusArcmin 按新尺寸与新比例尺重算。
-     */
     fun rescaleSolveFor(
         solve: SolveResult,
         fromW: Int,
         fromH: Int,
         toW: Int,
         toH: Int,
-    ): SolveResult {
-        val ps = solve.pixScaleArcsec * fromW.toDouble() / toW
-        val wcs = solve.wcs?.rescaledFor(fromW, fromH, toW, toH)
-        return SolveResult(
-            raDeg = solve.raDeg,
-            decDeg = solve.decDeg,
-            pixScaleArcsec = ps,
-            orientationDeg = solve.orientationDeg,
-            parity = solve.parity,
-            imageWidth = toW,
-            imageHeight = toH,
-            subId = solve.subId,
-            fieldRadiusArcmin = Math.hypot(toW.toDouble(), toH.toDouble()) * ps / (2.0 * 60.0),
-            nMatch = solve.nMatch,
-            indexId = solve.indexId,
-            logodds = solve.logodds,
-            wcs = wcs,
-        )
-    }
+    ): SolveResult = SolverPlanning.rescaleSolveFor(solve, fromW, fromH, toW, toH)
 
-    /**
-     * 纯决策函数（JVM 可单测）：按模式与视场估计决定引擎执行顺序。
-     *
-     * - AUTO：广角 Hipparcos 亮星表优先 —— fov 已知且 ≥8°（星表适用范围）：
-     *   先自研亮星表匹配，失败再官方引擎；窄场（<8°）亮星表自动跳过直接官方；
-     *   >180° 仅亮星表；fov 未知 → 亮星表先试再官方（盲解分段限时）；
-     *   有 Key 时最后追加在线。
-     * - NATIVE_FIRST：官方 → 自研 → 在线（始终，保留旧策略可选）。
-     * - OFFLINE_ONLY：AUTO 的本地部分（星表 + 官方），无在线。
-     * - ONLINE_ONLY：仅在线（无 Key 时返回空列表，调用方给引导）。
-     */
     fun planSteps(
         fovDeg: Double?,
         mode: EngineMode,
         hasApiKey: Boolean,
         nativeAvailable: Boolean = true,
-    ): List<SolveEngine> {
-        val steps = ArrayList<SolveEngine>()
-        fun localSteps() {
-            val fov = fovDeg
-            when {
-                fov == null -> {
-                    steps += SolveEngine.LOCAL_MATCHER
-                    if (nativeAvailable) steps += SolveEngine.ASTROMETRY_NATIVE
-                }
-                fov in NATIVE_FOV_MIN_DEG..NATIVE_FOV_MAX_DEG -> {
-                    if (fov >= LOCAL_FOV_MIN_DEG || !nativeAvailable) steps += SolveEngine.LOCAL_MATCHER
-                    if (nativeAvailable) steps += SolveEngine.ASTROMETRY_NATIVE
-                }
-                else -> steps += SolveEngine.LOCAL_MATCHER
-            }
-        }
-        when (mode) {
-            EngineMode.ONLINE_ONLY -> if (hasApiKey) steps += SolveEngine.ONLINE_NOVA
-            EngineMode.OFFLINE_ONLY -> localSteps()
-            EngineMode.NATIVE_FIRST -> {
-                if (nativeAvailable) steps += SolveEngine.ASTROMETRY_NATIVE
-                steps += SolveEngine.LOCAL_MATCHER
-                if (hasApiKey) steps += SolveEngine.ONLINE_NOVA
-            }
-            EngineMode.AUTO -> {
-                localSteps()
-                if (hasApiKey) steps += SolveEngine.ONLINE_NOVA
-            }
-        }
-        return steps
-    }
+    ): List<SolveEngine> = SolverPlanning.planSteps(fovDeg, mode, hasApiKey, nativeAvailable)
 
     internal sealed class LocalAcceptVerdict {
         object AcceptLocal : LocalAcceptVerdict()
@@ -289,11 +168,7 @@ object StarSolver {
     }
 
     /**
-     * 本地解是否可呈现：高内点直接接受；低内点用官方引擎复核（见
-     * [crossCheckAccept]）。复核在自研视场 ±35% 内部署，官方引擎自身带
-     * logodds≥25/nMatch≥2 门槛，10 秒上限，单次触发。
-     * 若官方复核解出且与自研解一致 → 接受自研解；
-     * 若官方复核给出更高置信度的解（与自研不一致）→ 采纳官方解（[LocalAcceptVerdict.AdoptNative]）。
+     * 本地解是否可呈现：高内点直接接受；低内点用官方引擎复核（见 [crossCheckAccept]）。
      */
     internal fun evaluateLocalSolve(
         context: Context,
@@ -315,7 +190,6 @@ object StarSolver {
             null
         }
         if (native == null) {
-            // 官方引擎未解出（超时或不可用）→ 宁放过不误杀，接受自研解
             return LocalAcceptVerdict.AcceptLocal
         }
         val isConsistent = crossCheckAccept(
@@ -328,107 +202,20 @@ object StarSolver {
         }
     }
 
-    private fun acceptLocalSolve(
-        context: Context,
-        display: Bitmap,
-        matched: LocalMatchResult,
-    ): Boolean = evaluateLocalSolve(context, display, matched) is LocalAcceptVerdict.AcceptLocal
+    fun readFovDeg(imagePath: String): Double? = SolverPlanning.readFovDeg(imagePath)
 
-    /**
-     * 从图片文件读取 EXIF 视场估计（度）；无焦距信息返回 null。
-     *
-     * §0.108：FITS 走 WCS（`CDELT × NAXIS`）—— 与 EXIF 焦距先验**同一条**「可信视场」
-     * 闸门（§0.103：>45° 宽场跳过深域重试）。天文素材的 WCS 比 EXIF 焦距更可信。
-     * §0.111：内置离线演示图随包发布时无 EXIF 焦距，若匹配文件名则返回其已知真值先验（~75° 广角）。
-     */
-    fun readFovDeg(imagePath: String): Double? {
-        if (com.starcam.astro.util.FitsImage.isFitsPath(imagePath)) {
-            return try {
-                com.starcam.astro.util.FitsImage.readMeta(imagePath)?.fovDeg
-            } catch (e: Throwable) {
-                null
-            }
-        }
-        val fromExif = try {
-            val exif = ExifInterface(imagePath)
-            val focal35 = exif.getAttributeDouble(
-                ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM, 0.0,
-            )
-            val portrait = FovEstimate.isPortrait(
-                exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL),
-            )
-            FovEstimate.fovDegFromFocal35(focal35, portrait)
-        } catch (e: Exception) {
-            null
-        }
-        if (fromExif != null) return fromExif
+    internal fun demoPhotoFov(fileName: String): Double? = SolverPlanning.demoPhotoFov(fileName)
 
-        // 仅在明确来自内置离线演示图目录（offline_photos / realphotos / testdata）时
-        // 才应用预置视场真值先验，防止用户本地普通照片因命名为 photoXXXX 发生先验污染（Audit 3.3）
-        val file = java.io.File(imagePath)
-        val parent = file.parentFile?.name ?: ""
-        val isDemoPath = parent == "offline_photos" || parent == "realphotos" ||
-            imagePath.contains("offline_photos") || imagePath.contains("testdata") ||
-            imagePath.startsWith("/demo/") || imagePath.startsWith("/http/photo") ||
-            imagePath.startsWith("/batch/photo")
-        if (isDemoPath) {
-            return demoPhotoFov(file.name)
-        }
-        return null
-    }
-
-    /** 内置离线演示图的已知真实视场先验（度） */
-    internal fun demoPhotoFov(fileName: String): Double? {
-        val id = Regex("^photo(\\d{4})\\..+$").find(fileName)?.groupValues?.get(1) ?: return null
-        return when (id) {
-            "4963" -> 77.2
-            "4974" -> 77.0
-            "4984" -> 76.0
-            "4998" -> 75.6
-            "5031" -> 76.0
-            "5040" -> 77.0
-            "5049" -> 71.0
-            "5057" -> 75.0
-            "5068" -> 72.0
-            "5076" -> 72.0
-            "5087" -> 76.0
-            "5092" -> 76.0
-            else -> null
-        }
-    }
-
-    /**
-     * 判断当前环境与参数是否支持本地星表与官方引擎并发竞速（Racing，§0.114）。
-     *
-     * 竞速条件：
-     * 1. 计划步骤中同时包含 LOCAL_MATCHER 与 ASTROMETRY_NATIVE；
-     * 2. 本地原生库可用（arm64-v8a）；
-     * 3. 设备不是低内存设备（!isLowRamDevice）且可用堆内存 ≥ 256MB；
-     * 4. 视场未知（null）或处于广角（≥8°）。
-     */
     fun canRace(
         isLowRam: Boolean,
         maxMemoryBytes: Long,
         isNativeAvailable: Boolean,
         fovDeg: Double?,
         steps: List<SolveEngine>,
-    ): Boolean {
-        if (!steps.contains(SolveEngine.LOCAL_MATCHER) || !steps.contains(SolveEngine.ASTROMETRY_NATIVE)) {
-            return false
-        }
-        if (!isNativeAvailable) return false
-        if (isLowRam) return false
-        if (maxMemoryBytes < 256L * 1024 * 1024) return false
-        return fovDeg == null || fovDeg >= LOCAL_FOV_MIN_DEG
-    }
+    ): Boolean = SolverPlanning.canRace(isLowRam, maxMemoryBytes, isNativeAvailable, fovDeg, steps)
 
-    fun canRace(context: Context, fovDeg: Double?, steps: List<SolveEngine>): Boolean {
-        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-        val isLowRam = am?.isLowRamDevice == true
-        val maxMem = Runtime.getRuntime().maxMemory()
-        val isNative = NativeEngineProbe.available
-        return canRace(isLowRam, maxMem, isNative, fovDeg, steps)
-    }
+    fun canRace(context: Context, fovDeg: Double?, steps: List<SolveEngine>): Boolean =
+        SolverPlanning.canRace(context, fovDeg, steps)
 
     /**
      * 双引擎并发竞速（§0.114）：

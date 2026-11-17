@@ -194,51 +194,11 @@ object StellarSolverNative {
         val gray = grayInput?.also { require(it.size == w * h) }?.copyOf() ?: bitmapToGray(bitmap)
         val json = try {
             extractStars(gray, w, h, thresholdBgMultiple, maxStars)
-        } catch (e: Throwable) {
+        } catch (_: Throwable) {
             lastDiag?.append("sep=${thresholdBgMultiple}σ 原生库不可用；")
             return null
         }
-        return try {
-            val o = JSONObject(json)
-            if (!o.optBoolean("ok", false)) {
-                lastDiag?.append("sep=${thresholdBgMultiple}σ 失败(${o.optString("error")})；")
-                return null
-            }
-            val n = o.optInt("n", 0)
-            // §0.86：未截断的峰值总数（旧版原生库无此字段时退化为 n）
-            val totalPeaks = o.optInt("npeaks", n)
-            if (n <= 0) {
-                lastDiag?.append("sep=${thresholdBgMultiple}σ 0 颗；")
-                return null
-            }
-            val xs = o.getJSONArray("x")
-            val ys = o.getJSONArray("y")
-            val fs = o.getJSONArray("flux")
-            val raw = ArrayList<DetectedStar>(n)
-            for (i in 0 until n) {
-                raw.add(DetectedStar(xs.getDouble(i).toFloat(), ys.getDouble(i).toFloat(), fs.getDouble(i).toFloat()))
-            }
-            // §0.72 边界过滤：simplexy 在图像边界（背景估计失效区）会产生大量伪影。
-            // 实测失败样本 73% 的星点落在 30px 边界带（面积占比仅 6.3%，富集 11.6 倍），
-            // 而正常样本仅 1~5%。这些伪影会挤占 work 集并污染投票，直接剔除。
-            val margin = EDGE_MARGIN_PX
-            val out = raw.filter {
-                it.x >= margin && it.y >= margin && it.x <= w - margin && it.y <= h - margin
-            }
-            if (lastDiag != null) {
-                val border = raw.size - out.size
-                val fl = raw.map { it.brightness }.sortedDescending()
-                lastDiag.append(
-                    "sep=${thresholdBgMultiple}σ 全图检出${totalPeaks}颗/取最亮${raw.size}颗".format() +
-                        "（边界剔除${border}颗→${out.size}颗）" +
-                        " flux=${"%.1f".format(fl.lastOrNull() ?: 0f)}~${"%.1f".format(fl.firstOrNull() ?: 0f)}" +
-                        " 边缘占比=${"%.0f".format(100.0 * border / raw.size)}%；",
-                )
-            }
-            out.takeIf { it.size >= 5 }?.let { SepStars(it, totalPeaks) }
-        } catch (e: Exception) {
-            null
-        }
+        return NativeSolverSupport.parseSepStarsJson(json, w, h, EDGE_MARGIN_PX, thresholdBgMultiple, lastDiag)
     }
 
     /** 从文件图片求解（自动缩放到 2200 长边内） */
@@ -249,7 +209,7 @@ object StellarSolverNative {
         fovHiDeg: Double,
         timeLimitSec: Double = 45.0,
     ): SolveResult? {
-        val bitmap = decodeSampled(imagePath) ?: return null
+        val bitmap = NativeSolverSupport.decodeSampled(imagePath) ?: return null
         return solveBitmap(context, bitmap, fovLoDeg, fovHiDeg, timeLimitSec)
     }
 
@@ -304,60 +264,15 @@ object StellarSolverNative {
     /** 最近一次求解失败时的提星数（当前线程隔离，真机诊断用，AutoTest 读取；null=未知） */
     val lastFailNStars: Int? get() = threadFailDiag.get()?.nStars
 
-    private fun isDebugBuild(context: Context): Boolean =
-        (context.applicationInfo.flags and
-            android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-
     /**
      * §0.64 诊断：把"本地匹配器实际吃到的像素"与它检出的星点落盘（仅 debug 构建）。
-     *
-     * 动机：用户报告"原图识别不了、相册拉高对比度就能识别"，但该图在开发机上
-     * 无论怎么复现都能解出 —— 说明真机喂给求解器的像素/星点与开发机不同。
-     * 失败时留下这份数据，即可在开发机精确重放问题，不必再靠截图推断。
-     *
-     * 输出（应用外部文件目录）：
-     *  - `local_fail_latest.gray`：int32 宽 + int32 高 + float32 灰度（与测试台同格式）
-     *  - `local_fail_latest.txt`：检测到的星点数与坐标/亮度，便于对照
      */
     fun dumpLocalFail(
         context: Context,
         bitmap: Bitmap,
         stars: List<DetectedStar>,
         note: String,
-    ) {
-        if (!isDebugBuild(context)) return
-        try {
-            val dir = context.getExternalFilesDir(null) ?: return
-            val w = bitmap.width
-            val h = bitmap.height
-            val pixels = IntArray(w * h)
-            bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-            val grayFile = java.io.File(dir, "local_fail_latest.gray")
-            java.io.DataOutputStream(java.io.FileOutputStream(grayFile).buffered(128 * 1024)).use { o ->
-                o.writeInt(w)
-                o.writeInt(h)
-                for (c in pixels) {
-                    val r = (c shr 16) and 0xFF
-                    val g = (c shr 8) and 0xFF
-                    val b = c and 0xFF
-                    o.writeFloat(0.299f * r + 0.587f * g + 0.114f * b)
-                }
-            }
-            java.io.File(dir, "local_fail_latest.txt").writeText(
-                buildString {
-                    append("note=").append(note).append('\n')
-                    append("size=").append(w).append('x').append(h).append('\n')
-                    append("detected=").append(stars.size).append('\n')
-                    for ((i, d) in stars.withIndex()) {
-                        append("star[").append(i).append("] x=").append(d.x)
-                            .append(" y=").append(d.y)
-                            .append(" b=").append(d.brightness).append('\n')
-                    }
-                },
-            )
-        } catch (_: Throwable) {
-        }
-    }
+    ) = NativeSolverSupport.dumpLocalFail(context, bitmap, stars, note)
 
     /** 最近一次提星失败的诊断：simplexy 返回码 / 输入灰度均值 / 灰度最大值（线程隔离） */
     val lastFailRc: Int? get() = threadFailDiag.get()?.rc
@@ -388,7 +303,7 @@ object StellarSolverNative {
         } else {
             bitmapToGray(bitmap)
         }
-        val indexes = ensureIndexes(context)
+        val indexes = NativeSolverSupport.ensureIndexes(context, BUNDLED_INDEX_NAMES)
 
         // 首轮原生求解传 extStars = null：C 层 simplexy 提星成功率 >99.9% 且自备提星。
         // 杜绝每轮盲解均提前执行耗时 100~250ms 的 JVM 提星与大数组分配。
@@ -408,7 +323,7 @@ object StellarSolverNative {
             return null
         }
         token?.check()
-        var parsed = parseJson(json, w, h)
+        var parsed = NativeSolverSupport.parseJson(json, w, h)
         // 官方解质量门槛（服务器 12 张标定：真解 logodds 26~907、nmatch≥15；
         // 噪声星点下的随机假解 logodds<10、nmatch=1）——宁可 FAILED 也不报错误天区
         if (parsed != null && parsed.logodds != null &&
@@ -469,7 +384,7 @@ object StellarSolverNative {
                         json
                     }
                     token?.check()
-                    parsed = parseJson(json, w, h)
+                    parsed = NativeSolverSupport.parseJson(json, w, h)
                     if (parsed != null && parsed.logodds != null &&
                         (parsed.logodds < 25.0 || (parsed.nMatch ?: 99) < 2)
                     ) {
@@ -479,24 +394,10 @@ object StellarSolverNative {
             }
         }
 
-        // 诊断：官方求解失败时转储灰度输入（仅 debug 构建，单文件轮换）
-        // 供服务器端 diag_arm64_dyn 用同一条数据复现"提星 0 颗"之谜
-        if (parsed == null && isDebugBuild(context)) {
-            try {
-                val dump = java.io.File(
-                    context.getExternalFilesDir(null),
-                    "gray_dump_latest.gray",
-                )
-                java.io.DataOutputStream(java.io.FileOutputStream(dump).buffered(128 * 1024)).use { o ->
-                    o.writeInt(w); o.writeInt(h)
-                    for (v in effectiveGray) o.writeFloat(v)
-                }
-            } catch (_: Throwable) {
-            }
-        }
         if (parsed == null) {
+            NativeSolverSupport.dumpNativeGray(context, w, h, effectiveGray)
             try {
-                val o = org.json.JSONObject(json)
+                val o = JSONObject(json)
                 threadFailDiag.set(
                     FailDiag(
                         nStars = if (o.has("nstars")) o.getInt("nstars") else null,
@@ -511,157 +412,5 @@ object StellarSolverNative {
         return parsed
     }
 
-    /**
-     * 校验 FITS 索引文件完整性（§0.123 修复 P2-1）。
-     * FITS 标准强制规范：
-     * 1. 文件长度必须 ≥2880 字节且严格为 2880 字节的整数倍；
-     * 2. 首个 Header 卡片（80 字节 ASCII）必须以 "SIMPLE  =" 起始。
-     */
     internal fun isValidFitsIndex(file: File): Boolean = FitsIndexValidator.isValidFitsIndex(file)
-
-    /**
-     * 确保索引文件在 filesDir（首次从 assets 解压）。返回完整路径列表，
-     * 缺失的索引自动跳过（如窄场索引用户未下载时）。
-     * §0.123 修复 P2-1：临时文件解压 + 原子替换 + FITS 完整性自愈。
-     */
-    @Synchronized
-    private fun ensureIndexes(context: Context): Array<String> {
-        val dir = File(context.filesDir, "indexes").apply { mkdirs() }
-        val result = ArrayList<String>()
-        for (name in BUNDLED_INDEX_NAMES) {
-            val f = File(dir, name)
-            if (!isValidFitsIndex(f)) {
-                val tmp = File(dir, "$name.tmp")
-                try {
-                    context.assets.open("indexes/$name").use { input ->
-                        tmp.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    if (isValidFitsIndex(tmp)) {
-                        if (f.exists()) f.delete()
-                        tmp.renameTo(f)
-                    } else {
-                        tmp.delete()
-                    }
-                } catch (e: Exception) {
-                    tmp.delete()
-                    continue // 未打包该索引：跳过
-                }
-            }
-            if (isValidFitsIndex(f)) result.add(f.absolutePath)
-        }
-        return result.toTypedArray()
-    }
-
-    private fun decodeSampled(imagePath: String): Bitmap? =
-        try {
-            com.starcam.astro.util.ImageUtils.decodeSampledBitmap(imagePath, 2200)
-        } catch (e: Exception) {
-            null
-        }
-
-    /** 解析原生返回的 JSON */
-    private fun parseJson(json: String, w: Int, h: Int): SolveResult? {
-        return try {
-            val o = JSONObject(json)
-            if (!o.optBoolean("ok", false)) return null
-            val ra = o.getDouble("ra")
-            val dec = o.getDouble("dec")
-            val fieldwArcmin = o.getDouble("fieldw_arcmin")
-            val fieldhArcmin = o.getDouble("fieldh_arcmin")
-            val orient = o.getDouble("orient")
-            val pixscale = o.getDouble("pixscale")
-            val parity = o.getInt("parity")
-            val crpix1 = o.optDouble("crpix1", w / 2.0 + 0.5)
-            val crpix2 = o.optDouble("crpix2", h / 2.0 + 0.5)
-            // 原生库 0.2 起直出官方 CD 矩阵（tan_t.wcstan，度/像素），
-            // 与官方求解器结果逐位一致；旧库无 cd 字段时回退 orient/parity 重建
-            val wcs = if (o.has("cd00")) {
-                WcsTransform(
-                    crpix1, crpix2, ra, dec,
-                    o.getDouble("cd00"), o.getDouble("cd01"),
-                    o.getDouble("cd10"), o.getDouble("cd11"),
-                )
-            } else {
-                val s = pixscale / 3600.0
-                val th = Math.toRadians(orient)
-                val cosTh = kotlin.math.cos(th)
-                val sinTh = kotlin.math.sin(th)
-                if (parity > 0) {
-                    WcsTransform(crpix1, crpix2, ra, dec,
-                        s * cosTh, s * sinTh, -s * sinTh, s * cosTh)
-                } else {
-                    WcsTransform(crpix1, crpix2, ra, dec,
-                        -s * cosTh, s * sinTh, s * sinTh, s * cosTh)
-                }
-            }
-            // The native TAN reference point can be far from the image center.
-            val center = wcs.fitsPixelToSky(w / 2.0 + 0.5, h / 2.0 + 0.5)
-            SolveResult(
-                raDeg = center[0],
-                decDeg = center[1],
-                pixScaleArcsec = pixscale,
-                orientationDeg = orient,
-                parity = parity,
-                imageWidth = w,
-                imageHeight = h,
-                fieldRadiusArcmin = kotlin.math.hypot(fieldwArcmin, fieldhArcmin) / 2.0,
-                nMatch = if (o.has("nmatch")) o.getInt("nmatch") else null,
-                nStars = if (o.has("nstars")) o.getInt("nstars") else null,
-                indexId = if (o.has("indexid")) o.getInt("indexid") else null,
-                logodds = if (o.has("logodds")) o.getDouble("logodds") else null,
-                wcs = wcs,
-            )
-        } catch (e: Exception) {
-            null
-        }
-    }
-}
-
-/**
- * §0.95 原生引擎可用性探测（缺陷报告 S3 的「能力上报」那一半）。
- *
- * 原生库只编译了 arm64-v8a，`build.gradle.kts` 也没有声明 `abiFilters` —— 于是 32 位
- * 与 x86 设备**能装上包**，但 [StellarSolverNative] 的 `System.loadLibrary` 会失败，
- * 官方引擎与 SEP 提星整体不可用，而此前只在调用点静默 catch，用户与支持者都看不到。
- *
- * 之所以单独放一个对象：库缺失时 [StellarSolverNative] 的 `init` 会抛
- * `ExceptionInInitializerError`，**该对象本身不可用** —— 探测必须独立于它。
- * `loadLibrary` 幂等，重复加载无副作用；结果缓存（成败不会随运行变化）。
- */
-object NativeEngineProbe {
-    val available: Boolean by lazy {
-        try {
-            System.loadLibrary("stellar_solver")
-            true
-        } catch (e: Throwable) {
-            false
-        }
-    }
-}
-
-/**
- * §0.123 修复 P2-1：FITS 索引完整性校验器（纯 JVM，不触发 System.loadLibrary）。
- */
-object FitsIndexValidator {
-    /**
-     * 校验 FITS 索引文件完整性。
-     * FITS 标准强制规范：
-     * 1. 文件长度必须 ≥2880 字节且严格为 2880 字节的整数倍；
-     * 2. 首个 Header 卡片（80 字节 ASCII）必须以 "SIMPLE  =" 起始。
-     */
-    fun isValidFitsIndex(file: File): Boolean {
-        if (!file.exists() || !file.isFile) return false
-        val len = file.length()
-        if (len < 2880L || len % 2880L != 0L) return false
-        return try {
-            file.inputStream().use { input ->
-                val header = ByteArray(80)
-                val read = input.read(header)
-                if (read < 80) false
-                else String(header, 0, 80, Charsets.US_ASCII).startsWith("SIMPLE  =")
-            }
-        } catch (_: Exception) {
-            false
-        }
-    }
 }

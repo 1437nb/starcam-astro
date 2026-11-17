@@ -7,6 +7,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.starcam.astro.astro.EngineMode
 import com.starcam.astro.ui.theme.AppThemeMode
+import java.util.WeakHashMap
 
 /** 应用语言选择：跟随系统 / 简体中文 / 英文 */
 enum class AppLanguage(val key: String, val labelZh: String, val labelEn: String) {
@@ -17,97 +18,34 @@ enum class AppLanguage(val key: String, val labelZh: String, val labelEn: String
     fun label(isEnglish: Boolean = false): String = if (isEnglish) labelEn else labelZh
 }
 
-/** 应用设置（普通项 SharedPreferences；API Key 走加密存储） */
+/**
+ * 应用设置（普通项 SharedPreferences；API Key 走加密存储）。
+ *
+ * §0.142：底层存储按 `applicationContext` 共享单例 [SharedStore]，消除
+ * `StarCamApplication` 后台预热、`MainActivity`、`StarCamApp` 与 `CameraScreen`
+ * 各自 new 实例导致的 Keystore 重复初始化与 `apiKeyCache` 内存缓存割裂。
+ */
 class SettingsRepository(context: Context) {
 
-    private val appContext = context.applicationContext
-    private val prefs = appContext
-        .getSharedPreferences("starcam_settings", Context.MODE_PRIVATE)
+    private val store: SharedStore = storeFor(context)
+    private val prefs: SharedPreferences get() = store.prefs
 
-    /**
-     * API Key 专用加密存储。
-     *
-     * API Key 是可计费凭据，MODE_PRIVATE 只挡其他应用，挡不住 root / 取证
-     * （AndroidManifest 已设 allowBackup=false，adb backup 这条路径已封）。
-     * 加密存储初始化失败时回退普通 prefs——宁可降级也不能让用户配不了 key。
-     */
     /**
      * §0.94：加密存储是否**真正**可用。
      *
-     * 加密初始化失败会静默回退明文 prefs（见 [securePrefs]）—— 这本身是刻意的
+     * 加密初始化失败会静默回退明文 prefs（见 [SharedStore.securePrefs]）—— 这本身是刻意的
      * 可用性取舍，但此前只在 logcat 留一行警告，**用户完全无感知**：可计费的
      * API Key 在降级设备上以明文落盘，与 README 的隐私承诺不符。
      * 设置页据此明示「当前为明文存储」。
      *
-     * 首次调用会触发 [securePrefs] 初始化（代价与任何一次 apiKey 读取相同，
-     * 且 §0.81 的预热线程通常已初始化过）—— 故建议在 IO 线程调用。
+     * 首次调用会触发加密存储初始化（§0.81 的后台预热线程通常已初始化过）—— 建议在 IO 线程调用。
      */
-    fun isApiKeyStorageEncrypted(): Boolean {
-        securePrefs
-        return secureOk
-    }
-
-    /** 加密 prefs 是否创建成功（由 [securePrefs] 初始化时写入） */
-    @Volatile
-    private var secureOk = false
-
-    private val securePrefs: SharedPreferences by lazy {
-        try {
-            val masterKey = MasterKey.Builder(appContext)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            val created = EncryptedSharedPreferences.create(
-                appContext,
-                "starcam_secure_settings",
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-            )
-            secureOk = true
-            created
-        } catch (e: Throwable) {
-            Log.w(TAG, "加密存储不可用，API Key 回退普通存储", e)
-            secureOk = false
-            prefs
-        }
-    }
-
-    /**
-     * §0.81：apiKey 的内存缓存。
-     *
-     * [securePrefs] 每次 `getString` 都要走一遍 AES-GCM 解密，而 [hasApiKey] 会在
-     * **首页组合期**被读（`StarCamApp` 的 `HomeScreen(hasApiKey = ...)`）。
-     * 冷启动首次读还要连带初始化 Android Keystore，实测 100ms~1s —— 全在主线程。
-     * 首次读后缓存住，后续零成本；写入时同步更新。
-     */
-    @Volatile
-    private var apiKeyCache: String? = null
+    fun isApiKeyStorageEncrypted(): Boolean = store.isApiKeyStorageEncrypted()
 
     /** astrometry.net API Key（到 https://nova.astrometry.net/api_help 免费注册获取） */
     var apiKey: String
-        get() {
-            apiKeyCache?.let { return it }
-            val fromSecure = securePrefs.getString(KEY_API_KEY, "") ?: ""
-            val value = if (fromSecure.isNotEmpty()) {
-                fromSecure
-            } else {
-                // 迁移：旧版本明文存的 key 读出来改写进加密存储，并清掉明文项
-                val legacy = prefs.getString(KEY_API_KEY, "") ?: ""
-                if (legacy.isNotEmpty() && securePrefs !== prefs) {
-                    securePrefs.edit().putString(KEY_API_KEY, legacy).apply()
-                    prefs.edit().remove(KEY_API_KEY).apply()
-                }
-                legacy
-            }
-            apiKeyCache = value
-            return value
-        }
-        set(value) {
-            val v = value.trim()
-            securePrefs.edit().putString(KEY_API_KEY, v).apply()
-            if (securePrefs !== prefs) prefs.edit().remove(KEY_API_KEY).apply()
-            apiKeyCache = v
-        }
+        get() = store.getApiKey()
+        set(value) = store.setApiKey(value)
 
     /** 服务器地址（默认 nova.astrometry.net，可改自建服务） */
     var serverUrl: String
@@ -185,6 +123,70 @@ class SettingsRepository(context: Context) {
         get() = prefs.getBoolean(KEY_PARALLEL_RACING, true)
         set(value) = prefs.edit().putBoolean(KEY_PARALLEL_RACING, value).apply()
 
+    private class SharedStore(private val appContext: Context) {
+        val prefs: SharedPreferences = appContext
+            .getSharedPreferences("starcam_settings", Context.MODE_PRIVATE)
+
+        @Volatile
+        private var secureOk = false
+
+        val securePrefs: SharedPreferences by lazy {
+            try {
+                val masterKey = MasterKey.Builder(appContext)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+                val created = EncryptedSharedPreferences.create(
+                    appContext,
+                    "starcam_secure_settings",
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                )
+                secureOk = true
+                created
+            } catch (e: Throwable) {
+                Log.w(TAG, "加密存储不可用，API Key 回退普通存储", e)
+                secureOk = false
+                prefs
+            }
+        }
+
+        /**
+         * §0.81：apiKey 的内存缓存（跨全进程所有 [SettingsRepository] 引用共享）。
+         */
+        @Volatile
+        private var apiKeyCache: String? = null
+
+        fun isApiKeyStorageEncrypted(): Boolean {
+            securePrefs
+            return secureOk
+        }
+
+        fun getApiKey(): String {
+            apiKeyCache?.let { return it }
+            val fromSecure = securePrefs.getString(KEY_API_KEY, "") ?: ""
+            val value = if (fromSecure.isNotEmpty()) {
+                fromSecure
+            } else {
+                val legacy = prefs.getString(KEY_API_KEY, "") ?: ""
+                if (legacy.isNotEmpty() && securePrefs !== prefs) {
+                    securePrefs.edit().putString(KEY_API_KEY, legacy).apply()
+                    prefs.edit().remove(KEY_API_KEY).apply()
+                }
+                legacy
+            }
+            apiKeyCache = value
+            return value
+        }
+
+        fun setApiKey(value: String) {
+            val v = value.trim()
+            securePrefs.edit().putString(KEY_API_KEY, v).apply()
+            if (securePrefs !== prefs) prefs.edit().remove(KEY_API_KEY).apply()
+            apiKeyCache = v
+        }
+    }
+
     companion object {
         private const val TAG = "SettingsRepository"
         private const val KEY_API_KEY = "api_key"
@@ -198,5 +200,16 @@ class SettingsRepository(context: Context) {
         private const val KEY_SOLVE_BUDGET = "solve_budget_sec"
         private const val KEY_PARALLEL_RACING = "parallel_engine_racing"
         const val DEFAULT_SERVER = "https://nova.astrometry.net/api"
+
+        private val stores = WeakHashMap<Context, SharedStore>()
+
+        private fun storeFor(context: Context): SharedStore {
+            val key = context.applicationContext ?: context
+            return synchronized(stores) {
+                stores.getOrPut(key) { SharedStore(key) }
+            }
+        }
+
+        fun getInstance(context: Context): SettingsRepository = SettingsRepository(context)
     }
 }
