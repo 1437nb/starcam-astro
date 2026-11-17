@@ -613,6 +613,7 @@ fun CameraScreen(
                         CameraSelector.LENS_FACING_BACK
                     }
                 },
+                arTargetLabel = arTarget?.label(com.starcam.astro.ui.theme.LocaleState.isEnglish),
             )
 
             // 提示信息与星空对焦提示
@@ -677,6 +678,8 @@ fun CameraScreen(
                 arTargetPicker = false
             },
             onDismiss = { arTargetPicker = false },
+            latDeg = pointingState.latDeg,
+            lonDeg = pointingState.lonDeg,
         )
     }
 }
