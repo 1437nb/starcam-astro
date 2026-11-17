@@ -8,6 +8,8 @@
 
 An **offline-first** Android app for astrophotography plate-solving and night sky identification. Capture or import night-sky photos to perform on-device blind plate-solving (RA, Dec, FOV, orientation, parity), overlay constellation lines, proper star names, Messier deep-sky objects, and real-time Sun/Moon/planet positions, or explore the sky with the sensor-driven AR live star map.
 
+**Local development v1.5.104 (versionCode 124, §0.143)** polishes UI and interaction flows across 20 Compose UI files in all four feature domains while keeping plate-solving algorithms, JNI signatures, and the rendering pipeline untouched: adds a 1-tap Night Vision Red & engine status strip on Home, a spherical Canvas Moon-phase disc in `TonightSkyCard`, and a 5-card Material 3 `SettingsScreen` with API Key visibility toggle; upgrades the Camera viewfinder with custom vector frosted HUD capsules, a collapsible one-handed Pro exposure drawer with 3 clamped astrophotography presets, and a searchable/filterable `ArTargetPicker`; refines `ResultScreen` with an adaptive aspect-ratio photo viewport (preserving zero-pixel WCS alignment), a 1-tap zoom-reset full-screen viewer HUD, and a 2×2 telemetry grid with clipboard coordinate copy; and unlocks immediate per-photo inspection while a batch is still running, adds a clear-all confirmation dialog in `HistoryScreen`, and upgrades the `GalleryScreen` floating multi-select bar and `OfflineDemoScreen` hero card — passing 52 test classes / 378 unit tests and `lintDebug` with 0 errors. [Validation report](docs/128-验证报告增补-§0.143-全应用交互与视觉体验精修v1.5.104.md)
+
 **Local development v1.5.103 (versionCode 123, §0.142)** completes a modular architecture refactoring across the app with zero changes to UI, rendering, JNI signatures, or plate-solving behavior: decomposes monoliths (`LocalStarMatcher` 3,227 → 958 lines, `CameraScreen` 1,686 → 682 lines, `ResultScreen` 1,582 → 352 lines, `StarSolver`, `StellarSolverNative`, and `HomeScreen`) into 17 cohesive modules, unifies `SettingsRepository` encrypted storage and `apiKey` cache sharing across instances, brings every handwritten logic/UI file under 1,000 lines, and passes all 63 test classes / 402 JVM tests. [Validation report](docs/127-验证报告增补-§0.142-App模块化架构与巨石文件解耦重构v1.5.103.md)
 
 **Local signed build v1.5.102 (versionCode 122, §0.141)** resolves 28 audited stability, concurrency, JNI, precision, WCS/EXIF, and Camera2/AR lifecycle defects, rebuilds the native solver library, and passes 62 test classes / 400 JVM tests plus release binary auditing. [Validation report](docs/126-验证报告增补-§0.141-全量缺陷审计与稳定性修复v1.5.102.md)
@@ -91,8 +93,8 @@ Latest release: **[v1.5.96](https://github.com/1437nb/starcam-astro/releases/tag
 │       ├── main/assets/offline_photos/      # 12 public night-sky demo photos
 │       ├── main/jniLibs/arm64-v8a/          # libstellar_solver.so native solver (rebuildable from source via tools/build_native.py)
 │       ├── main/cpp/astro_bridge.c          # JNI bridge source
-│       └── test/java/com/starcam/astro/     # Standard suite: 46 classes / 336 tests, including public-photo truth checks
-├── docs/                   # Architecture & 100+ validation reports (through §0.132)
+│       └── test/java/com/starcam/astro/     # Standard suite: 52 classes / 378 tests (full local suite: 63 classes / 402 tests)
+├── docs/                   # Architecture & 120+ validation reports (through §0.143)
 ├── tools/                  # Catalog generators, truth calibration & release scripts
 ├── fastlane/metadata/      # F-Droid store metadata (zh-CN / en-US descriptions, changelogs, icon, screenshots)
 ├── THIRD_PARTY_NOTICES.md  # Sources and licenses of bundled third-party code, data and media

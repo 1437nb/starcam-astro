@@ -5,14 +5,16 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-11-18（v1.5.103 全应用模块化架构与巨石文件解耦重构，完整 JVM 63 类 / 402 项全绿）
-**当前基线**：本地开发版 Debug v1.5.103（versionCode 123，§0.142 模块化架构重构，`StarCam-v1.5.103-modular-architecture-refactor-debug.apk` 已构建校验；最近本地签名 Release 为 v1.5.102 / versionCode 122，最近公开 Release 为 v1.5.96 / tag `v1.5.96`，均未自动推送）。
+**最后更新**：2026-11-18（v1.5.104 全应用交互与视觉体验精修，常规单测 52 类 / 378 项全绿，`lintDebug` 0 错误）
+**当前基线**：本地开发版 Debug v1.5.104（versionCode 124，§0.143 全应用交互与视觉体验精修，`StarCam-v1.5.104-polish-ui-and-interactions-debug.apk` 已构建校验；最近本地签名 Release 为 v1.5.102 / versionCode 122，最近公开 Release 为 v1.5.96 / tag `v1.5.96`，均未自动推送）。
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
-**构建环境**：Kotlin 编译、单元测试与 APK 打包均在本机完成。v1.5.103 完整 JVM 回归 63 类 / 402 项、0 失败 / 0 错误 / 0 跳过（含本机全部 11 个照片/FITS/窄场真值台与新增 `SettingsRepositoryTest`）；应用源码 `lintDebug` 0 错误 / 9 警告；原生求解库 `libstellar_solver.so` 保持 SHA-256 `7848e2118c0519b9...`（16 KB 对齐）。当前本机无在线 Android 真机/模拟器，ARM 真机实测待做。工具链与辅助机器见 `AGENTS.md` §0 与 §2。
+**构建环境**：Kotlin 编译、单元测试与 APK 打包均在本机完成。v1.5.104 常规单测（`-PskipPhotoTests=true`）52 类 / 378 项、0 失败 / 0 错误 / 0 跳过（`astro/**` 零改动；最近一次不带 `skipPhotoTests` 的完整本机 JVM 回归为 v1.5.103 的 63 类 / 402 项全绿）；应用源码 `lintDebug` 0 错误 / 9 警告；原生求解库 `libstellar_solver.so` 保持 SHA-256 `7848e2118c0519b9...`（16 KB 对齐）。当前本机无在线 Android 真机/模拟器，ARM 真机实测待做。工具链与辅助机器见 `AGENTS.md` §0 与 §2。
 
 ---
 
 ## 一、下一步（建议优先级，待开发者拍板）
+
+> **2026-11-18 v1.5.104 全应用交互与视觉体验精修（§0.143）**。在不改动任何底层求解算法（`astro/**`）、JNI 签名、AR 零分配画布与统一星图渲染器的前提下，对四大界面域共 20 个 Compose UI 文件执行交互与视觉精修：① 首页新增一键夜视红切换胶囊、引擎状态胶囊、可点 API Key 提示条与默认收起的使用说明，`TonightSkyCard` 新增 `28.dp` Canvas 球面月相盘，`SettingsScreen` 重构为 5 张 M3 分组卡片并补齐 API Key 显隐切换与日志清空确认；② 相机顶栏与指向 HUD 全面替换为惰性自定义矢量图标磨砂胶囊与等宽防抖数字，底部控制栏升级为单手可折叠快捷胶囊抽屉与 3 档安全钳制的 Pro 星空摄影预设（广角银河 / 暗夜深空 / 手持夜拍），`ArTargetPicker` 支持关键词检索、分类筛选与太阳系视差导航；③ 结果页画布升级为自适应视口比例（保持 WCS 投影 0 像素偏移）与图层预设胶囊，全屏查看器支持倍率徽章一键复位与后台重绘微距加载环，`ResultInfoPanel` 升级为 2×2 遥测卡片网格与一键复制坐标；④ `BatchScreen` 解锁即完即看（单张完成即可点入查看或重试）与总进度卡，`HistoryScreen` 增加清空二次确认弹窗与三栏遥测汇总卡，并精修 `GalleryScreen` 多选悬浮栏与 `OfflineDemoScreen` 顶部英雄卡。常规单测 52 类 / 378 项全绿，`lintDebug` 0 错误 / 9 警告，`assembleDebug`（23,859,406 字节，16 KB 对齐 + 8 个 FITS 索引逐字节一致）通过。下一步待连接 ARM 真机实测户外夜视红暗适应、相机 Pro 预设与触屏交互观感，按开发者明确指令决定是否跑新 Release 与推送 GitHub。详见 `docs/128-验证报告增补-§0.143-全应用交互与视觉体验精修v1.5.104.md`。
 
 > **2026-11-18 v1.5.103 全应用模块化架构与巨石文件解耦重构（§0.142）**。在严格保持现有 UI、渲染管线、JNI 导出签名与盲解算法行为逐位不变的前提下，完成四大模块群拆分与状态层收敛：① `LocalStarMatcher.kt`（3,227 → 958 行）拆出 `StarFieldGeometry` / `StarFieldDetector` / `TriangleStarIndex` / `StarFieldFitter` / `TriangleVoteScorer`，保留全部 `debug*` 反射槽位；② `CameraScreen.kt`（1,686 → 682 行）拆出 `CameraArOverlay`（保持 `remember` 零每帧分配）/ `CameraHudOverlay` / `CameraControlsPanel` / `CameraFrameAnalyzer`；③ `ResultScreen.kt`（1,582 → 352 行）拆出 `ResultLoadingAndError` / `ResultPhotoCanvas` / `SkyObjectInfoCard` / `ResultBitmapRenderer` / `ResultInfoPanel`；④ `StarSolver` 拆出 `SolverPlanning`，`StellarSolverNative` 拆出 `NativeSolverSupport`，`HomeScreen` 拆出 `StarCamBrandIcon`，并将 `SettingsRepository` 改为按 `applicationContext` 共享 `SharedStore`（消除跨实例 Keystore 重复解密与 `apiKeyCache` 割裂，附 `SettingsRepositoryTest`）。全仓手写逻辑与 UI 文件全部降至 1,000 行以内；不带 `skipPhotoTests` 的完整 JVM 回归 63 类 / 402 项全绿，`assembleDebug`（16 KB 对齐 + 8 个 FITS 索引逐字节一致）与 `lintDebug`（0 错误）均通过，并同步刷新 `docs/01-项目架构与代码地图.md`、`交接说明.md` 与中英文 `README`。下一步待连接 ARM 真机验收相机/AR/Pro AE 与原图识别，按开发者明确指令决定是否跑新 Release 与推送 GitHub。详见 `docs/127-验证报告增补-§0.142-App模块化架构与巨石文件解耦重构v1.5.103.md`。
 
@@ -134,6 +136,8 @@
     ③ ~~**`astrometry-local` 的从零复现脚本**~~（已在 §0.134/§0.135 由 `tools/build_native.py` 结清）。
 
 ## 二、最近完成
+
+- **2026-11-18（v1.5.104 / §0.143 全应用交互与视觉体验精修）**。在不触碰 `astro/**` 求解器、JNI 签名、AR 零分配画布与统一渲染管线的前提下，完成四大界面域 20 个 Compose UI 文件体验升级：首页快捷夜视红/引擎胶囊、Canvas 球面月相盘与 5 卡分组化设置页（`24560da`）；相机矢量磨砂胶囊 HUD、单手可折叠 Pro 星空摄影三档预设抽屉与可检索分类 `ArTargetPicker`（`5ab1d59`）；结果页自适应视口画布（保持 0 像素偏移）、全屏查看器倍率一键复位与 2×2 遥测卡片网格（`945ae83`）；批量识别单张即完即看与总进度卡、历史清空二次确认弹窗、原图相册多选悬浮栏及离线演示英雄卡（`b9236d5`），全量适配四主题与夜视红暗适应保护。常规单测（`-PskipPhotoTests=true`）52 类 / 378 项全绿，`lintDebug` 0 错误 / 9 警告，Debug APK（`StarCam-v1.5.104-polish-ui-and-interactions-debug.apk`，23,859,406 字节，SHA-256 `fcea168ad9306ef5c22773655e4a6383d85de73141a5c314dbd398cd23198b6f`）通过 8 个 FITS 索引逐字节校验与 `libstellar_solver.so` 16 KB 对齐检查（数据偏移 `13,271,040`）。详见 `docs/128-验证报告增补-§0.143-全应用交互与视觉体验精修v1.5.104.md`。
 
 - **2026-11-18（v1.5.103 / §0.142 模块化架构与巨石文件解耦重构）**。将 `LocalStarMatcher`（3,227 → 958 行）、`CameraScreen`（1,686 → 682 行）、`ResultScreen`（1,582 → 352 行）、`StarSolver`、`StellarSolverNative` 与 `HomeScreen` 按职责拆分为 17 个内聚模块，统一 `SettingsRepository` 按 `applicationContext` 共享 `SharedStore` 加密存储与 `apiKeyCache`（新增 `SettingsRepositoryTest`），全仓手写逻辑与 UI 文件全部降至 1,000 行以内。保持 UI、渲染管线、JNI 签名与盲解行为逐位不变；完整 JVM 63 类 / 402 项全绿，`lintDebug` 0 错误 / 9 警告，Debug APK（`StarCam-v1.5.103-modular-architecture-refactor-debug.apk`，SHA-256 `387ef13fdf8ccc4a6bcf6bfbb28d023c7dff2d8f73be1a300f1620b22253e6ac`）通过 8 个 FITS 索引逐字节校验与 `libstellar_solver.so` 16 KB 对齐检查。详见 `docs/127-验证报告增补-§0.142-App模块化架构与巨石文件解耦重构v1.5.103.md`。
 
