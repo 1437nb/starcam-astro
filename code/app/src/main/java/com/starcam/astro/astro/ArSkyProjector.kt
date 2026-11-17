@@ -77,14 +77,6 @@ object ArSkyProjector {
         )
     }
 
-    // 连线可见性索引（主线程逐帧复用，避免每帧分配）
-    private val visibleIdx = IntArray(StarCatalogData.stars.size)
-
-    // §0.78：project() 的 scratch（主线程逐帧专用，与 projectPoint 的 ptScratch 同理）
-    private val aScratch = FloatArray(9)
-    private val camScratch = FloatArray(3)
-    private val cScratch = FloatArray(3)
-
     // §0.54b：projectPoint 独立 scratch（与 project() 局部数组不共享，主线程专用，零每帧分配）
     private val ptScratchA = FloatArray(9)
     private val ptScratchC = FloatArray(3)
@@ -199,8 +191,8 @@ object ArSkyProjector {
         val cl = kotlin.math.cos(lstDeg * d).toFloat()
         val sp = kotlin.math.sin(latDeg * d).toFloat()
         val cp = kotlin.math.cos(latDeg * d).toFloat()
-        // §0.78：写入复用 scratch（原本每帧一个 floatArrayOf(9)）
-        val a = aScratch
+        // §0.78：写入容器专属复用 scratch（避免多实例/跨线程共享状态竞争）
+        val a = out.aScratch
         a[0] = -sl; a[1] = cl; a[2] = 0f             // E
         a[3] = -sp * cl; a[4] = -sp * sl; a[5] = cp  // N
         a[6] = cp * cl; a[7] = cp * sl; a[8] = sp    // U
@@ -227,7 +219,7 @@ object ArSkyProjector {
         var offX = 0f
         var offY = 0f
         if (correctionVec != null) {
-            val c = cScratch
+            val c = out.cScratch
             enuToCam(correctionVec, c)
             if (c[2] > 0.05f) {
                 offX = cx - (cx + f * c[0] / c[2])
@@ -236,7 +228,8 @@ object ArSkyProjector {
         }
 
         // 恒星
-        val cam = camScratch
+        val cam = out.camScratch
+        val visibleIdx = out.visibleIdx
         val nStars = entries.size
         for (i in 0 until nStars) {
             val o = i * 3
@@ -405,6 +398,10 @@ object ArSkyProjector {
         internal val conSumY = FloatArray(ArSkyProjector.conCodes.size)
         internal val conCount = IntArray(ArSkyProjector.conCodes.size)
         internal val solarPool = ArrayList<StarChartOverlay.Solar2D>(9)
+        internal val visibleIdx = IntArray(StarCatalogData.stars.size)
+        internal val aScratch = FloatArray(9)
+        internal val camScratch = FloatArray(3)
+        internal val cScratch = FloatArray(3)
 
         val stars = ArrayList<StarChartOverlay.Star2D>(256)
         val lines = ArrayList<StarChartOverlay.Line2D>(48)

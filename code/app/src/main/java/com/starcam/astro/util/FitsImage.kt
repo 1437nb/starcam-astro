@@ -59,13 +59,15 @@ object FitsImage {
         val siteLat: Double?,
         val siteLon: Double?,
         val objectName: String?,
+        /** 由 CD1_1..CD2_2 推导的像素尺度（度/像素），当无 CDELT1/2 时回退使用。 */
+        val cdScale: Double? = null,
     ) {
         /** 长边视场（度）；缺 WCS 时为 null。 */
         val fovDeg: Double?
             get() {
-                val px = cdelt1 ?: cdelt2 ?: return null
+                val px = cdelt1 ?: cdelt2 ?: cdScale ?: return null
                 val pxAbs = kotlin.math.abs(px)
-                return if (pxAbs > 0.0) pxAbs * maxOf(naxis1, naxis2) else null
+                return if (pxAbs > 0.0 && pxAbs.isFinite()) pxAbs * maxOf(naxis1, naxis2) else null
             }
     }
 
@@ -304,21 +306,34 @@ object FitsImage {
         }
     }
 
-    private fun metaOf(hdu: Hdu, primaryHdu: Hdu? = null): FitsMeta = FitsMeta(
-        bitpix = hdu.int("BITPIX"),
-        bscale = hdu.dbl("BSCALE") ?: primaryHdu?.dbl("BSCALE") ?: 1.0,
-        bzero = hdu.dbl("BZERO") ?: primaryHdu?.dbl("BZERO") ?: 0.0,
-        naxis1 = hdu.int("NAXIS1"),
-        naxis2 = hdu.int("NAXIS2"),
-        crval1 = hdu.dbl("CRVAL1") ?: primaryHdu?.dbl("CRVAL1"),
-        crval2 = hdu.dbl("CRVAL2") ?: primaryHdu?.dbl("CRVAL2"),
-        cdelt1 = hdu.dbl("CDELT1") ?: primaryHdu?.dbl("CDELT1"),
-        cdelt2 = hdu.dbl("CDELT2") ?: primaryHdu?.dbl("CDELT2"),
-        dateObs = hdu.str("DATE-OBS") ?: primaryHdu?.str("DATE-OBS"),
-        siteLat = hdu.dbl("SITELAT") ?: hdu.dbl("LATITUDE") ?: primaryHdu?.dbl("SITELAT") ?: primaryHdu?.dbl("LATITUDE"),
-        siteLon = hdu.dbl("SITELONG") ?: hdu.dbl("LONGITUD") ?: primaryHdu?.dbl("SITELONG") ?: primaryHdu?.dbl("LONGITUD"),
-        objectName = hdu.str("OBJECT") ?: primaryHdu?.str("OBJECT"),
-    )
+    private fun metaOf(hdu: Hdu, primaryHdu: Hdu? = null): FitsMeta {
+        fun hdrDbl(key: String) = hdu.dbl(key) ?: primaryHdu?.dbl(key)
+        val cd11 = hdrDbl("CD1_1")
+        val cd12 = hdrDbl("CD1_2")
+        val cd21 = hdrDbl("CD2_1")
+        val cd22 = hdrDbl("CD2_2")
+        val cdScale = when {
+            cd11 != null || cd21 != null -> kotlin.math.hypot(cd11 ?: 0.0, cd21 ?: 0.0).takeIf { it > 0.0 }
+            cd12 != null || cd22 != null -> kotlin.math.hypot(cd12 ?: 0.0, cd22 ?: 0.0).takeIf { it > 0.0 }
+            else -> null
+        }
+        return FitsMeta(
+            bitpix = hdu.int("BITPIX"),
+            bscale = hdrDbl("BSCALE") ?: 1.0,
+            bzero = hdrDbl("BZERO") ?: 0.0,
+            naxis1 = hdu.int("NAXIS1"),
+            naxis2 = hdu.int("NAXIS2"),
+            crval1 = hdrDbl("CRVAL1"),
+            crval2 = hdrDbl("CRVAL2"),
+            cdelt1 = hdrDbl("CDELT1"),
+            cdelt2 = hdrDbl("CDELT2"),
+            dateObs = hdu.str("DATE-OBS") ?: primaryHdu?.str("DATE-OBS"),
+            siteLat = hdu.dbl("SITELAT") ?: hdu.dbl("LATITUDE") ?: primaryHdu?.dbl("SITELAT") ?: primaryHdu?.dbl("LATITUDE"),
+            siteLon = hdu.dbl("SITELONG") ?: hdu.dbl("LONGITUD") ?: primaryHdu?.dbl("SITELONG") ?: primaryHdu?.dbl("LONGITUD"),
+            objectName = hdu.str("OBJECT") ?: primaryHdu?.str("OBJECT"),
+            cdScale = cdScale,
+        )
+    }
 
     // ------------------------------------------------------------------ 数据
 
@@ -356,20 +371,20 @@ object FitsImage {
         if (bytesPer <= 0 || dataStart + n.toLong() * bytesPer > bytes.size) return null
         val raw = FloatArray(n)
         val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.BIG_ENDIAN)
-        when (bitpix) {
-            8 -> for (i in 0 until n) raw[i] = (bytes[dataStart + i].toInt() and 0xFF).toFloat()
-            16 -> for (i in 0 until n) raw[i] = bb.getShort(dataStart + i * 2).toFloat()
-            32 -> for (i in 0 until n) raw[i] = bb.getInt(dataStart + i * 4).toFloat()
-            -32 -> for (i in 0 until n) raw[i] = bb.getFloat(dataStart + i * 4)
-            -64 -> for (i in 0 until n) raw[i] = bb.getDouble(dataStart + i * 8).toFloat()
-            else -> return null
-        }
         val bscale = hdu.dbl("BSCALE") ?: 1.0
         val bzero = hdu.dbl("BZERO") ?: 0.0
-        if (bscale != 1.0 || bzero != 0.0) {
-            val s = bscale.toFloat()
-            val z = bzero.toFloat()
-            for (i in 0 until n) raw[i] = z + s * raw[i]
+        val needScale = bscale != 1.0 || bzero != 0.0
+        for (i in 0 until n) {
+            var vDouble = when (bitpix) {
+                8 -> (bytes[dataStart + i].toInt() and 0xFF).toDouble()
+                16 -> bb.getShort(dataStart + i * 2).toDouble()
+                32 -> bb.getInt(dataStart + i * 4).toDouble()
+                -32 -> bb.getFloat(dataStart + i * 4).toDouble()
+                -64 -> bb.getDouble(dataStart + i * 8)
+                else -> return null
+            }
+            if (needScale) vDouble = bzero + bscale * vDouble
+            raw[i] = if (vDouble.isFinite()) vDouble.toFloat() else 0f
         }
         // 行序翻转：FITS 自下而上，位图自上而下（与 convert_narrowfield.py 一致）
         val flipped = FloatArray(n)

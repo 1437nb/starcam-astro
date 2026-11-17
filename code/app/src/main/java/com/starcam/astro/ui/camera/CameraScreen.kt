@@ -310,13 +310,8 @@ fun CameraScreen(
             orientationTracker.startTracking()
         }
         onDispose {
-            // §0.77：先解绑相机，再收线程池 —— 顺序不能反。分析流若还在投递而
-            // executor 已 shutdown，会命中 RejectedExecutionException，且未被回收的
-            // ImageProxy 可能让 KEEP_ONLY_LATEST 的分析流挂死、之后不再出帧。
-            cameraProviderRef.get()?.unbindAll()
             // §0.77：Pro 模式注入的是「AE 关 + 手动 ISO + 快门」，快门最长可到 30s。
-            // 不清除就离开，这套参数会留在相机设备上 —— 用户下次进来看到黑屏/极暗。
-            // 这里显式恢复自动 AE，与 proMode 切回 false 时的处理保持一致。
+            // 必须先清除再 unbindAll，否则相机解绑后 Camera2CameraControl 无法下发清除选项。
             if (proMode) {
                 cameraControl?.let { ctl ->
                     try {
@@ -326,6 +321,10 @@ fun CameraScreen(
                     }
                 }
             }
+            // §0.77：先解绑相机，再收线程池 —— 顺序不能反。分析流若还在投递而
+            // executor 已 shutdown，会命中 RejectedExecutionException，且未被回收的
+            // ImageProxy 可能让 KEEP_ONLY_LATEST 的分析流挂死、之后不再出帧。
+            cameraProviderRef.get()?.unbindAll()
             orientationTracker.stopTracking()
             locationHelper.stopListening()
             analysisExecutor.shutdown()
@@ -435,6 +434,9 @@ fun CameraScreen(
                     val frame = oriented ?: return@setAnalyzer
                     val w = frame.width
                     val h = frame.height
+                    // Capture sensor pose and timestamp at frame arrival, before star detection/matching latency.
+                    val framePointing = latestPointing.get()
+                    val frameTimeSec = System.currentTimeMillis() / 1000L
                     val hint = if (settings.sensorAssistedPointing) orientationTracker.createPointingHint() else null
                     val stars = LocalStarMatcher.detectStars(frame, 60)
                     // §0.77：预览路径关闭深域兜底。主摄广角（≈67°~77°）本就落在
@@ -450,14 +452,12 @@ fun CameraScreen(
                             // §0.56：真解视场与航向偏角校准（替代 2D 屏幕平移）
                             // 1. 真实视场自动标定（Ground Truth 像素比例尺）
                             val solvedFov = res.solve.fieldWidthDeg
-                            // 2. 真实航向残差：通过当前时刻 LST 与纬度将 (ra, dec) 转换为真地平真方位 azSolve
-                            val nowSec = System.currentTimeMillis() / 1000L
-                            val pCur = orientationTracker.currentPointing
-                            val latVal = pCur.latDeg
-                            val lonVal = pCur.lonDeg
+                            // 2. 真实航向残差：通过曝光帧时刻 LST 与纬度将 (ra, dec) 转换为真地平真方位 azSolve
+                            val latVal = framePointing.latDeg
+                            val lonVal = framePointing.lonDeg
                             var deltaAz = 0.0
-                            if (latVal != null && lonVal != null) {
-                                val jdNow = com.starcam.astro.astro.SkyEphemeris.unixSecondsToJd(nowSec.toDouble())
+                            if (latVal != null && lonVal != null && framePointing.hasOrientation) {
+                                val jdNow = com.starcam.astro.astro.SkyEphemeris.unixSecondsToJd(frameTimeSec.toDouble())
                                 val lstNow = com.starcam.astro.astro.SkyEphemeris.lstDeg(jdNow, lonVal)
                                 val d2r = Math.PI / 180.0
                                 val sl = kotlin.math.sin(lstNow * d2r)
@@ -472,7 +472,7 @@ fun CameraScreen(
                                 val n = -sp * cl * vx - sp * sl * vy + cp * vz
                                 var azSolve = Math.toDegrees(kotlin.math.atan2(e, n))
                                 if (azSolve < 0.0) azSolve += 360.0
-                                deltaAz = azSolve - pCur.azDeg
+                                deltaAz = azSolve - framePointing.azDeg
                                 while (deltaAz > 180.0) deltaAz -= 360.0
                                 while (deltaAz < -180.0) deltaAz += 360.0
                             }
@@ -603,6 +603,15 @@ fun CameraScreen(
     LaunchedEffect(evIndex, cameraControl) {
         val control = cameraControl ?: return@LaunchedEffect
         control.setExposureCompensationIndex(evIndex.coerceIn(-maxEvIndex, maxEvIndex))
+    }
+
+    LaunchedEffect(flashOn, imageCapture, facing) {
+        val cap = imageCapture ?: return@LaunchedEffect
+        cap.flashMode = if (flashOn && facing == CameraSelector.LENS_FACING_BACK) {
+            ImageCapture.FLASH_MODE_ON
+        } else {
+            ImageCapture.FLASH_MODE_OFF
+        }
     }
 
     // §0.50：Pro 手动曝光——Camera2 运行时注入（AE off + ISO + 快门），无需重绑
@@ -1181,6 +1190,7 @@ fun CameraScreen(
                     IconButton(
                         onClick = {
                             fovUserOverridden = false
+                            proMode = false
                             facing = if (facing == CameraSelector.LENS_FACING_BACK) {
                                 CameraSelector.LENS_FACING_FRONT
                             } else {

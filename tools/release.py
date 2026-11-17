@@ -313,13 +313,13 @@ def main() -> None:
         print("\n[dry-run] 未修改任何文件")
         return
 
-    bump_version(args.version, args.desc, dry=False)
-
     if args.skip_build:
+        bump_version(args.version, args.desc, dry=False)
         print("\n[skip-build] 版本号已改，未构建。别忘了提交 build.gradle.kts")
         return
 
     preflight()
+    bump_version(args.version, args.desc, dry=False)
     apk = build(args.desc)
     digest = verify_signature(apk)
     dst, sha = archive(apk)

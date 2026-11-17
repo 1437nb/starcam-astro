@@ -29,8 +29,6 @@ internal object FitsPixels {
         if (outputCount * 4L > available.coerceAtLeast(0L) / 4L) throw ImageMemoryLimitException()
         val buffer = ByteArray(65536)
         val values = ByteBuffer.wrap(buffer).order(ByteOrder.BIG_ENDIAN)
-        val scale = bscale.toFloat()
-        val zero = bzero.toFloat()
         fun scan(topDown: Boolean = false, visit: PixelVisitor) {
             for (y in 0 until h) {
                 checkActive()
@@ -43,14 +41,15 @@ internal object FitsPixels {
                     file.readFully(buffer, 0, n * bytesPer)
                     values.position(0)
                     repeat(n) { dx ->
-                        var v = when (bitpix) {
-                            8 -> (values.get().toInt() and 255).toFloat()
-                            16 -> values.short.toFloat()
-                            32 -> values.int.toFloat()
-                            -32 -> values.float
-                            else -> values.double.toFloat()
+                        var vDouble = when (bitpix) {
+                            8 -> (values.get().toInt() and 255).toDouble()
+                            16 -> values.short.toDouble()
+                            32 -> values.int.toDouble()
+                            -32 -> values.float.toDouble()
+                            else -> values.double
                         }
-                        if (bscale != 1.0 || bzero != 0.0) v = zero + scale * v
+                        if (bscale != 1.0 || bzero != 0.0) vDouble = bzero + bscale * vDouble
+                        var v = if (vDouble.isFinite()) vDouble.toFloat() else 0f
                         if (!v.isFinite()) v = 0f
                         visit.accept(x + dx, y, v)
                     }

@@ -35,6 +35,7 @@ class PhotoImportViewModel(application: Application) : AndroidViewModel(applicat
         private set
     private var task: Job? = null
     private var generation = 0L
+    private val unconsumedFiles = ArrayList<File>()
 
     fun importPhotos(uris: List<Uri>) {
         if (uris.isEmpty() || state.running) return
@@ -43,9 +44,18 @@ class PhotoImportViewModel(application: Application) : AndroidViewModel(applicat
             state = PhotoImportState(finished = true, overLimit = true)
             return
         }
+        val prevTask = task
+        prevTask?.cancel()
         val inputs = uris.toList()
         state = PhotoImportState(running = true, total = inputs.size)
         task = viewModelScope.launch {
+            prevTask?.join()
+            val staleFiles = synchronized(unconsumedFiles) {
+                unconsumedFiles.toList().also { unconsumedFiles.clear() }
+            }
+            if (staleFiles.isNotEmpty()) {
+                withContext(Dispatchers.IO) { staleFiles.forEach { it.delete() } }
+            }
             val ownedFiles = ArrayList<File>()
             var delivered = false
             try {
@@ -64,6 +74,10 @@ class PhotoImportViewModel(application: Application) : AndroidViewModel(applicat
                     )
                 }
                 if (run != generation) return@launch
+                synchronized(unconsumedFiles) {
+                    unconsumedFiles.clear()
+                    unconsumedFiles.addAll(ownedFiles)
+                }
                 state = state.copy(running = false, finished = true, paths = ownedFiles.map { it.absolutePath })
                 delivered = true
             } catch (e: CancellationException) {
@@ -84,8 +98,27 @@ class PhotoImportViewModel(application: Application) : AndroidViewModel(applicat
     fun cancel() {
         generation++
         task?.cancel()
+        val staleFiles = synchronized(unconsumedFiles) {
+            unconsumedFiles.toList().also { unconsumedFiles.clear() }
+        }
+        if (staleFiles.isNotEmpty()) {
+            viewModelScope.launch(Dispatchers.IO) { staleFiles.forEach { it.delete() } }
+        }
         state = PhotoImportState()
     }
 
-    fun consumeResult() { state = PhotoImportState() }
+    fun consumeResult() {
+        synchronized(unconsumedFiles) { unconsumedFiles.clear() }
+        state = PhotoImportState()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        generation++
+        task?.cancel()
+        val staleFiles = synchronized(unconsumedFiles) {
+            unconsumedFiles.toList().also { unconsumedFiles.clear() }
+        }
+        staleFiles.forEach { runCatching { it.delete() } }
+    }
 }

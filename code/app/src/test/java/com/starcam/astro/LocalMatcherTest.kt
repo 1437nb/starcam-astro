@@ -347,4 +347,38 @@ class LocalMatcherTest {
             assertTrue("debugPhaseTimings 缺少字段 $key: $timings", timings!!.contains(key))
         }
     }
+
+    @Test
+    fun `detectStarsGray 在 NaN 像素与大面积亮块下不崩溃`() {
+        val w = 128
+        val h = 128
+        val gray = FloatArray(w * h) { 10f }
+        gray[10 * w + 10] = Float.NaN
+        gray[10 * w + 11] = Float.POSITIVE_INFINITY
+        // 大片亮区触发连通域上限（超过 64*64 时必须安全中止而不是越界）
+        for (y in 20 until 100) {
+            for (x in 20 until 100) {
+                gray[y * w + x] = 255f
+            }
+        }
+        val stars = LocalStarMatcher.detectStarsGray(w, h, gray)
+        assertTrue(stars.isEmpty())
+    }
+
+    @Test
+    fun `近极区星点在跨 RA 缝隙与高赤纬下仍能匹配`() {
+        // 1) 直接验证网格近邻查询：Polaris (HIP 11767) 位于 RA≈37.95°, Dec≈89.26°；
+        //    从 RA=359.0°, Dec=89.20°（RA 差近 39°，但球面角距仅 ~0.5°）以 tol=1.5° 查询必须命中。
+        val nearPolaris = LocalStarMatcher.nearestStarInGrid(ra = 359.0, dec = 89.20, tolDeg = 1.5)
+        assertNotNull("高赤纬跨 RA 网格缝隙应能找到北极星", nearPolaris)
+        assertEquals(11767, nearPolaris!!.hip)
+
+        // 2) 端到端宽场近极区天区匹配（覆盖足够多的 mag<=4 亮星）
+        val region = SkyRegion(name = "NorthPoleWide", raDeg = 200.0, decDeg = 80.0, fovDeg = 60.0)
+        val gray = renderStarField(region)
+        val detected = LocalStarMatcher.detectStarsGray(W, H, gray)
+        val match = LocalStarMatcher.match(detected, W, H)
+        assertNotNull("近极区合成星场应成功匹配", match)
+        assertTrue(match!!.solve.decDeg > 70.0)
+    }
 }

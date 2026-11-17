@@ -77,4 +77,18 @@ class SolveTokenTest {
         assertNotNull(demoFov)
         assertTrue(demoFov!! in 75.0..77.0)
     }
+
+    @Test
+    fun token_exceedBudget_setsFlagAndThrowsSolveBudgetExceeded() {
+        val token = SolveToken(timeoutMillis = 0L)
+        assertTrue(token.isBudgetExceeded)
+        assertTrue(token.isCancelled)
+
+        try {
+            token.check()
+            fail("Expected SolveBudgetExceeded")
+        } catch (e: Exception) {
+            assertTrue(e is SolveBudgetExceeded)
+        }
+    }
 }

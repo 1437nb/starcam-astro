@@ -122,11 +122,26 @@ object ExifPriorsReader {
                 exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL),
             ),
         )
-        val lat = parseDms(exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE))?.let {
-            if (exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF) == "S") -it else it
-        }
-        val lon = parseDms(exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE))?.let {
-            if (exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF) == "W") -it else it
+        var lat = parseDms(exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE))?.let {
+            val ref = exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF)
+            when (ref) {
+                "S" -> -kotlin.math.abs(it)
+                "N" -> kotlin.math.abs(it)
+                else -> it
+            }
+        }?.takeIf { it in -90.0..90.0 }
+        var lon = parseDms(exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE))?.let {
+            val ref = exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF)
+            when (ref) {
+                "W" -> -kotlin.math.abs(it)
+                "E" -> kotlin.math.abs(it)
+                else -> it
+            }
+        }?.takeIf { it in -180.0..180.0 }
+        // Null Island (0, 0) in camera EXIF indicates uninitialized GPS hardware.
+        if (lat == 0.0 && lon == 0.0) {
+            lat = null
+            lon = null
         }
 
         // GPS 时间（UTC）优先，其次 DateTimeOriginal（本地时区）
@@ -159,7 +174,7 @@ object ExifPriorsReader {
     }
 
     /** 解析 EXIF 分数格式的度分秒（"39/1,54/1,32/1" 或 "39,54.5"） */
-    private fun parseDms(raw: String?): Double? {
+    internal fun parseDms(raw: String?): Double? {
         if (raw.isNullOrBlank()) return null
         val parts = raw.split(",")
         if (parts.size < 2 || parts.size > 3) return null
@@ -175,8 +190,11 @@ object ExifPriorsReader {
         val deg = frac(parts[0])
         val min = if (parts.size > 1) frac(parts[1]) else 0.0
         val sec = if (parts.size > 2) frac(parts[2]) else 0.0
-        val dms = deg + min / 60.0 + sec / 3600.0
-        if (!dms.isFinite() || dms !in -540.0..540.0) return null
+        if (!deg.isFinite() || !min.isFinite() || !sec.isFinite()) return null
+        if (min < 0.0 || sec < 0.0) return null
+        val sign = if (deg < 0.0) -1.0 else 1.0
+        val dms = sign * (kotlin.math.abs(deg) + min / 60.0 + sec / 3600.0)
+        if (!dms.isFinite() || dms !in -180.0..180.0) return null
         return dms
     }
 

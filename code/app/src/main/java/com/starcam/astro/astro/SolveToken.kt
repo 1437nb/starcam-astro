@@ -26,7 +26,11 @@ class SolveToken(
 
     /** JNI also polls this getter; deadline uses a monotonic clock. */
     val isCancelled: Boolean
-        get() = cancelled || parent?.isCancelled == true ||
+        get() = cancelled || parent?.isCancelled == true || isBudgetExceeded
+
+    /** 是否已触及当前或父令牌的时间预算上限。 */
+    val isBudgetExceeded: Boolean
+        get() = parent?.isBudgetExceeded == true ||
             budgetNanos?.let { System.nanoTime() - startedNanos >= it } == true
 
     /** 请求取消求解 */
@@ -61,6 +65,7 @@ internal suspend fun <T> withSolveCancellation(token: SolveToken, action: suspen
             while (isActive) {
                 try { token.check() }
                 catch (e: CancellationException) { operation.cancel(e); return@launch }
+                catch (_: SolveBudgetExceeded) { return@launch }
                 delay(20)
             }
         }

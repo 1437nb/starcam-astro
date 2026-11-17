@@ -218,9 +218,12 @@ fun ResultScreen(
         onBack()
     }
 
+    val activity = LocalContext.current as? android.app.Activity
     androidx.compose.runtime.DisposableEffect(imagePath, demoRegion, cachedSolve, cachedDisplayPath) {
         onDispose {
-            viewModel.onLeaveScreen()
+            if (activity?.isChangingConfigurations != true) {
+                viewModel.onLeaveScreen()
+            }
         }
     }
 
@@ -236,9 +239,10 @@ fun ResultScreen(
     }
 
     val state = viewModel.state
+    var hasRetried by remember(imagePath, demoRegion, cachedSolve, cachedDisplayPath) { mutableStateOf(false) }
     LaunchedEffect(state) {
         val success = state as? ResultUiState.Success
-        if (success != null && !success.isDemo && cachedSolve == null) onSolveCompleted(success)
+        if (success != null && !success.isDemo && (cachedSolve == null || hasRetried)) onSolveCompleted(success)
     }
     val detectedStars = viewModel.detectedStars
     val detectedStarTotal = viewModel.detectedStarTotal
@@ -293,7 +297,10 @@ fun ResultScreen(
                     modifier = Modifier.padding(padding),
                     layerFlags = layerFlags,
                     onFlagsChange = { layerFlags = it },
-                    onRetry = { viewModel.retry(imagePath, demoRegion, settings) },
+                    onRetry = {
+                        hasRetried = true
+                        viewModel.retry(imagePath, demoRegion, settings)
+                    },
                     onRetake = onRetake,
                     onBack = onBack,
                     onOpenViewer = { orig, anno ->
@@ -314,7 +321,10 @@ fun ResultScreen(
                     diagnostics = s.diagnostics,
                     elapsedMs = s.elapsedMs,
                     modifier = Modifier.padding(padding),
-                    onRetry = { viewModel.retry(imagePath, demoRegion, settings) },
+                    onRetry = {
+                        hasRetried = true
+                        viewModel.retry(imagePath, demoRegion, settings)
+                    },
                     onBack = onBack,
                     onOpenViewer = { orig, anno ->
                         viewerRender = null
@@ -327,7 +337,11 @@ fun ResultScreen(
         viewer?.let { (orig, anno, title) ->
             ZoomableImageViewer(
                 orig, anno, title,
-                onClose = { viewer = null },
+                onClose = {
+                    viewer = null
+                    viewerRender = null
+                    viewerHit = null
+                },
                 renderAnnotated = viewerRender,
                 initialFlags = layerFlags,
                 onFlagsChange = { layerFlags = it },

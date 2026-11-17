@@ -100,6 +100,9 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
             state = ResultUiState.Loading(null, I18n.Result.preparingPhoto)
             detectedStars = emptyList()
             detectedStarTotal = 0
+            var errorDisplay: Bitmap? = null
+            var diag: SolveDiagnostics? = null
+            var solveStartedAt = 0L
 
             try {
                 if (cachedSolve != null) {
@@ -108,7 +111,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                         val cached = cachedDisplayPath?.let { ImageUtils.decodeSampledBitmap(it, 2200, check) }
                         cached ?: ImageUtils.decodeSampledBitmap(imagePath, 2200, check)?.let {
                             // Rebuild the same EXIF basis as the online upload after retry/history.
-                            if (cachedSolve.subId != null || cachedEngine?.contains("nova.astrometry.net", true) == true) {
+                            if (cachedSolve.subId != null || isOnlineEngineHint(cachedEngine)) {
                                 ImageUtils.rotateByExif(imagePath, it)
                             } else it
                         }
@@ -163,9 +166,9 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                     state = ResultUiState.Error(I18n.Result.cannotReadImage)
                     return@launch
                 }
+                errorDisplay = display
                 state = ResultUiState.Loading(display, I18n.Result.preparingSolve, budgetSec = settings.solveBudgetSec)
-                var diag: SolveDiagnostics? = null
-                val t0 = System.currentTimeMillis()
+                solveStartedAt = System.currentTimeMillis()
 
                 val result = StarSolver.solve(
                     context = getApplication(),
@@ -189,7 +192,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                         detectedStarTotal = total
                     },
                 )
-                val elapsedMs = System.currentTimeMillis() - t0
+                val elapsedMs = System.currentTimeMillis() - solveStartedAt
 
                 if (result == null) {
                     withContext(Dispatchers.IO) {
@@ -217,12 +220,25 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
             } catch (e: CancellationException) {
                 // 取消时不弹出错误对话框，静默中止
             } catch (e: Throwable) {
-                state = ResultUiState.Error(when (e) {
-                    is OutOfMemoryError -> I18n.Result.imageMemoryLimit
-                    is com.starcam.astro.util.ImageMemoryLimitException -> I18n.Result.imageMemoryLimit
-                    is com.starcam.astro.astro.SolveBudgetExceeded -> I18n.Result.timeBudgetExceeded
-                    else -> if (LocaleState.isEnglish) "Solving failed: ${e.message}" else "求解异常：${e.message}"
-                })
+                val elapsedMs = if (solveStartedAt > 0L) System.currentTimeMillis() - solveStartedAt else 0L
+                when (e) {
+                    is OutOfMemoryError,
+                    is com.starcam.astro.util.ImageMemoryLimitException -> {
+                        state = ResultUiState.Error(I18n.Result.imageMemoryLimit)
+                    }
+                    is com.starcam.astro.astro.SolveBudgetExceeded -> {
+                        if (solveStartedAt > 0L) {
+                            withContext(Dispatchers.IO) {
+                                StatsStore.record(getApplication(), ok = false, engine = "无", ms = elapsedMs)
+                            }
+                        }
+                        state = ResultUiState.Error(I18n.Result.timeBudgetExceeded, errorDisplay, diag, elapsedMs)
+                    }
+                    else -> {
+                        val msg = if (LocaleState.isEnglish) "Solving failed: ${e.message}" else "求解异常：${e.message}"
+                        state = ResultUiState.Error(msg, errorDisplay, diag, elapsedMs)
+                    }
+                }
             }
         }
     }
@@ -320,11 +336,19 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
             exportSourcePath = imagePath,
             solveUsesUprightPixels = when {
                 solve.subId != null || engine == SolveEngine.ONLINE_NOVA -> true
-                cachedEngineHint?.contains("nova.astrometry.net", ignoreCase = true) == true -> true
+                isOnlineEngineHint(cachedEngineHint) -> true
                 cachedEngineHint == "批量导出" -> null
                 else -> false
             },
         )
+    }
+
+    private fun isOnlineEngineHint(hint: String?): Boolean {
+        val h = hint ?: return false
+        return h.contains("nova.astrometry.net", ignoreCase = true) ||
+            h.contains("在线识别") ||
+            h.contains("Online API", ignoreCase = true) ||
+            h.contains("ONLINE_NOVA", ignoreCase = true)
     }
 
     /** 取消当前后台求解任务并释放令牌 */

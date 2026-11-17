@@ -131,13 +131,26 @@ object ImageUtils {
     }
 
     /** 压缩为适合上传的 JPEG（最长边 [maxDim]，质量 [quality]），输出到 [out] */
-    fun compressForUpload(path: String, out: File, maxDim: Int = 2000, quality: Int = 88): File? {
-        val bmp = decodeSampledBitmap(path, maxDim) ?: return null
-        val upright = rotateByExif(path, bmp)
-        FileOutputStream(out).use { upright.compress(Bitmap.CompressFormat.JPEG, quality, it) }
-        if (upright !== bmp) upright.recycle()
-        bmp.recycle()
-        return out
+    fun compressForUpload(
+        path: String,
+        out: File,
+        maxDim: Int = 2000,
+        quality: Int = 88,
+        checkActive: () -> Unit = {},
+    ): File? {
+        checkActive()
+        val bmp = decodeSampledBitmap(path, maxDim, checkActive) ?: return null
+        var upright: Bitmap? = null
+        try {
+            checkActive()
+            upright = rotateByExif(path, bmp)
+            checkActive()
+            FileOutputStream(out).use { upright.compress(Bitmap.CompressFormat.JPEG, quality, it) }
+            return out
+        } finally {
+            if (upright != null && upright !== bmp && !upright.isRecycled) upright.recycle()
+            if (!bmp.isRecycled) bmp.recycle()
+        }
     }
 
     /** 把相册选择的 URI 拷贝到应用缓存目录 */
@@ -238,30 +251,43 @@ object ImageUtils {
                 val uri = context.contentResolver.insert(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values,
                 ) ?: return null
-                val wrote = context.contentResolver.openOutputStream(uri)?.use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
-                } ?: false
-                if (!wrote) {
-                    context.contentResolver.delete(uri, null, null)
-                    return null
+                var committed = false
+                try {
+                    val wrote = context.contentResolver.openOutputStream(uri)?.use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                    } ?: false
+                    if (!wrote) {
+                        return null
+                    }
+                    context.contentResolver.update(
+                        uri,
+                        ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
+                        null,
+                        null,
+                    )
+                    committed = true
+                    "相册 Pictures/StarCam/$name"
+                } finally {
+                    if (!committed) {
+                        runCatching { context.contentResolver.delete(uri, null, null) }
+                    }
                 }
-                context.contentResolver.update(
-                    uri,
-                    ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
-                    null,
-                    null,
-                )
-                "相册 Pictures/StarCam/$name"
             } else {
                 val dir = File(
                     context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "StarCam",
                 ).apply { mkdirs() }
                 val file = File(dir, name)
-                val wrote = FileOutputStream(file).use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                var committed = false
+                try {
+                    val wrote = FileOutputStream(file).use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                    }
+                    if (!wrote) return null
+                    committed = true
+                    "应用目录 Pictures/StarCam/$name"
+                } finally {
+                    if (!committed) runCatching { file.delete() }
                 }
-                if (!wrote) return null
-                "应用目录 Pictures/StarCam/$name"
             }
         } catch (e: Exception) {
             null

@@ -721,13 +721,19 @@ object LocalStarMatcher {
                             val ni = ny * width + nx
                             if (!visited[ni] && sub[ni] > thr) {
                                 visited[ni] = true
+                                if (sp >= stackX.size) {
+                                    overflow = true
+                                    break
+                                }
                                 stackX[sp] = nx
                                 stackY[sp] = ny
                                 sp++
                             }
                         }
                     }
+                    if (overflow) break
                 }
+                if (overflow) break
             }
             if (overflow || count < 2) continue
             if (maxV > 250f && (maxX - minX) * (maxY - minY) > 64) continue // 饱和大斑（路灯等）
@@ -810,22 +816,28 @@ object LocalStarMatcher {
     private fun boxBlur(src: FloatArray, w: Int, h: Int, r: Int): FloatArray {
         val tmp = FloatArray(w * h)
         val out = FloatArray(w * h)
-        val ws = (2 * r + 1).toFloat()
+        val ws = (2 * r + 1).toDouble()
+        val line = DoubleArray(maxOf(w, h))
         for (y in 0 until h) {
             val row = y * w
-            var acc = 0f
-            for (x in -r..r) acc += src[row + x.coerceIn(0, w - 1)]
             for (x in 0 until w) {
-                tmp[row + x] = acc / ws
-                acc += src[row + (x + r + 1).coerceIn(0, w - 1)] - src[row + (x - r).coerceIn(0, w - 1)]
+                val v = src[row + x]
+                line[x] = if (v.isFinite()) v.toDouble() else 0.0
+            }
+            var acc = 0.0
+            for (x in -r..r) acc += line[x.coerceIn(0, w - 1)]
+            for (x in 0 until w) {
+                tmp[row + x] = (acc / ws).toFloat()
+                acc += line[(x + r + 1).coerceIn(0, w - 1)] - line[(x - r).coerceIn(0, w - 1)]
             }
         }
         for (x in 0 until w) {
-            var acc = 0f
-            for (y in -r..r) acc += tmp[y.coerceIn(0, h - 1) * w + x]
+            for (y in 0 until h) line[y] = tmp[y * w + x].toDouble()
+            var acc = 0.0
+            for (y in -r..r) acc += line[y.coerceIn(0, h - 1)]
             for (y in 0 until h) {
-                out[y * w + x] = acc / ws
-                acc += tmp[(y + r + 1).coerceIn(0, h - 1) * w + x] - tmp[(y - r).coerceIn(0, h - 1) * w + x]
+                out[y * w + x] = (acc / ws).toFloat()
+                acc += line[(y + r + 1).coerceIn(0, h - 1)] - line[(y - r).coerceIn(0, h - 1)]
             }
         }
         return out
@@ -2511,22 +2523,33 @@ object LocalStarMatcher {
     }
 
     /** (ra, dec) 附近 [tolDeg] 内最近的星表星，无则 null */
-    private fun nearestStarInGrid(
+    internal fun nearestStarInGrid(
         ra: Double,
         dec: Double,
         tolDeg: Double,
         grid: Map<Int, List<StarEntry>> = catGrid(),
     ): StarEntry? {
-        val col0 = ((((ra - 0.5) % 360.0) + 360.0) % 360.0 / 5.0).toInt()
-        val col1 = ((((ra + 0.5) % 360.0) + 360.0) % 360.0 / 5.0).toInt()
-        val row0 = ((dec - 0.5 + 90.0) / 5.0).toInt().coerceIn(0, 35)
-        val row1 = ((dec + 0.5 + 90.0) / 5.0).toInt().coerceIn(0, 35)
+        val marginDeg = maxOf(0.5, tolDeg)
+        val row0 = ((dec - marginDeg + 90.0) / 5.0).toInt().coerceIn(0, 35)
+        val row1 = ((dec + marginDeg + 90.0) / 5.0).toInt().coerceIn(0, 35)
+        val nearPole = abs(dec) + marginDeg >= 90.0
+        val cols = if (nearPole) {
+            IntArray(72) { it }
+        } else {
+            val cosDec = cos(dec * PI / 180.0).coerceAtLeast(0.05)
+            val raHalfSpan = (marginDeg / cosDec).coerceAtMost(180.0)
+            val colSpan = (raHalfSpan / 5.0).toInt() + 1
+            val cCenter = ((((ra % 360.0) + 360.0) % 360.0) / 5.0).toInt().coerceIn(0, 71)
+            val cSet = HashSet<Int>(minOf(72, colSpan * 2 + 1))
+            for (dc in -colSpan..colSpan) {
+                cSet.add(((cCenter + dc) % 72 + 72) % 72)
+            }
+            cSet.toIntArray()
+        }
         var best: StarEntry? = null
         var bestD = tolDeg
-        val cols = if (col0 == col1) intArrayOf(col0) else intArrayOf(col0, col1)
-        val rows = if (row0 == row1) intArrayOf(row0) else intArrayOf(row0, row1)
         for (col in cols) {
-            for (row in rows) {
+            for (row in row0..row1) {
                 grid[col * 1000 + row]?.let { list ->
                     for (s in list) {
                         val d = angDist(ra, dec, s.ra, s.dec)

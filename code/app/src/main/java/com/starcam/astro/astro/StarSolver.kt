@@ -451,17 +451,20 @@ object StarSolver {
                 onPhase = { if (!token.isCancelled) ctx.onPhase(SolvePhase.RACING) },
                 onStarsDetected = { stars, total -> if (!token.isCancelled) ctx.onStarsDetected(stars, total) },
             ))
-        val outcome = raceEngineOutcomes(ctx.token,
-            { execute(localStep, it, localReport) },
-            { execute(nativeStep, it, nativeReport) }, sharedBitmap = ctx.display)
-        val steps = ctx.report.optJSONArray("steps") ?: org.json.JSONArray().also { ctx.report.put("steps", it) }
-        for (report in listOf(localReport, nativeReport)) {
-            report.optJSONArray("steps")?.let { array ->
-                for (i in baseSteps until array.length()) steps.put(array.get(i))
+        val outcome = try {
+            raceEngineOutcomes(ctx.token,
+                { execute(localStep, it, localReport) },
+                { execute(nativeStep, it, nativeReport) }, sharedBitmap = ctx.display)
+        } finally {
+            val steps = ctx.report.optJSONArray("steps") ?: org.json.JSONArray().also { ctx.report.put("steps", it) }
+            for (report in listOf(localReport, nativeReport)) {
+                report.optJSONArray("steps")?.let { array ->
+                    for (i in baseSteps until array.length()) steps.put(array.get(i))
+                }
             }
-        }
-        for (key in listOf("stars", "starCount")) {
-            if (localReport.has(key)) ctx.report.put(key, localReport.get(key))
+            for (key in listOf("stars", "starCount")) {
+                if (localReport.has(key)) ctx.report.put(key, localReport.get(key))
+            }
         }
         if (outcome is StepOutcome.Success) {
             writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, outcome.result.engine.labelZh, outcome.result.detail)
@@ -528,6 +531,7 @@ object StarSolver {
         val enginesTried = ArrayList<String>()
         var lastLocalStars: List<DetectedStar>? = null
         var lastLocalStarTotal = 0
+        var lastDetectedDiagStars: List<SolveDiagnostics.DiagStar>? = null
         var fovOverride: Double? = null
         val logT0 = System.currentTimeMillis()
         val report = com.starcam.astro.data.SolveLogStore.newReport(
@@ -573,7 +577,11 @@ object StarSolver {
             log = log,
             logT0 = logT0,
             onProgress = onProgress,
-            onStarsDetected = onStarsDetected,
+            onStarsDetected = { stars, total ->
+                lastDetectedDiagStars = stars
+                if (total > 0) lastLocalStarTotal = total
+                onStarsDetected(stars, total)
+            },
             onPhase = onPhase,
         )
 
@@ -581,107 +589,119 @@ object StarSolver {
             settings.engineMode == EngineMode.AUTO &&
             canRace(context, fov, steps)
 
-        if (shouldRace) {
-            log.line(context, "双引擎并发竞速（LocalMatcher + Native）开启")
-            enginesTried.add("内置星表")
-            enginesTried.add("官方引擎")
+        var budgetExceededError: SolveBudgetExceeded? = null
+        try {
+            if (shouldRace) {
+                log.line(context, "双引擎并发竞速（LocalMatcher + Native）开启")
+                enginesTried.add("内置星表")
+                enginesTried.add("官方引擎")
 
-            val raceTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
-            val raceOutcome = kotlinx.coroutines.withTimeoutOrNull(raceTimeout) {
-                raceSteps(ctx, localStep, nativeStep)
-            } ?: run {
-                log.line(context, "双引擎并发竞速超时（耗尽剩余预算 ${raceTimeout}ms）")
-                StepOutcome.Failure(reason = "竞速超时")
-            }
-            when (raceOutcome) {
-                is StepOutcome.Success -> return@withContext raceOutcome.result
-                is StepOutcome.Failure -> {
-                    raceOutcome.fovOverride?.let { fovOverride = it }
-                    raceOutcome.diagStars?.let { lastLocalStars = it }
-                    if (raceOutcome.diagStarTotal > 0) lastLocalStarTotal = raceOutcome.diagStarTotal
-                    raceOutcome.graySnapshot?.let {
-                        lastGraySnapshot = it
-                        lastGrayW = raceOutcome.grayW
-                        lastGrayH = raceOutcome.grayH
-                    }
-                }
-                is StepOutcome.Skipped -> {}
-            }
-
-            if (steps.contains(SolveEngine.ONLINE_NOVA)) {
-                coroutineContext.ensureActive()
-                token.check()
-                if (!ctx.isBudgetDepleted) {
-                    enginesTried.add("在线识别")
-                    val onlineTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
-                    val onlineOutcome = kotlinx.coroutines.withTimeoutOrNull(onlineTimeout) {
-                        onlineStep.execute(ctx.copy(fovOverride = fovOverride))
-                    } ?: run {
-                        log.line(context, "在线识别超时（耗尽剩余预算 ${onlineTimeout}ms）")
-                        StepOutcome.Failure(reason = "在线识别超时")
-                    }
-                    if (onlineOutcome is StepOutcome.Success) {
-                        return@withContext onlineOutcome.result
-                    }
-                }
-            }
-        } else {
-            for (engine in steps) {
-                coroutineContext.ensureActive()
-                token.check()
-
-                if (ctx.isBudgetDepleted) {
-                    log.line(context, "全局时间预算耗尽（上限 ${budgetSec.toInt()}s），终止后续引擎尝试")
-                    break
-                }
-
-                val step = stepMap[engine] ?: continue
-                enginesTried.add(engine.labelZh)
-
-                val stepTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
-                val outcome = kotlinx.coroutines.withTimeoutOrNull(stepTimeout) {
-                    step.execute(ctx.copy(fovOverride = fovOverride))
+                val raceTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
+                val raceOutcome = kotlinx.coroutines.withTimeoutOrNull(raceTimeout) {
+                    raceSteps(ctx, localStep, nativeStep)
                 } ?: run {
-                    log.line(context, "${engine.labelZh}：单步执行超时（耗尽剩余预算 ${stepTimeout}ms），跳过")
-                    StepOutcome.Failure(reason = "单步超过预算")
+                    log.line(context, "双引擎并发竞速超时（耗尽剩余预算 ${raceTimeout}ms）")
+                    StepOutcome.Failure(reason = "竞速超时")
                 }
-                when (outcome) {
-                    is StepOutcome.Success -> return@withContext outcome.result
+                when (raceOutcome) {
+                    is StepOutcome.Success -> return@withContext raceOutcome.result
                     is StepOutcome.Failure -> {
-                        outcome.fovOverride?.let { fovOverride = it }
-                        outcome.diagStars?.let { lastLocalStars = it }
-                        if (outcome.diagStarTotal > 0) lastLocalStarTotal = outcome.diagStarTotal
-                        outcome.graySnapshot?.let {
+                        raceOutcome.fovOverride?.let { fovOverride = it }
+                        raceOutcome.diagStars?.let { lastLocalStars = it }
+                        if (raceOutcome.diagStarTotal > 0) lastLocalStarTotal = raceOutcome.diagStarTotal
+                        raceOutcome.graySnapshot?.let {
                             lastGraySnapshot = it
-                            lastGrayW = outcome.grayW
-                            lastGrayH = outcome.grayH
+                            lastGrayW = raceOutcome.grayW
+                            lastGrayH = raceOutcome.grayH
                         }
                     }
                     is StepOutcome.Skipped -> {}
                 }
+
+                if (steps.contains(SolveEngine.ONLINE_NOVA)) {
+                    coroutineContext.ensureActive()
+                    token.check()
+                    if (!ctx.isBudgetDepleted) {
+                        enginesTried.add("在线识别")
+                        val onlineTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
+                        val onlineOutcome = kotlinx.coroutines.withTimeoutOrNull(onlineTimeout) {
+                            onlineStep.execute(ctx.copy(fovOverride = fovOverride))
+                        } ?: run {
+                            log.line(context, "在线识别超时（耗尽剩余预算 ${onlineTimeout}ms）")
+                            StepOutcome.Failure(reason = "在线识别超时")
+                        }
+                        if (onlineOutcome is StepOutcome.Success) {
+                            return@withContext onlineOutcome.result
+                        }
+                    }
+                }
+            } else {
+                for (engine in steps) {
+                    coroutineContext.ensureActive()
+                    token.check()
+
+                    if (ctx.isBudgetDepleted) {
+                        log.line(context, "全局时间预算耗尽（上限 ${budgetSec.toInt()}s），终止后续引擎尝试")
+                        break
+                    }
+
+                    val step = stepMap[engine] ?: continue
+                    enginesTried.add(engine.labelZh)
+
+                    val stepTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
+                    val outcome = kotlinx.coroutines.withTimeoutOrNull(stepTimeout) {
+                        step.execute(ctx.copy(fovOverride = fovOverride))
+                    } ?: run {
+                        log.line(context, "${engine.labelZh}：单步执行超时（耗尽剩余预算 ${stepTimeout}ms），跳过")
+                        StepOutcome.Failure(reason = "单步超过预算")
+                    }
+                    when (outcome) {
+                        is StepOutcome.Success -> return@withContext outcome.result
+                        is StepOutcome.Failure -> {
+                            outcome.fovOverride?.let { fovOverride = it }
+                            outcome.diagStars?.let { lastLocalStars = it }
+                            if (outcome.diagStarTotal > 0) lastLocalStarTotal = outcome.diagStarTotal
+                            outcome.graySnapshot?.let {
+                                lastGraySnapshot = it
+                                lastGrayW = outcome.grayW
+                                lastGrayH = outcome.grayH
+                            }
+                        }
+                        is StepOutcome.Skipped -> {}
+                    }
+                }
             }
+        } catch (e: SolveBudgetExceeded) {
+            budgetExceededError = e
+            log.line(context, "全局时间预算耗尽（上限 ${budgetSec.toInt()}s），收集失败诊断与现场")
         }
 
         val last = lastLocalStars
         val maxB = last?.maxOfOrNull { it.brightness } ?: 0f
+        val diagStarList = last?.map { s ->
+            SolveDiagnostics.DiagStar(
+                x = s.x / display.width.toFloat(),
+                y = s.y / display.height.toFloat(),
+                brightness01 = if (maxB > 0f) {
+                    (s.brightness / maxB).coerceIn(0f, 1f)
+                } else 0.5f,
+            )
+        } ?: lastDetectedDiagStars ?: emptyList()
+        val diagStarCount = when {
+            lastLocalStarTotal > 0 -> lastLocalStarTotal
+            last != null -> last.size
+            else -> diagStarList.size
+        }
         onDiagnostics(
             SolveDiagnostics(
-                starCount = if (lastLocalStarTotal > 0) lastLocalStarTotal else (last?.size ?: 0),
-                stars = (last ?: emptyList()).map { s ->
-                    SolveDiagnostics.DiagStar(
-                        x = s.x / display.width.toFloat(),
-                        y = s.y / display.height.toFloat(),
-                        brightness01 = if (maxB > 0f) {
-                            (s.brightness / maxB).coerceIn(0f, 1f)
-                        } else 0.5f,
-                    )
-                },
+                starCount = diagStarCount,
+                stars = diagStarList,
                 enginesTried = enginesTried,
             ),
         )
 
         val failVerdict = SolveDiagnostics(
-            starCount = last?.size ?: 0,
+            starCount = diagStarCount,
             stars = emptyList(),
             enginesTried = enginesTried,
         ).let { "${it.verdict}（引擎：${enginesTried.joinToString("→")}）" }
@@ -699,6 +719,7 @@ object StarSolver {
             )
         } catch (_: Throwable) {
         }
+        budgetExceededError?.let { throw it }
         null
     }
 

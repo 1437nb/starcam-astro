@@ -278,15 +278,17 @@ object SolveLogStore {
     /** 追加一步引擎尝试 */
     fun addStep(report: JSONObject, engine: String, outcome: String, detail: String? = null,
                 costMs: Long? = null) {
-        try {
-            val arr = report.optJSONArray("steps") ?: JSONArray().also { report.put("steps", it) }
-            arr.put(JSONObject().apply {
-                put("engine", engine)
-                put("outcome", outcome)
-                detail?.let { put("detail", it) }
-                costMs?.let { put("costMs", it) }
-            })
-        } catch (_: Throwable) {
+        synchronized(report) {
+            try {
+                val arr = report.optJSONArray("steps") ?: JSONArray().also { report.put("steps", it) }
+                arr.put(JSONObject().apply {
+                    put("engine", engine)
+                    put("outcome", outcome)
+                    detail?.let { put("detail", it) }
+                    costMs?.let { put("costMs", it) }
+                })
+            } catch (_: Throwable) {
+            }
         }
     }
 
@@ -302,36 +304,40 @@ object SolveLogStore {
         stars: List<com.starcam.astro.astro.DetectedStar>,
         total: Int = stars.size,
     ) {
-        try {
-            val arr = JSONArray()
-            val n = minOf(stars.size, MAX_STARS_IN_REPORT)
-            for (i in 0 until n) {
-                val s = stars[i]
-                arr.put(JSONArray().apply {
-                    put(s.x.toDouble()); put(s.y.toDouble()); put(s.brightness.toDouble())
-                })
+        synchronized(report) {
+            try {
+                val arr = JSONArray()
+                val n = minOf(stars.size, MAX_STARS_IN_REPORT)
+                for (i in 0 until n) {
+                    val s = stars[i]
+                    arr.put(JSONArray().apply {
+                        put(s.x.toDouble()); put(s.y.toDouble()); put(s.brightness.toDouble())
+                    })
+                }
+                report.put("stars", arr)
+                report.put("starCount", if (total > 0) total else stars.size)
+            } catch (_: Throwable) {
             }
-            report.put("stars", arr)
-            report.put("starCount", if (total > 0) total else stars.size)
-        } catch (_: Throwable) {
         }
     }
 
     /** 把 report.json 渲染成人类可读的短摘要（失败页显示用） */
-    fun renderSummary(report: JSONObject): String = buildString {
-        appendLine("图像 ${report.optInt("width")}×${report.optInt("height")}")
-        report.optInt("starCount", -1).takeIf { it >= 0 }?.let { appendLine("检出星点 $it 颗") }
+    fun renderSummary(report: JSONObject): String = synchronized(report) {
+        buildString {
+            appendLine("图像 ${report.optInt("width")}×${report.optInt("height")}")
+            report.optInt("starCount", -1).takeIf { it >= 0 }?.let { appendLine("检出星点 $it 颗") }
 
-        val steps = report.optJSONArray("steps")
-        if (steps != null && steps.length() > 0) {
-            appendLine("引擎尝试：")
-            for (i in 0 until steps.length()) {
-                val s = steps.optJSONObject(i) ?: continue
-                val cost = s.optLong("costMs", -1).takeIf { it >= 0 }?.let { " (${it}ms)" } ?: ""
-                val det = s.optString("detail", "").takeIf { it.isNotBlank() }?.let { "：$it" } ?: ""
-                appendLine("  · ${s.optString("engine")} → ${s.optString("outcome")}$det$cost")
+            val steps = report.optJSONArray("steps")
+            if (steps != null && steps.length() > 0) {
+                appendLine("引擎尝试：")
+                for (i in 0 until steps.length()) {
+                    val s = steps.optJSONObject(i) ?: continue
+                    val cost = s.optLong("costMs", -1).takeIf { it >= 0 }?.let { " (${it}ms)" } ?: ""
+                    val det = s.optString("detail", "").takeIf { it.isNotBlank() }?.let { "：$it" } ?: ""
+                    appendLine("  · ${s.optString("engine")} → ${s.optString("outcome")}$det$cost")
+                }
             }
+            report.optString("verdict", "").takeIf { it.isNotBlank() }?.let { appendLine("判定：$it") }
         }
-        report.optString("verdict", "").takeIf { it.isNotBlank() }?.let { appendLine("判定：$it") }
     }
 }

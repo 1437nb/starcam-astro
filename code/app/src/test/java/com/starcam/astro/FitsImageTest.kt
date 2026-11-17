@@ -367,5 +367,43 @@ class FitsImageTest {
         }
     }
 
+    @Test
+    fun `BITPIX32 与 BZERO 2^31 保持小 ADU 精度不坍缩`() {
+        val w = 4
+        val h = 4
+        val head = headerBlock(
+            card("SIMPLE", "T"), card("BITPIX", 32), card("NAXIS", 2),
+            card("NAXIS1", w), card("NAXIS2", h),
+            card("BSCALE", 1.0), card("BZERO", 2147483648.0),
+        )
+        val data = ByteBuffer.allocate(w * h * 4).order(ByteOrder.BIG_ENDIAN)
+        for (i in 0 until w * h) {
+            // 物理值 = 2^31 + raw = i * 10 (10, 20, ..., 150) — Float32 先算会把小差异全部舍入掉
+            data.putInt((-2147483648L + i * 10L).toInt())
+        }
+        val out = ByteArrayOutputStream()
+        out.write(head)
+        out.write(data.array())
+        val pad = (2880 - (data.array().size % 2880)) % 2880
+        out.write(ByteArray(pad))
+        val d = FitsImage.decodeBytes(out.toByteArray(), maxDim = 2200)
+        assertNotNull(d)
+        assertTrue("末端像素与起始像素必须拉开拉伸梯度", d!!.gray[3] > d.gray[0] + 10f)
+    }
+
+    @Test
+    fun `FitsMeta fovDeg 在缺少 CDELT 时回退到 CD 矩阵`() {
+        val head = headerBlock(
+            card("SIMPLE", "T"), card("BITPIX", 16), card("NAXIS", 2),
+            card("NAXIS1", 2000), card("NAXIS2", 1500),
+            card("CD1_1", -0.0003), card("CD1_2", 0.0004),
+            card("CD2_1", 0.0004), card("CD2_2", 0.0003),
+        )
+        val meta = FitsImage.readMetaBytes(head)
+        assertNotNull(meta)
+        assertNull(meta!!.cdelt1)
+        assertEquals(1.0, meta.fovDeg!!, 1e-6)
+    }
+
     private fun assertFalse(b: Boolean) = assertTrue("应为 false", !b)
 }

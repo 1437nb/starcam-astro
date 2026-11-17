@@ -289,6 +289,7 @@ object HistoryStore {
             .edit().putString(KEY, arr.toString()).apply()
     }
 
+    @Synchronized
     fun load(context: Context): List<Entry> {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val arr = try {
@@ -367,14 +368,30 @@ object HistoryStore {
                     put(MediaStore.Downloads.DISPLAY_NAME, fileName)
                     put(MediaStore.Downloads.MIME_TYPE, "text/csv")
                     put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    put(MediaStore.Downloads.IS_PENDING, 1)
                 }
                 val uri = context.contentResolver.insert(
                     MediaStore.Downloads.EXTERNAL_CONTENT_URI, values,
                 ) ?: return null
-                context.contentResolver.openOutputStream(uri)?.use {
-                    it.write(sb.toString().toByteArray())
+                var committed = false
+                try {
+                    val stream = context.contentResolver.openOutputStream(uri) ?: return null
+                    stream.use {
+                        it.write(sb.toString().toByteArray())
+                    }
+                    context.contentResolver.update(
+                        uri,
+                        ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+                        null,
+                        null,
+                    )
+                    committed = true
+                    "下载目录/$fileName"
+                } finally {
+                    if (!committed) {
+                        runCatching { context.contentResolver.delete(uri, null, null) }
+                    }
                 }
-                "下载目录/$fileName"
             } else {
                 // §0.78：API 26~28 写公共下载目录需要 WRITE_EXTERNAL_STORAGE，
                 // 而 manifest 只声明了 READ_EXTERNAL_STORAGE —— 必然抛 SecurityException，

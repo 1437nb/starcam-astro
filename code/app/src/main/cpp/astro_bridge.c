@@ -629,14 +629,27 @@ typedef struct {
 static int jni_is_cancelled(void* value) {
     jni_cancel_probe* probe = (jni_cancel_probe*)value;
     if (!probe->token || !probe->getter) return 0;
-    return (*probe->env)->CallBooleanMethod(probe->env, probe->token, probe->getter) == JNI_TRUE;
+    jboolean cancelled = (*probe->env)->CallBooleanMethod(probe->env, probe->token, probe->getter);
+    if ((*probe->env)->ExceptionCheck(probe->env)) {
+        (*probe->env)->ExceptionClear(probe->env);
+        return 1;
+    }
+    return cancelled == JNI_TRUE;
 }
 
 static jmethodID cancel_getter(JNIEnv* env, jobject token) {
     if (!token) return NULL;
     jclass type = (*env)->GetObjectClass(env, token);
+    if (!type || (*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
     jmethodID getter = (*env)->GetMethodID(env, type, "isCancelled", "()Z");
     (*env)->DeleteLocalRef(env, type);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
     return getter;
 }
 
@@ -715,7 +728,12 @@ Java_com_starcam_astro_astro_StellarSolverNative_solvePriors(
  * 直接截断会留下图像上半部分的星而丢掉亮星）。 */
 static void top_k_by_flux(const starxy_t* f, int k, int* out_idx) {
     int n = f->N;
-    char* used = (char*)calloc(n, 1);
+    if (k <= 0 || n <= 0) return;
+    char* used = (char*)calloc((size_t)n, 1);
+    if (!used) {
+        for (int i = 0; i < k && i < n; i++) out_idx[i] = i;
+        return;
+    }
     for (int i = 0; i < k; i++) {
         int best = -1;
         double bestf = -1e300;
@@ -723,6 +741,10 @@ static void top_k_by_flux(const starxy_t* f, int k, int* out_idx) {
             if (used[j]) continue;
             double fj = starxy_get_flux(f, j);
             if (fj > bestf) { bestf = fj; best = j; }
+        }
+        if (best < 0) {
+            out_idx[i] = i < n ? i : 0;
+            continue;
         }
         used[best] = 1;
         out_idx[i] = best;
@@ -786,42 +808,52 @@ static jstring extract_stars_impl(JNIEnv* env, jfloatArray gray, jint w, jint h,
                 starxy_set_flux(f, i, s.flux[i]);
             }
             int k = s.npeaks > maxStars ? maxStars : s.npeaks;
-            int* idx = (int*)malloc(sizeof(int) * (k > 0 ? k : 1));
-            if (k == s.npeaks) {
-                for (int i = 0; i < k; i++) idx[i] = i;
+            if (k < 0) k = 0;
+            int* idx = (int*)malloc(sizeof(int) * (size_t)(k > 0 ? k : 1));
+            if (!idx) {
+                out = strdup("{\"ok\":false,\"error\":\"oom\"}");
             } else {
-                top_k_by_flux(f, k, idx);
+                if (k == s.npeaks) {
+                    for (int i = 0; i < k; i++) idx[i] = i;
+                } else {
+                    top_k_by_flux(f, k, idx);
+                }
+                size_t sz = 192 + (size_t)k * 64;
+                out = (char*)malloc(sz);
+                if (out) {
+                    /* §0.86 "npeaks" = simplexy 在本幅图上检出的峰值总数（**未截断**）。
+                     * 为什么必须单独报：调用方按 maxStars 截断后，"到底检出了多少"这件事
+                     * 就丢失了 —— 真实星空照片的 npeaks 常达数百上千，截断到 200 后 UI
+                     * 永远显示 ~197，变成一个没有信息量的常数（用户实测 187/195/197）。
+                     * 数组仍按 maxStars 截断：喂给匹配器的量有安全上限（SEP_MATCH_MAX），
+                     * 但**计数**不该受它约束。 */
+                    int pos = snprintf(out, sz, "{\"ok\":true,\"n\":%d,\"npeaks\":%d,\"x\":[", k,
+                                       s.npeaks);
+                    for (int i = 0; i < k && pos >= 0 && (size_t)pos < sz; i++)
+                        pos += snprintf(out + pos, sz - (size_t)pos, "%s%.3f", i ? "," : "",
+                                        starxy_get_x(f, idx[i]));
+                    if (pos >= 0 && (size_t)pos < sz)
+                        pos += snprintf(out + pos, sz - (size_t)pos, "],\"y\":[");
+                    for (int i = 0; i < k && pos >= 0 && (size_t)pos < sz; i++)
+                        pos += snprintf(out + pos, sz - (size_t)pos, "%s%.3f", i ? "," : "",
+                                        starxy_get_y(f, idx[i]));
+                    if (pos >= 0 && (size_t)pos < sz)
+                        pos += snprintf(out + pos, sz - (size_t)pos, "],\"flux\":[");
+                    for (int i = 0; i < k && pos >= 0 && (size_t)pos < sz; i++)
+                        pos += snprintf(out + pos, sz - (size_t)pos, "%s%.4f", i ? "," : "",
+                                        starxy_get_flux(f, idx[i]));
+                    if (pos >= 0 && (size_t)pos < sz)
+                        snprintf(out + pos, sz - (size_t)pos, "]}");
+                }
+                free(idx);
             }
-            size_t sz = 192 + (size_t)k * 64;
-            out = (char*)malloc(sz);
-            /* §0.86 "npeaks" = simplexy 在本幅图上检出的峰值总数（**未截断**）。
-             * 为什么必须单独报：调用方按 maxStars 截断后，"到底检出了多少"这件事
-             * 就丢失了 —— 真实星空照片的 npeaks 常达数百上千，截断到 200 后 UI
-             * 永远显示 ~197，变成一个没有信息量的常数（用户实测 187/195/197）。
-             * 数组仍按 maxStars 截断：喂给匹配器的量有安全上限（SEP_MATCH_MAX），
-             * 但**计数**不该受它约束。 */
-            int pos = snprintf(out, sz, "{\"ok\":true,\"n\":%d,\"npeaks\":%d,\"x\":[", k,
-                               s.npeaks);
-            for (int i = 0; i < k; i++)
-                pos += snprintf(out + pos, sz - pos, "%s%.3f", i ? "," : "",
-                                starxy_get_x(f, idx[i]));
-            pos += snprintf(out + pos, sz - pos, "],\"y\":[");
-            for (int i = 0; i < k; i++)
-                pos += snprintf(out + pos, sz - pos, "%s%.3f", i ? "," : "",
-                                starxy_get_y(f, idx[i]));
-            pos += snprintf(out + pos, sz - pos, "],\"flux\":[");
-            for (int i = 0; i < k; i++)
-                pos += snprintf(out + pos, sz - pos, "%s%.4f", i ? "," : "",
-                                starxy_get_flux(f, idx[i]));
-            snprintf(out + pos, sz - pos, "]}");
-            free(idx);
             starxy_free(f);
         }
     }
     release_simplexy(&s);
     (*env)->ReleaseFloatArrayElements(env, gray, g, JNI_ABORT);
 
-    jstring js = (*env)->NewStringUTF(env, out);
+    jstring js = (*env)->NewStringUTF(env, out ? out : "{\"ok\":false,\"error\":\"oom\"}");
     free(out);
     return js;
 }

@@ -125,7 +125,13 @@ internal object SkyRegionRecovery {
         val candidate = larger.match.solve
         val smaller = detectAndMatch(smallerHeight, minInliers = 7) ?: return null
         val check = smaller.match.solve
-        if (candidate.parity != check.parity || abs(check.pixScaleArcsec / candidate.pixScaleArcsec - 1) > 0.05) {
+        if (candidate.parity != check.parity ||
+            !candidate.pixScaleArcsec.isFinite() ||
+            !check.pixScaleArcsec.isFinite() ||
+            candidate.pixScaleArcsec <= 0.0 ||
+            check.pixScaleArcsec <= 0.0 ||
+            abs(check.pixScaleArcsec / candidate.pixScaleArcsec - 1) > 0.05
+        ) {
             return null
         }
         val skyWcs = candidate.wcs ?: return null

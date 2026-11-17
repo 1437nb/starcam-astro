@@ -16,8 +16,11 @@ object QuatMath {
     /** 旋转向量（TYPE_ROTATION_VECTOR 的 3 元素形式 x,y,z）→ 单位四元数 */
     fun quatFromRotationVector(x: Float, y: Float, z: Float): FloatArray {
         val w2 = 1.0 - x.toDouble() * x - y.toDouble() * y - z.toDouble() * z
-        val w = if (w2 > 0.0) sqrt(w2) else 0.0
-        return floatArrayOf(w.toFloat(), x, y, z)
+        return if (w2 > 0.0) {
+            floatArrayOf(sqrt(w2).toFloat(), x, y, z)
+        } else {
+            normalize(floatArrayOf(0f, x, y, z))
+        }
     }
 
     /** 单位四元数乘法 q = a ⊗ b（合成旋转） */

@@ -229,6 +229,29 @@ class AstroMathTest {
             assertTrue("天区「${region.name}」可见星过少: $visible", visible >= 5)
         }
     }
+
+    @Test
+    fun wcsSingularMatrixAndMalformedHeaderAreSafe() {
+        val singular = WcsTransform(
+            crpix1 = 100.0, crpix2 = 100.0,
+            crval1 = 10.0, crval2 = 20.0,
+            cd11 = 0.0, cd12 = 0.0, cd21 = 0.0, cd22 = 0.0,
+        )
+        val px = singular.skyToFitsPixel(10.0, 20.0)
+        assertTrue(px[0].isNaN() && px[1].isNaN())
+
+        val badHeader = """
+            CRPIX1  = 100.0
+            CRPIX2  = 200.0
+            CRVAL1  = 10.0
+            CRVAL2  = 20.0
+            CD1_1   = 1..2
+            CD1_2   = 0.0
+            CD2_1   = 0.0
+            CD2_2   = 0.001
+        """.trimIndent()
+        org.junit.Assert.assertNull(WcsTransform.parse(badHeader))
+    }
 }
 
 /** 测试辅助：暴露行列式 */

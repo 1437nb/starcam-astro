@@ -30,7 +30,18 @@ class StarCamApplication : Application() {
         // 把那份开销挪出启动关键路径 —— 之后走 SettingsRepository 的内存缓存。
         Thread {
             runCatching { SettingsRepository(this).hasApiKey }
+            runCatching { cleanupStaleCacheFiles() }
         }.apply { name = "starcam-secure-prewarm"; isDaemon = true }.start()
+    }
+
+    private fun cleanupStaleCacheFiles() {
+        val cutoff = System.currentTimeMillis() - 6L * 60L * 60L * 1000L
+        val prefixes = listOf("batch-display-", "starcam-upload-", "import_")
+        cacheDir.listFiles()?.forEach { f ->
+            if (f.isFile && f.lastModified() < cutoff && prefixes.any { f.name.startsWith(it) }) {
+                runCatching { f.delete() }
+            }
+        }
     }
 
     override fun onTrimMemory(level: Int) {

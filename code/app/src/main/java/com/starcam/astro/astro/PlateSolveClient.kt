@@ -2,6 +2,8 @@ package com.starcam.astro.astro
 
 import android.graphics.BitmapFactory
 import com.starcam.astro.data.SettingsRepository
+import com.starcam.astro.ui.theme.LocaleState
+import com.starcam.astro.util.FitsImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -43,7 +45,11 @@ class PlateSolveClient(
     private val serverUrl: String = serverUrl.trim().removeSuffix("/").also {
         if (!isSecureServerUrl(it)) {
             throw PlateSolveException(
-                "在线识别要求 HTTPS 服务器地址（当前：$it）。请在「设置」中改用 https:// 开头的地址。",
+                if (LocaleState.isEnglish) {
+                    "Online solve requires an HTTPS server URL (got: $it). Please switch to https:// in Settings."
+                } else {
+                    "在线识别要求 HTTPS 服务器地址（当前：$it）。请在「设置」中改用 https:// 开头的地址。"
+                },
                 PlateSolveException.Kind.OTHER,
             )
         }
@@ -61,7 +67,11 @@ class PlateSolveClient(
         val key = computeFileKey(image)
         globalUploadLock.withLock {
             if (globalInFlightKeys.contains(key)) {
-                throw PlateSolveException("该照片正在识别中，请勿重复提交。", PlateSolveException.Kind.OTHER)
+                throw PlateSolveException(
+                    if (LocaleState.isEnglish) "This photo is already solving, please wait."
+                    else "该照片正在识别中，请勿重复提交。",
+                    PlateSolveException.Kind.OTHER,
+                )
             }
             globalInFlightKeys.add(key)
         }
@@ -83,13 +93,14 @@ class PlateSolveClient(
         onProgress: (String) -> Unit,
     ): SolveResult {
         val overallDeadline = (System.nanoTime() / 1_000_000) + timeoutMs
-        onProgress("正在登录识别服务…")
+        val isEn = LocaleState.isEnglish
+        onProgress(if (isEn) "Signing in to solve service…" else "正在登录识别服务…")
         val session = login(apiKey)
 
-        onProgress("正在上传照片…")
+        onProgress(if (isEn) "Uploading photo…" else "正在上传照片…")
         val subId = upload(session, image)
 
-        onProgress("排队等待解算…")
+        onProgress(if (isEn) "Queued for solving…" else "排队等待解算…")
         val waitBudget = (overallDeadline - (System.nanoTime() / 1_000_000)).coerceAtLeast(1000L)
         val jobId = waitForJob(subId, minOf(WAIT_FOR_JOB_TIMEOUT_MS, waitBudget))
 
@@ -100,7 +111,8 @@ class PlateSolveClient(
         while (true) {
             if ((System.nanoTime() / 1_000_000) > deadline) {
                 throw PlateSolveException(
-                    "解算超时（已达预算限制），可能天区恒星较少或服务正忙",
+                    if (isEn) "Solve timed out (budget reached); sky region may be sparse or server busy."
+                    else "解算超时（已达预算限制），可能天区恒星较少或服务正忙",
                     PlateSolveException.Kind.TIMEOUT,
                 )
             }
@@ -112,8 +124,12 @@ class PlateSolveClient(
             when (status) {
                 "success" -> break
                 "failure" -> throw PlateSolveException(
-                    "识别失败：未找到可匹配的星场。请确认照片包含清晰星空（≥3 颗亮星），" +
-                        "且没有严重过曝、模糊或镜头污渍。",
+                    if (isEn) {
+                        "Solve failed: no matching star field found. Ensure photo shows clear stars (≥3 bright stars) without severe blur or overexposure."
+                    } else {
+                        "识别失败：未找到可匹配的星场。请确认照片包含清晰星空（≥3 颗亮星），" +
+                            "且没有严重过曝、模糊或镜头污渍。"
+                    },
                     PlateSolveException.Kind.NO_MATCH,
                 )
                 else -> Unit
@@ -123,7 +139,7 @@ class PlateSolveClient(
             delay(interval)
         }
 
-        onProgress("解算成功，正在生成星座标注…")
+        onProgress(if (isEn) "Solved, generating star chart overlay…" else "解算成功，正在生成星座标注…")
         return fetchCalibration(jobId, image)
     }
 
@@ -139,42 +155,52 @@ class PlateSolveClient(
         return (current * 3 / 2).coerceAtMost(POLL_INTERVAL_MAX_MS)
     }
 
-    private fun progressText(status: String): String = when (status) {
-        "queued" -> "排队等待解算…"
-        "solving" -> "正在解算星场（通常需要 10–60 秒）…"
-        "success" -> "解算成功"
-        "failure" -> "识别失败"
-        else -> "处理中（$status）…"
+    private fun progressText(status: String): String {
+        val isEn = LocaleState.isEnglish
+        return when (status) {
+            "queued" -> if (isEn) "Queued for solving…" else "排队等待解算…"
+            "solving" -> if (isEn) "Solving star field (usually 10–60s)…" else "正在解算星场（通常需要 10–60 秒）…"
+            "success" -> if (isEn) "Solve succeeded" else "解算成功"
+            "failure" -> if (isEn) "Solve failed" else "识别失败"
+            else -> if (isEn) "Processing ($status)…" else "处理中（$status）…"
+        }
     }
 
     /**
      * POST 并解析 JSON。网络类错误自动重试一次（弱网下体验明显改善），
-     * HTTP 429/503 会带上 Retry-After 供调用方退避。
+     * HTTP 429/503 遵守 Retry-After 退避并重试。
      */
     private suspend fun postJson(url: String, body: RequestBody): JSONObject =
         postJsonWithRetry(url, body).first
 
     private suspend fun postJsonWithRetry(url: String, body: RequestBody): Pair<JSONObject, Long?> {
         var lastError: IOException? = null
+        val isEn = LocaleState.isEnglish
         for (attempt in 0 until MAX_NETWORK_RETRIES) {
             try {
                 val req = Request.Builder().url(url).post(body).build()
                 client.newCall(req).awaitText().let { resp ->
                     val text = resp.text
+                    val retryAfterMs = resp.retryAfter?.trim()?.toLongOrNull()
+                        ?.coerceIn(1L, POLL_INTERVAL_MAX_MS / 1000)?.times(1000L)
                     if (resp.code == 429 || resp.code == 503) {
+                        if (attempt < MAX_NETWORK_RETRIES - 1) {
+                            delay(retryAfterMs ?: POLL_INTERVAL_INITIAL_MS)
+                            return@let
+                        }
                         throw PlateSolveException(
-                            "识别服务繁忙（HTTP ${resp.code}），请稍后重试。",
+                            if (isEn) "Solve service busy (HTTP ${resp.code}), please try again later."
+                            else "识别服务繁忙（HTTP ${resp.code}），请稍后重试。",
                             PlateSolveException.Kind.TIMEOUT,
                         )
                     }
                     if (resp.code !in 200..299) {
                         throw PlateSolveException(
-                            "请求失败（HTTP ${resp.code}）",
+                            if (isEn) "Request failed (HTTP ${resp.code})" else "请求失败（HTTP ${resp.code}）",
                             PlateSolveException.Kind.NETWORK,
                         )
                     }
-                    return JSONObject(text) to resp.retryAfter?.trim()?.toLongOrNull()
-                        ?.coerceIn(0L, POLL_INTERVAL_MAX_MS / 1000)?.times(1000L)
+                    return JSONObject(text) to retryAfterMs
                 }
             } catch (e: IOException) {
                 lastError = e
@@ -182,18 +208,21 @@ class PlateSolveClient(
             }
         }
         throw PlateSolveException(
-            "网络连接失败：${lastError?.message ?: "未知错误"}",
+            if (isEn) "Network error: ${lastError?.message ?: "unknown"}"
+            else "网络连接失败：${lastError?.message ?: "未知错误"}",
             PlateSolveException.Kind.NETWORK,
         )
     }
 
     private suspend fun login(apiKey: String): String {
+        val isEn = LocaleState.isEnglish
         val json = JSONObject().put("apikey", apiKey).toString()
         val body = FormBody.Builder().add("request-json", json).build()
         val obj = postJson("$serverUrl/login", body)
         if (obj.optString("status") != "success") {
+            val defaultMsg = if (isEn) "Invalid API Key, please check Settings" else "API Key 无效，请到「设置」中检查"
             throw PlateSolveException(
-                obj.optString("errormsg", "API Key 无效，请到「设置」中检查"),
+                obj.optString("errormsg", defaultMsg),
                 PlateSolveException.Kind.AUTH,
             )
         }
@@ -201,6 +230,7 @@ class PlateSolveClient(
     }
 
     private suspend fun upload(session: String, image: File): Long {
+        val isEn = LocaleState.isEnglish
         val meta = JSONObject()
             .put("session", session)
             .put("publicly_visible", "n") // 隐私：图片不进入公开图库
@@ -214,8 +244,9 @@ class PlateSolveClient(
             .build()
         val obj = postJson("$serverUrl/upload", body)
         if (obj.optString("status") != "success") {
+            val detail = obj.optString("errormsg", obj.toString().take(120))
             throw PlateSolveException(
-                "上传失败：${obj.optString("errormsg", obj.toString().take(120))}",
+                if (isEn) "Upload failed: $detail" else "上传失败：$detail",
                 PlateSolveException.Kind.SOLVE_ERROR,
             )
         }
@@ -226,12 +257,14 @@ class PlateSolveClient(
 
     /** 轮询 submissions/{id} 直到拿到第一个非空 job id */
     private suspend fun waitForJob(subId: Long, maxWaitMs: Long = WAIT_FOR_JOB_TIMEOUT_MS): Long {
+        val isEn = LocaleState.isEnglish
         val deadline = (System.nanoTime() / 1_000_000) + maxWaitMs
         var interval = POLL_INTERVAL_INITIAL_MS
         while (true) {
             if ((System.nanoTime() / 1_000_000) > deadline) {
                 throw PlateSolveException(
-                    "任务未进入解算队列（等待 ${maxWaitMs / 1000} 秒），请稍后重试",
+                    if (isEn) "Job did not enter solve queue within ${maxWaitMs / 1000}s, please retry"
+                    else "任务未进入解算队列（等待 ${maxWaitMs / 1000} 秒），请稍后重试",
                     PlateSolveException.Kind.TIMEOUT,
                 )
             }
@@ -253,9 +286,13 @@ class PlateSolveClient(
     }
 
     private suspend fun fetchCalibration(jobId: Long, image: File): SolveResult {
+        val isEn = LocaleState.isEnglish
         val obj = postJson("$serverUrl/jobs/$jobId/calibration", emptyBody())
         if (obj.optString("status") != "success") {
-            throw PlateSolveException("定标数据缺失，请重试", PlateSolveException.Kind.SOLVE_ERROR)
+            throw PlateSolveException(
+                if (isEn) "Calibration data missing, please retry" else "定标数据缺失，请重试",
+                PlateSolveException.Kind.SOLVE_ERROR,
+            )
         }
 
         val ra = obj.getDouble("ra")
@@ -268,8 +305,16 @@ class PlateSolveClient(
         // 图像尺寸以实际上传文件为准（calibration 里不保证返回像素宽高）
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(image.absolutePath, bounds)
-        val width = if (bounds.outWidth > 0) bounds.outWidth else 0
-        val height = if (bounds.outHeight > 0) bounds.outHeight else 0
+        var width = if (bounds.outWidth > 0) bounds.outWidth else 0
+        var height = if (bounds.outHeight > 0) bounds.outHeight else 0
+        if ((width == 0 || height == 0) && FitsImage.isFitsPath(image.absolutePath)) {
+            FitsImage.readMeta(image.absolutePath)?.let { meta ->
+                if (meta.naxis1 > 0 && meta.naxis2 > 0) {
+                    width = meta.naxis1
+                    height = meta.naxis2
+                }
+            }
+        }
 
         val wcs = WcsTransform.fromCalibration(ra, dec, orientation, pixscale, parity, width, height)
 

@@ -99,7 +99,7 @@ class AutoTestActivity : ComponentActivity() {
                     val ext = context.getExternalFilesDir(null)
                     lines = lines + "extFiles=${ext?.absolutePath}"
                     val candidates = listOfNotNull(
-                        File(dir),
+                        dir?.takeIf { it.isNotBlank() }?.let(::File),
                         ext?.let { File(it, "test12") },
                     )
                     var fileSrc: File? = null
@@ -240,8 +240,12 @@ object AutoTest {
         return out
     }
 
-    /** 数据源：名字 + 打开解码位图 */
-    data class Source(val name: String, val open: () -> android.graphics.Bitmap?)
+    /** 数据源：名字 + 打开解码位图 + 可选原始路径/URI（供 EXIF 先验读取） */
+    data class Source(
+        val name: String,
+        val sourcePath: String? = null,
+        val open: () -> android.graphics.Bitmap?,
+    )
 
     /** MediaStore 相册库扫描（RELATIVE_PATH 前缀匹配，按添加时间排序） */
     fun mediaStoreSources(
@@ -270,7 +274,7 @@ object AutoTest {
                     val uri = android.net.Uri.parse(
                         "content://media/external/images/media/$id",
                     )
-                    out.add(Source(name) {
+                    out.add(Source(name, uri.toString()) {
                         context.contentResolver.openInputStream(uri)?.use { s ->
                             android.graphics.BitmapFactory.decodeStream(s)
                         }
@@ -308,8 +312,10 @@ object AutoTest {
         for (f in files) {
             if (f.name in seen) continue
             seen.add(f.name)
-            seq.add(Source(f.name) {
-                android.graphics.BitmapFactory.decodeStream(java.io.FileInputStream(f))
+            seq.add(Source(f.name, f.absolutePath) {
+                java.io.FileInputStream(f).use { s ->
+                    android.graphics.BitmapFactory.decodeStream(s)
+                }
             })
         }
         val settings = SettingsRepository(context)
@@ -334,7 +340,7 @@ object AutoTest {
                     if (bmp == null) {
                         "${srcItem.name} FAILED nstars=0 (decode-fail)"
                     } else {
-                        val result = StarSolver.solve(context, bmp, "/batch/${srcItem.name}", settings) { }
+                        val result = StarSolver.solve(context, bmp, srcItem.sourcePath ?: "/batch/${srcItem.name}", settings) { }
                         if (result != null) {
                             solved++
                             val s = result.solve

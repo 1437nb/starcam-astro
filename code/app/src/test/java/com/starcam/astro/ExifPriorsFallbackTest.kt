@@ -1,6 +1,7 @@
 package com.starcam.astro
 
 import com.starcam.astro.astro.ExifPriors
+import com.starcam.astro.astro.ExifPriorsReader
 import com.starcam.astro.astro.LocationSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -83,5 +84,15 @@ class ExifPriorsFallbackTest {
 
         assertTrue(merged.locationIsFallback)
         assertNotNull(merged.zenith)
+    }
+
+    @Test
+    fun parseDmsHandlesNegativeDegreesAndRejectsOutOfRange() {
+        val neg = ExifPriorsReader.parseDms("-33/1,30/1,0/1")
+        assertNotNull(neg)
+        assertEquals(-33.5, neg!!, 1e-9)
+
+        assertNull("超过 ±180° 应被拒绝", ExifPriorsReader.parseDms("200/1,0/1,0/1"))
+        assertNull("负分秒非法", ExifPriorsReader.parseDms("33/1,-15/1,0/1"))
     }
 }

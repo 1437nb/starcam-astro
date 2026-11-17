@@ -292,10 +292,17 @@ object StellarSolverNative {
     /** 无天区先验哨兵值 */
     const val NO_PRIOR: Double = -999.0
 
-    /** 最近一次求解失败时的提星数（真机诊断用，AutoTest 读取；null=未知） */
-    @Volatile
-    var lastFailNStars: Int? = null
-        private set
+    private data class FailDiag(
+        val nStars: Int? = null,
+        val rc: Int? = null,
+        val gMean: Double? = null,
+        val gMax: Double? = null,
+    )
+
+    private val threadFailDiag = ThreadLocal<FailDiag?>()
+
+    /** 最近一次求解失败时的提星数（当前线程隔离，真机诊断用，AutoTest 读取；null=未知） */
+    val lastFailNStars: Int? get() = threadFailDiag.get()?.nStars
 
     private fun isDebugBuild(context: Context): Boolean =
         (context.applicationInfo.flags and
@@ -352,18 +359,12 @@ object StellarSolverNative {
         }
     }
 
-    /** 最近一次提星失败的诊断：simplexy 返回码 / 输入灰度均值 / 灰度最大值 */
-    @Volatile
-    var lastFailRc: Int? = null
-        private set
+    /** 最近一次提星失败的诊断：simplexy 返回码 / 输入灰度均值 / 灰度最大值（线程隔离） */
+    val lastFailRc: Int? get() = threadFailDiag.get()?.rc
 
-    @Volatile
-    var lastFailGMean: Double? = null
-        private set
+    val lastFailGMean: Double? get() = threadFailDiag.get()?.gMean
 
-    @Volatile
-    var lastFailGMax: Double? = null
-        private set
+    val lastFailGMax: Double? get() = threadFailDiag.get()?.gMax
 
     private fun solveBitmapImpl(
         context: Context,
@@ -379,15 +380,7 @@ object StellarSolverNative {
         token: SolveToken? = null,
     ): SolveResult? {
         token?.check()
-        // §0.107（二期审计 2026-10-14）：**先清空上一次的失败诊断**。
-        // 桥只在 star-extraction-failed 时输出 rc/gmean/gmax；提星成功但未解出
-        // （no-solution / timeout）的 JSON 里没有这几个键，而下面解析用的是
-        // `if (o.has(...))` —— 不清空的话，上一张照片（甚至上一轮）留下的
-        // rc/gmean 会被当成本次的诊断一直打下去，把排查引向错误方向。
-        lastFailNStars = null
-        lastFailRc = null
-        lastFailGMean = null
-        lastFailGMax = null
+        threadFailDiag.remove()
         val w = bitmap.width
         val h = bitmap.height
         val effectiveGray = if (gray != null && gray.size == w * h) {
@@ -399,6 +392,7 @@ object StellarSolverNative {
 
         // 首轮原生求解传 extStars = null：C 层 simplexy 提星成功率 >99.9% 且自备提星。
         // 杜绝每轮盲解均提前执行耗时 100~250ms 的 JVM 提星与大数组分配。
+        val tAttempt0Nanos = System.nanoTime()
         var extStars: FloatArray? = null
         var json = try {
             if (raDeg > NO_PRIOR / 2.0) {
@@ -436,7 +430,9 @@ object StellarSolverNative {
             } catch (_: Exception) {
             }
 
-            if (needRetryWithExtStars) {
+            val elapsedSec = (System.nanoTime() - tAttempt0Nanos) / 1e9
+            val remainingLimitSec = timeLimitSec - elapsedSec
+            if (needRetryWithExtStars && remainingLimitSec >= 0.5) {
                 token?.check()
                 extStars = try {
                     com.starcam.astro.astro.LocalStarMatcher.detectStarsGray(w, h, effectiveGray, 200)
@@ -455,16 +451,18 @@ object StellarSolverNative {
                 }
 
                 if (extStars != null) {
+                    val retryLimitSec = (timeLimitSec - (System.nanoTime() - tAttempt0Nanos) / 1e9)
+                        .coerceAtLeast(0.5)
                     json = try {
                         if (raDeg > NO_PRIOR / 2.0) {
                             solvePriors(
                                 effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg,
-                                raDeg, decDeg, radiusDeg, plimOverride, timeLimitSec, extStars, token,
+                                raDeg, decDeg, radiusDeg, plimOverride, retryLimitSec, extStars, token,
                             )
                         } else {
                             solve(
                                 effectiveGray, w, h, indexes, fovLoDeg, fovHiDeg,
-                                plimOverride, timeLimitSec, extStars, token,
+                                plimOverride, retryLimitSec, extStars, token,
                             )
                         }
                     } catch (_: Throwable) {
@@ -499,10 +497,14 @@ object StellarSolverNative {
         if (parsed == null) {
             try {
                 val o = org.json.JSONObject(json)
-                if (o.has("nstars")) lastFailNStars = o.getInt("nstars")
-                if (o.has("rc")) lastFailRc = o.getInt("rc")
-                if (o.has("gmean")) lastFailGMean = o.getDouble("gmean")
-                if (o.has("gmax")) lastFailGMax = o.getDouble("gmax")
+                threadFailDiag.set(
+                    FailDiag(
+                        nStars = if (o.has("nstars")) o.getInt("nstars") else null,
+                        rc = if (o.has("rc")) o.getInt("rc") else null,
+                        gMean = if (o.has("gmean")) o.getDouble("gmean") else null,
+                        gMax = if (o.has("gmax")) o.getDouble("gmax") else null,
+                    ),
+                )
             } catch (_: Exception) {
             }
         }

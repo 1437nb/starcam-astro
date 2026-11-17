@@ -23,17 +23,17 @@ class OnlineNovaStep : SolveStep {
         coroutineContext.ensureActive()
         ctx.token.check()
 
+        val isEn = LocaleState.isEnglish
         val key = ctx.settings.apiKey
         if (key.isBlank()) {
-            return StepOutcome.Skipped("未配置 API Key")
+            return StepOutcome.Skipped(if (isEn) "API Key not configured" else "未配置 API Key")
         }
 
         if (ctx.isBudgetDepleted) {
             ctx.log.line(ctx.context, "在线识别：全局时间预算耗尽，跳过")
-            return StepOutcome.Skipped("全局时间预算耗尽")
+            return StepOutcome.Skipped(if (isEn) "Global time budget exhausted" else "全局时间预算耗尽")
         }
 
-        val isEn = LocaleState.isEnglish
         ctx.onPhase(com.starcam.astro.astro.SolvePhase.ONLINE)
         ctx.onProgress(
             if (isEn) "Local engines unmatched, uploading for online solve…"
@@ -44,15 +44,32 @@ class OnlineNovaStep : SolveStep {
         var onlineDisplay: android.graphics.Bitmap? = null
         var delivered = false
         try {
-            val ok = ImageUtils.compressForUpload(ctx.imagePath, upload) != null
-            if (!ok) return StepOutcome.Failure("图片压缩上传失败")
-            ctx.token.check()
-
-            onlineDisplay = ImageUtils.decodeSampledBitmap(upload.absolutePath, 2200)
-                ?: return StepOutcome.Failure("无法解码上传图片副本")
-
-            val remainingMs = (ctx.remainingSec * 1000).toLong().coerceAtLeast(1000L)
             val solve = try {
+                val ok = ImageUtils.compressForUpload(ctx.imagePath, upload) {
+                    ctx.token.check()
+                } != null
+                if (!ok) {
+                    val msg = if (isEn) "Failed to compress image for upload" else "图片压缩上传失败"
+                    SolveLogStore.addStep(
+                        ctx.report, "在线识别", "failed", msg,
+                        System.currentTimeMillis() - ctx.logT0,
+                    )
+                    return StepOutcome.Failure(msg)
+                }
+                ctx.token.check()
+
+                onlineDisplay = ImageUtils.decodeSampledBitmap(upload.absolutePath, 2200) {
+                    ctx.token.check()
+                } ?: run {
+                    val msg = if (isEn) "Failed to decode uploaded image copy" else "无法解码上传图片副本"
+                    SolveLogStore.addStep(
+                        ctx.report, "在线识别", "failed", msg,
+                        System.currentTimeMillis() - ctx.logT0,
+                    )
+                    return StepOutcome.Failure(msg)
+                }
+
+                val remainingMs = (ctx.remainingSec * 1000).toLong().coerceAtLeast(1000L)
                 kotlinx.coroutines.withTimeout(remainingMs) {
                     val client = PlateSolveClient(ctx.settings.serverUrl)
                     client.solve(upload, key, remainingMs) { msg ->
@@ -62,18 +79,33 @@ class OnlineNovaStep : SolveStep {
                 }
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                 ctx.onProgress(if (isEn) "Online solve timed out" else "在线识别超时")
-                return StepOutcome.Failure("在线识别超过全局时间预算")
+                val reason = if (isEn) "Online solve exceeded global time budget" else "在线识别超过全局时间预算"
+                SolveLogStore.addStep(
+                    ctx.report, "在线识别", "timeout", reason,
+                    System.currentTimeMillis() - ctx.logT0,
+                )
+                return StepOutcome.Failure(reason)
             } catch (e: PlateSolveException) {
                 ctx.onProgress(e.message ?: if (isEn) "Online solve unavailable" else "在线识别不可用")
-                return StepOutcome.Failure(e.message ?: "在线求解失败")
+                val reason = e.message ?: if (isEn) "Online solve failed" else "在线求解失败"
+                SolveLogStore.addStep(
+                    ctx.report, "在线识别", "failed", reason,
+                    System.currentTimeMillis() - ctx.logT0,
+                )
+                return StepOutcome.Failure(reason)
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
-                return StepOutcome.Failure("网络异常：${e.message}")
+                val reason = if (isEn) "Network/IO error: ${e.message}" else "网络异常：${e.message}"
+                SolveLogStore.addStep(
+                    ctx.report, "在线识别", "failed", reason,
+                    System.currentTimeMillis() - ctx.logT0,
+                )
+                return StepOutcome.Failure(reason)
             }
 
             val detail = listOfNotNull(
-                solve.subId?.let { "任务 #$it" },
-                "在线定标",
+                solve.subId?.let { if (isEn) "Sub #$it" else "任务 #$it" },
+                if (isEn) "Online plate solve" else "在线定标",
             ).joinToString(" · ")
 
             ctx.log.line(

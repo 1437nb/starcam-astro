@@ -40,6 +40,7 @@ class BatchViewModel(application: Application) : AndroidViewModel(application) {
     private var job: Job? = null
     private var started = false
     private val token = SolveToken()
+    private val tempDisplayFiles = java.util.Collections.synchronizedList(mutableListOf<File>())
 
     fun start(paths: List<String>, settings: SettingsRepository) {
         if (started) return
@@ -92,6 +93,7 @@ class BatchViewModel(application: Application) : AndroidViewModel(application) {
             // 文件在应用私有 cache 中，不进入系统相册；原路径保留 EXIF 拍摄时间和位置。
             val displayPath = result.displayBitmap?.let { online ->
                 val file = File.createTempFile("batch-display-", ".png", context.cacheDir)
+                tempDisplayFiles.add(file)
                 file.outputStream().use { stream ->
                     check(online.compress(Bitmap.CompressFormat.PNG, 100, stream))
                 }
@@ -140,7 +142,7 @@ class BatchViewModel(application: Application) : AndroidViewModel(application) {
     /** Main-thread retry update; retain only metadata, and recompute rather than increment counts. */
     fun recordRetry(index: Int, solve: com.starcam.astro.astro.SolveResult,
                     engine: com.starcam.astro.astro.SolveEngine?, detail: String?) {
-        if (!finished || index !in outcomes.indices || solve.wcs == null) return
+        if (index !in outcomes.indices || solve.wcs == null) return
         val label = listOfNotNull(engine?.label(LocaleState.isEnglish), detail?.takeIf { it.isNotBlank() }).joinToString(" · ")
         outcomes = outcomes.toMutableList().also { it[index] = BatchOutcome.Solved(solve, label) }
         val tally = BatchTally()
@@ -150,6 +152,10 @@ class BatchViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         cancel()
+        val files = synchronized(tempDisplayFiles) {
+            tempDisplayFiles.toList().also { tempDisplayFiles.clear() }
+        }
+        files.forEach { runCatching { it.delete() } }
     }
 
     companion object {

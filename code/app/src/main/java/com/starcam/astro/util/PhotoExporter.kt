@@ -190,8 +190,9 @@ object PhotoExporter {
                 geometry.width, geometry.height, stars, StarChartOverlay.projectLines(stars),
                 StarChartOverlay.constellationLabels(stars, english), messier, solar,
             )
-            val annotationScale = maxOf(geometry.width, geometry.height).toFloat() / maxOf(input.previewWidth, input.previewHeight)
-            val degPerPx = (input.solve.fieldWidthDeg / footprint.first).toFloat()
+            val previewMaxDim = maxOf(input.previewWidth, input.previewHeight).coerceAtLeast(1)
+            val annotationScale = maxOf(geometry.width, geometry.height).toFloat() / previewMaxDim
+            val degPerPx = (input.solve.fieldWidthDeg / footprint.first.coerceAtLeast(1).toDouble()).toFloat()
             coroutineContext.ensureActive()
             LayeredRenderer.draw(
                 Canvas(target), scene, flags, english, density = 2f * annotationScale,

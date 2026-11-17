@@ -17,11 +17,13 @@ class AttitudeFusion(private val correctionTimeSec: Double = 0.8) {
 
     private var q: FloatArray? = null        // 运行估计（设备 → 世界）
     private val lastOmega = FloatArray(3)    // 最近陀螺角速度（设备系 rad/s）
-    private var lastEventNanos = 0L          // 最近一次旋转矢量/陀螺事件
+    private var lastEventNanos = 0L          // 最近一次旋转矢量/陀螺事件（单调不退）
+    private var lastGyroNanos = 0L           // 最近一次陀螺事件（专供陀螺积分 dt）
     private var lastRvNanos = 0L             // 最近一次旋转矢量事件
     private var hasEvents = false
 
     /** 旋转矢量事件（values 为 3 元素 x,y,z） */
+    @Synchronized
     fun onRotationVector(x: Float, y: Float, z: Float, timestampNanos: Long) {
         val qRv = QuatMath.quatFromRotationVector(x, y, z)
         val cur = q
@@ -33,30 +35,40 @@ class AttitudeFusion(private val correctionTimeSec: Double = 0.8) {
             q = QuatMath.nlerp(cur, qRv, alpha)
         }
         lastRvNanos = timestampNanos
-        lastEventNanos = timestampNanos
+        if (timestampNanos > lastEventNanos) {
+            lastEventNanos = timestampNanos
+        }
         hasEvents = true
     }
 
     /** 陀螺仪事件（角速度 rad/s，设备系） */
+    @Synchronized
     fun onGyro(omegaX: Float, omegaY: Float, omegaZ: Float, timestampNanos: Long) {
-        val cur = q ?: return
-        val dt = (timestampNanos - lastEventNanos) / 1e9
-        if (dt in 0.0..0.5) {
-            QuatMath.gyroDelta(floatArrayOf(omegaX, omegaY, omegaZ), dt)?.let { dq ->
-                q = QuatMath.normalize(QuatMath.quatMul(cur, dq))
-            }
+        val baseNanos = if (lastGyroNanos > 0L) lastGyroNanos else lastEventNanos
+        lastGyroNanos = timestampNanos
+        if (timestampNanos > lastEventNanos) {
+            lastEventNanos = timestampNanos
         }
         lastOmega[0] = omegaX
         lastOmega[1] = omegaY
         lastOmega[2] = omegaZ
-        lastEventNanos = timestampNanos
         hasEvents = true
+        val cur = q ?: return
+        if (baseNanos > 0L) {
+            val dt = (timestampNanos - baseNanos) / 1e9
+            if (dt in 0.0..0.5) {
+                QuatMath.gyroDelta(floatArrayOf(omegaX, omegaY, omegaZ), dt)?.let { dq ->
+                    q = QuatMath.normalize(QuatMath.quatMul(cur, dq))
+                }
+            }
+        }
     }
 
     /**
      * 预测姿态（设备 → 世界四元数）：运行估计 + 按最新角速度外推 [predictSec]。
      * 无任何事件时返回 null。
      */
+    @Synchronized
     fun predicted(nowNanos: Long, predictSec: Double): FloatArray? {
         val cur = q ?: return null
         if (!hasEvents) return null

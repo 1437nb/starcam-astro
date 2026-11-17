@@ -1,11 +1,12 @@
 package com.starcam.astro.astro
 
 import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.asin
 import kotlin.math.atan
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
-import kotlin.math.asin
 import kotlin.math.sqrt
 
 /**
@@ -58,6 +59,7 @@ class WcsTransform(
         val yw = north / rad
 
         // CD 矩阵求逆：像素偏移 u = CD⁻¹ · w
+        if (abs(det) < 1e-20 || !det.isFinite()) return doubleArrayOf(Double.NaN, Double.NaN)
         val u = (cd22 * xw - cd12 * yw) / det
         val v = (-cd21 * xw + cd11 * yw) / det
         return doubleArrayOf(crpix1 + u, crpix2 + v)
@@ -135,7 +137,9 @@ class WcsTransform(
                     t.startsWith("CD1_") || t.startsWith("CD2_")
                 ) {
                     val m = Regex("([A-Z0-9_]+)\\s*=\\s*([-+0-9.eE]+)").find(t)
-                    if (m != null) kv[m.groupValues[1]] = m.groupValues[2].toDouble()
+                    if (m != null) {
+                        m.groupValues[2].toDoubleOrNull()?.let { kv[m.groupValues[1]] = it }
+                    }
                 }
             }
             val need = listOf("CRPIX1", "CRPIX2", "CRVAL1", "CRVAL2", "CD1_1", "CD1_2", "CD2_1", "CD2_2")

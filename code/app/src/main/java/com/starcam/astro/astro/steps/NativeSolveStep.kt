@@ -76,7 +76,7 @@ class NativeSolveStep : SolveStep {
             )
             val remSec = ctx.remainingSec
             if (remSec > 0.5) {
-                val effectiveTimeLimit = minOf(StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV * 0.7, remSec * 0.9)
+                val effectiveTimeLimit = minOf(8.0, StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV * 0.4, remSec * 0.35)
                 nativeSolve = try {
                     StellarSolverNative.solveBitmapPriors(
                         ctx.context, ctx.display, lo, hi,
@@ -110,7 +110,7 @@ class NativeSolveStep : SolveStep {
             )
             val remSec = ctx.remainingSec
             if (remSec > 0.5) {
-                val effectiveTimeLimit = minOf(StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV * 0.7, remSec * 0.9)
+                val effectiveTimeLimit = minOf(10.0, StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV * 0.5, remSec * 0.45)
                 nativeSolve = try {
                     StellarSolverNative.solveBitmapPriors(
                         ctx.context, ctx.display, lo, hi,

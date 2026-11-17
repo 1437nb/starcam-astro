@@ -229,7 +229,8 @@ object LayeredRenderer {
                 var diskR = 0f
                 if (degPerPx > 0f && SolarSystemCatalog.isDisk(body)) {
                     val px = (s.pos.angularDiameterDeg / 2.0 / degPerPx).toFloat() * sx
-                    diskR = px.coerceIn(2.5f * density, maxDiskR)
+                    val minDiskR = 2.5f * density
+                    diskR = px.coerceIn(minDiskR, maxOf(minDiskR, maxDiskR))
                 }
 
                 val effR = if (SolarSystemCatalog.isDisk(body) && diskR > 0f) diskR else markerR
