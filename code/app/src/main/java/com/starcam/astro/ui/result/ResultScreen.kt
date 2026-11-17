@@ -17,9 +17,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -295,6 +294,7 @@ private fun SuccessContent(
 ) {
     // §0.78：全分辨率标注图合成要移出主线程（见下面 onTap 的说明）
     val scope = rememberCoroutineScope()
+    var openingViewer by remember { mutableStateOf(false) }
     // §0.47：图层开关由 ResultScreen 持有（查看器共享同一开关状态）
     Column(
         modifier = modifier
@@ -308,26 +308,33 @@ private fun SuccessContent(
             // §0.78：原来在主线程**同步**合成 2200px 全分辨率位图（≈14MB + 一遍全星表
             // 投影），点开大图时明显卡顿；而同一个操作在 SaveToGalleryButton 里却走了 IO。
             onTap = {
-                scope.launch {
-                    val anno = withContext(Dispatchers.IO) {
-                        renderAnnotatedBitmap(state, flags = layerFlags)
+                if (!openingViewer) {
+                    openingViewer = true
+                    scope.launch {
+                        try {
+                            val anno = withContext(Dispatchers.IO) {
+                                renderAnnotatedBitmap(state, flags = layerFlags)
+                            }
+                            onOpenViewer(state.bitmap, anno)
+                        } finally {
+                            openingViewer = false
+                        }
                     }
-                    onOpenViewer(state.bitmap, anno)
                 }
             },
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         // §0.120：图层快捷开关（识别完毕后直接切换星星名字、连线、星座名等标注）
         LayerFilterChips(
             flags = layerFlags,
             onFlagsChange = onFlagsChange,
             showPlanets = state.solar.isNotEmpty(),
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         PhotoExportActions(state, layerFlags) { flags, english ->
             renderAnnotatedBitmap(state, isEnglish = english, flags = flags)
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
         InfoPanel(state, Modifier.padding(horizontal = 16.dp))
         Spacer(Modifier.height(16.dp))
         Row(
@@ -336,15 +343,22 @@ private fun SuccessContent(
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Button(
+            FilledTonalButton(
                 onClick = onRetry,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-            ) { Text(com.starcam.astro.ui.I18n.Result.reSolve) }
-            OutlinedButton(onClick = onRetake, modifier = Modifier.weight(1f)) { Text(com.starcam.astro.ui.I18n.Result.retake) }
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp),
+            ) {
+                Text(com.starcam.astro.ui.I18n.Result.reSolve)
+            }
+            OutlinedButton(
+                onClick = onRetake,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp),
+            ) {
+                Text(com.starcam.astro.ui.I18n.Result.retake)
+            }
         }
         Spacer(Modifier.height(24.dp))
     }
