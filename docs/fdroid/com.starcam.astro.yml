@@ -16,9 +16,9 @@ RepoType: git
 Repo: https://github.com/1437nb/starcam-astro.git
 
 Builds:
-  - versionName: 1.5.102
-    versionCode: 122
-    commit: v1.5.102
+  - versionName: 1.5.104
+    versionCode: 124
+    commit: v1.5.104
     subdir: code/app
     sudo:
       - apt-get update
@@ -33,5 +33,5 @@ Builds:
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 1.5.102
-CurrentVersionCode: 122
+CurrentVersion: 1.5.104
+CurrentVersionCode: 124
