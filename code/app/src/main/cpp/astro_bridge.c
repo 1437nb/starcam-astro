@@ -293,6 +293,7 @@ static starxy_t* detect_stars(const float* gray, int w, int h, double plim_overr
         starxy_set_y(field, i, s.y[i]);
         starxy_set_flux(field, i, s.flux[i]);
     }
+    starxy_sort_by_flux(field);
     release_simplexy(&s);
     return field;
 }
@@ -423,6 +424,7 @@ static void run_solver(
                 starxy_set_y(ext_field, i, ext_stars[2 + i*3]);
                 starxy_set_flux(ext_field, i, ext_stars[3 + i*3]);
             }
+            starxy_sort_by_flux(ext_field);
         } else if (ext_n >= 4) {
             ext_n = 0; /* 畸形/截断的外部星表：忽略，不留半份数据 */
         }

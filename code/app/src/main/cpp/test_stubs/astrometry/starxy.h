@@ -17,5 +17,6 @@ void starxy_set_flux(starxy_t* f, int i, double v);
 double starxy_get_x(const starxy_t* f, int i);
 double starxy_get_y(const starxy_t* f, int i);
 double starxy_get_flux(const starxy_t* f, int i);
+void starxy_sort_by_flux(starxy_t* f);
 
 #endif /* ASTROMETRY_TEST_STUB_STARXY_H */

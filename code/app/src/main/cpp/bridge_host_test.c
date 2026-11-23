@@ -125,6 +125,7 @@ void starxy_set_flux(starxy_t* f, int i, double v) { (void)f; (void)i; (void)v; 
 double starxy_get_x(const starxy_t* f, int i) { (void)f; (void)i; return 0.0; }
 double starxy_get_y(const starxy_t* f, int i) { (void)f; (void)i; return 0.0; }
 double starxy_get_flux(const starxy_t* f, int i) { (void)f; (void)i; return 0.0; }
+void starxy_sort_by_flux(starxy_t* f) { (void)f; }
 
 void simplexy_set_defaults(simplexy_t* s) { memset(s, 0, sizeof(*s)); }
 int simplexy_run(simplexy_t* s) { s->npeaks = 0; return 0; }
