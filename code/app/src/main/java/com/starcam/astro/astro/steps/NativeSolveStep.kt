@@ -1,13 +1,16 @@
 package com.starcam.astro.astro.steps
 
 import android.graphics.Bitmap
+import com.starcam.astro.astro.CompactStarDetector
 import com.starcam.astro.astro.EngineResult
 import com.starcam.astro.astro.ExifPriors
 import com.starcam.astro.astro.ExifPriorsReader
 import com.starcam.astro.astro.FovEstimate
+import com.starcam.astro.astro.NativePreprocess
 import com.starcam.astro.astro.PointingHintStore
 import com.starcam.astro.astro.SolveEngine
 import com.starcam.astro.astro.SolveResult
+import com.starcam.astro.astro.SolverPlanning
 import com.starcam.astro.astro.StarSolver
 import com.starcam.astro.astro.StellarSolverNative
 import com.starcam.astro.data.SolveLogStore
@@ -129,10 +132,10 @@ class NativeSolveStep : SolveStep {
             )
             val remSec = ctx.remainingSec
             if (remSec > 0.5) {
-                val effectiveTimeLimit = if (priors.locationIsFallback) {
-                    minOf(4.0, remSec * 0.25)
-                } else {
-                    minOf(8.0, StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV * 0.45, remSec * 0.40)
+                val effectiveTimeLimit = when {
+                    priors.locationIsFallback -> minOf(2.5, remSec * 0.22)
+                    remSec <= 15.0 -> minOf(2.5, remSec * 0.22)
+                    else -> minOf(7.0, StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV * 0.40, remSec * 0.35)
                 }
                 val tSeg0 = System.currentTimeMillis()
                 nativeSolve = try {
@@ -162,22 +165,30 @@ class NativeSolveStep : SolveStep {
             }
         }
 
+        var lastObservedNStars: Int? = StellarSolverNative.lastFailNStars?.takeIf { it > 0 }
+
         // 3) 分段盲解 / 已知 scale 求解
         if (nativeSolve == null) {
+            val retryReserveSec = if (ctx.remainingSec >= 8.0) 5.5 else 0.0
             val nativePlan = if (effFov != null) {
                 val (lo, hi) = FovEstimate.fovRange(effFov)
                 listOf(Triple(lo, hi, StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV))
             } else {
-                com.starcam.astro.astro.SolverPlanning.nativeBlindSegments()
+                SolverPlanning.nativeBlindSegments()
             }
             for ((index, seg) in nativePlan.withIndex()) {
                 coroutineContext.ensureActive()
                 ctx.token.check()
-                val remSec = ctx.remainingSec
-                if (remSec <= 0.5) break
+                val usableRem = (ctx.remainingSec - retryReserveSec).coerceAtLeast(0.0)
+                if (usableRem <= 0.8) break
                 val (lo, hi, _) = seg
-                val effectiveTimeLimit = com.starcam.astro.astro.SolverPlanning
-                    .nativeSegmentTimeLimitSec(index, nativePlan, remSec)
+                val rawLimit = SolverPlanning
+                    .nativeSegmentTimeLimitSec(index, nativePlan, usableRem)
+                val effectiveTimeLimit = if (retryReserveSec > 0.0 && index == 0) {
+                    minOf(rawLimit, if (nativePlan.size > 1) 3.2 else 4.0)
+                } else {
+                    rawLimit
+                }
                 if (effectiveTimeLimit < 0.5) break
                 ctx.onProgress(
                     if (isEn) "Astrometry engine solving (FOV %.1f°–%.1f°, segment %d/%d, ~%.0fs)…"
@@ -197,6 +208,7 @@ class NativeSolveStep : SolveStep {
                     null
                 }
                 val segMs = System.currentTimeMillis() - tSeg0
+                StellarSolverNative.lastFailNStars?.takeIf { it > 0 }?.let { lastObservedNStars = it }
                 ctx.log.line(
                     ctx.context,
                     "官方引擎-分段[${index + 1}/${nativePlan.size}] %.1f°..%.1f°：limit=%.1fs elapsed=${segMs}ms ok=${nativeSolve != null} nstars=${StellarSolverNative.lastFailNStars ?: nativeSolve?.nStars ?: -1}"
@@ -206,6 +218,152 @@ class NativeSolveStep : SolveStep {
                     nativeDetail = if (isEn) "FOV %.1f°–%.1f°".format(lo, hi)
                     else "视场 %.1f°–%.1f°".format(lo, hi)
                     break
+                }
+            }
+        }
+
+        // 3.5) §0.144 P3 预算内单因子预处理重试（先天空裁剪避开前景，后局部背景扣除+降噪重提）
+        if (nativeSolve == null && ctx.remainingSec >= 2.2) {
+            coroutineContext.ensureActive()
+            ctx.token.check()
+            val origW = ctx.display.width
+            val origH = ctx.display.height
+            val quickStars = try {
+                CompactStarDetector.detect(origW, origH, grayBuffer, ctx.token)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+
+            // 3A) 前景感知天空裁剪重试
+            val cropPlan = NativePreprocess.detectSkyCrop(quickStars, grayBuffer, origW, origH)
+            if (cropPlan != null && ctx.remainingSec >= 2.0) {
+                val (edge, crop) = cropPlan
+                val cropBmp = try {
+                    Bitmap.createBitmap(ctx.display, crop.x0, crop.y0, crop.width, crop.height)
+                } catch (_: Throwable) {
+                    null
+                }
+                if (cropBmp != null) {
+                    try {
+                        val cropGray = NativePreprocess.cropGray(grayBuffer, origW, origH, crop)
+                        val fovScale = crop.width.toDouble() / origW.coerceAtLeast(1)
+                        val (cLo, cHi) = if (effFov != null) {
+                            FovEstimate.fovRange(effFov * fovScale)
+                        } else {
+                            (15.0 * fovScale).coerceAtLeast(1.5) to (115.0 * fovScale).coerceAtMost(140.0)
+                        }
+                        val limit = minOf(3.5, ctx.remainingSec * 0.55)
+                        if (limit >= 0.8) {
+                            ctx.onProgress(
+                                if (isEn) "Retrying sky crop away from foreground…"
+                                else "官方引擎避开前景裁剪天空重试中…",
+                            )
+                            val t0 = System.currentTimeMillis()
+                            val solvedCrop = try {
+                                StellarSolverNative.solveBitmap(
+                                    ctx.context, cropBmp, cLo, cHi, limit,
+                                    gray = cropGray,
+                                    token = ctx.token,
+                                )
+                            } catch (e: Throwable) {
+                                if (e is CancellationException) throw e
+                                null
+                            }
+                            val elapsed = System.currentTimeMillis() - t0
+                            StellarSolverNative.lastFailNStars?.takeIf { it > 0 }?.let { lastObservedNStars = it }
+                            ctx.log.line(
+                                ctx.context,
+                                "官方引擎-天空裁剪重试(${edge.name} ${crop.width}x${crop.height})：FOV %.1f°..%.1f° limit=%.1fs elapsed=${elapsed}ms ok=${solvedCrop != null} nstars=${StellarSolverNative.lastFailNStars ?: solvedCrop?.nStars ?: -1}"
+                                    .format(cLo, cHi, limit),
+                            )
+                            if (solvedCrop != null) {
+                                nativeSolve = NativePreprocess.remapCroppedSolve(solvedCrop, crop, origW, origH)
+                                nativeDetail = if (isEn) "Sky crop (${edge.name}, FOV %.1f°–%.1f°)".format(cLo, cHi)
+                                else "天空裁剪(${edge.name} · 视场 %.1f°–%.1f°)".format(cLo, cHi)
+                            }
+                        }
+                    } finally {
+                        cropBmp.recycle()
+                    }
+                }
+            }
+
+            // 3B) 局部背景扣除 + 热点抑制 + 自适应 plim 重试（针对光害/月晕/稠密噪点）
+            if (nativeSolve == null && ctx.remainingSec >= 1.8 &&
+                (lastObservedNStars == null || lastObservedNStars!! >= 1500)
+            ) {
+                coroutineContext.ensureActive()
+                ctx.token.check()
+                val tPrep0 = System.currentTimeMillis()
+                val cleanGray = NativePreprocess.cleanBackgroundAndSpots(grayBuffer, origW, origH)
+                val prepMs = System.currentTimeMillis() - tPrep0
+                val plim = NativePreprocess.recommendedPlim(lastObservedNStars)
+                val (bLo, bHi) = if (effFov != null) FovEstimate.fovRange(effFov) else 1.5 to 95.0
+                val limit = minOf(3.8, ctx.remainingSec * 0.80)
+                if (limit >= 0.8) {
+                    ctx.onProgress(
+                        if (isEn) "Retrying with skyglow background subtraction…"
+                        else "官方引擎正在进行去背景与噪点抑制重试…",
+                    )
+                    val t0 = System.currentTimeMillis()
+                    nativeSolve = try {
+                        StellarSolverNative.solveBitmap(
+                            ctx.context, ctx.display, bLo, bHi, limit,
+                            gray = cleanGray,
+                            token = ctx.token,
+                            plimOverride = plim,
+                        )
+                    } catch (e: Throwable) {
+                        if (e is CancellationException) throw e
+                        null
+                    }
+                    val elapsed = System.currentTimeMillis() - t0
+                    ctx.log.line(
+                        ctx.context,
+                        "官方引擎-去背景降噪重试(prep=${prepMs}ms plim=%.1f)：FOV %.1f°..%.1f° limit=%.1fs elapsed=${elapsed}ms ok=${nativeSolve != null} nstars=${StellarSolverNative.lastFailNStars ?: nativeSolve?.nStars ?: -1}"
+                            .format(plim, bLo, bHi, limit),
+                    )
+                    if (nativeSolve != null) {
+                        nativeDetail = if (isEn) "Skyglow cleaned (FOV %.1f°–%.1f°)".format(bLo, bHi)
+                        else "去背景降噪(视场 %.1f°–%.1f°)".format(bLo, bHi)
+                    }
+                }
+            }
+
+            // 3C) EXIF 窄视场估算偏差兜底（例如竖拍宽边 EXIF 导致真实水平视场超出 ±35%）
+            if (nativeSolve == null && effFov != null && ctx.remainingSec >= 2.2) {
+                coroutineContext.ensureActive()
+                ctx.token.check()
+                val wLo = (effFov * 0.55).coerceAtLeast(1.5)
+                val wHi = (effFov * 1.90).coerceAtMost(120.0)
+                val limit = minOf(3.2, ctx.remainingSec * 0.85)
+                if (limit >= 0.8) {
+                    ctx.onProgress(
+                        if (isEn) "Retrying widened FOV fallback…"
+                        else "官方引擎正在进行宽视场范围兜底重试…",
+                    )
+                    val t0 = System.currentTimeMillis()
+                    nativeSolve = try {
+                        StellarSolverNative.solveBitmap(
+                            ctx.context, ctx.display, wLo, wHi, limit,
+                            gray = grayBuffer,
+                            token = ctx.token,
+                        )
+                    } catch (e: Throwable) {
+                        if (e is CancellationException) throw e
+                        null
+                    }
+                    val elapsed = System.currentTimeMillis() - t0
+                    ctx.log.line(
+                        ctx.context,
+                        "官方引擎-宽视场兜底重试：FOV %.1f°..%.1f° limit=%.1fs elapsed=${elapsed}ms ok=${nativeSolve != null} nstars=${StellarSolverNative.lastFailNStars ?: nativeSolve?.nStars ?: -1}"
+                            .format(wLo, wHi, limit),
+                    )
+                    if (nativeSolve != null) {
+                        nativeDetail = if (isEn) "Widened FOV fallback (%.1f°–%.1f°)".format(wLo, wHi)
+                        else "宽视场兜底(%.1f°–%.1f°)".format(wLo, wHi)
+                    }
                 }
             }
         }

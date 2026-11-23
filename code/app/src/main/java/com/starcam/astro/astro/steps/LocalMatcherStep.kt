@@ -163,7 +163,7 @@ class LocalMatcherStep : SolveStep {
         // can exhaust all local time before recovery or NativeSolveStep ever runs.
         val tPrimary0 = System.currentTimeMillis()
         val primaryToken = if (recoveryAllowed) {
-            SolveToken(localToken, timeoutMillis = (localRemainingSec() * 550).toLong().coerceAtLeast(1L))
+            SolveToken(localToken, timeoutMillis = (localRemainingSec() * 700).toLong().coerceAtLeast(1L))
         } else {
             localToken
         }

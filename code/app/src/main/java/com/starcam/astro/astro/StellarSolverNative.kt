@@ -213,7 +213,7 @@ object StellarSolverNative {
         return solveBitmap(context, bitmap, fovLoDeg, fovHiDeg, timeLimitSec)
     }
 
-    /** 从 Bitmap 求解（可选传入已预先计算的灰度缓冲 [gray]，避免多轮盲解重复转换与分配） */
+    /** 从 Bitmap 求解（可选传入已预先计算的灰度缓冲 [gray] 与峰值显著度覆盖 [plimOverride]） */
     fun solveBitmap(
         context: Context,
         bitmap: Bitmap,
@@ -222,9 +222,11 @@ object StellarSolverNative {
         timeLimitSec: Double = 45.0,
         gray: FloatArray? = null,
         token: SolveToken? = null,
+        plimOverride: Double = 0.0,
     ): SolveResult? {
         return solveBitmapImpl(context, bitmap, fovLoDeg, fovHiDeg, timeLimitSec,
-            raDeg = NO_PRIOR, decDeg = NO_PRIOR, radiusDeg = -1.0, gray = gray, token = token)
+            raDeg = NO_PRIOR, decDeg = NO_PRIOR, radiusDeg = -1.0,
+            plimOverride = plimOverride, gray = gray, token = token)
     }
 
     /**
