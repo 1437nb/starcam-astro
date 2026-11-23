@@ -234,6 +234,7 @@ object StarSolver {
         suspend fun execute(step: SolveStep, token: SolveToken, report: org.json.JSONObject): StepOutcome =
             step.execute(ctx.copy(
                 token = token, report = report, recordSuccess = false,
+                stepBudgetSec = null, isRacing = true,
                 onProgress = { if (!token.isCancelled) ctx.onProgress("$prefix$it") },
                 onPhase = { if (!token.isCancelled) ctx.onPhase(SolvePhase.RACING) },
                 onStarsDetected = { stars, total -> if (!token.isCancelled) ctx.onStarsDetected(stars, total) },
@@ -423,7 +424,15 @@ object StarSolver {
                     }
                 }
             } else {
-                for (engine in steps) {
+                val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+                val isLowRam = am?.isLowRamDevice == true
+                val maxMemMb = Runtime.getRuntime().maxMemory() / (1024 * 1024)
+                log.line(
+                    context,
+                    "串行调度（racing=${settings.parallelEngineRacing}, canRace=false, " +
+                        "mode=${settings.engineMode.key}, maxMem=${maxMemMb}MB, lowRam=$isLowRam, native=${NativeEngineProbe.available}）",
+                )
+                for ((stepIdx, engine) in steps.withIndex()) {
                     coroutineContext.ensureActive()
                     token.check()
 
@@ -435,13 +444,44 @@ object StarSolver {
                     val step = stepMap[engine] ?: continue
                     enginesTried.add(engine.labelZh)
 
+                    val hasNativeFollowUp = (stepIdx + 1 until steps.size).any {
+                        steps[it] == SolveEngine.ASTROMETRY_NATIVE
+                    }
+                    val allocatedBudgetSec = if (engine == SolveEngine.LOCAL_MATCHER && hasNativeFollowUp) {
+                        SolverPlanning.localStepBudgetSec(budgetSec, fov, hasNativeFollowUp = true)
+                    } else {
+                        null
+                    }
+                    val stepStartMs = System.currentTimeMillis() - logT0
+                    log.line(
+                        context,
+                        "调度：开始 ${engine.labelZh}（offset=${stepStartMs}ms，全局剩余=${"%.1f".format(ctx.remainingSec)}s" +
+                            (allocatedBudgetSec?.let { "，步骤上限=${"%.1f".format(it)}s" } ?: "") + "）",
+                    )
+
                     val stepTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
                     val outcome = kotlinx.coroutines.withTimeoutOrNull(stepTimeout) {
-                        step.execute(ctx.copy(fovOverride = fovOverride))
+                        step.execute(
+                            ctx.copy(
+                                fovOverride = fovOverride,
+                                stepBudgetSec = allocatedBudgetSec,
+                                isRacing = false,
+                            ),
+                        )
                     } ?: run {
                         log.line(context, "${engine.labelZh}：单步执行超时（耗尽剩余预算 ${stepTimeout}ms），跳过")
                         StepOutcome.Failure(reason = "单步超过预算")
                     }
+                    val stepElapsedMs = (System.currentTimeMillis() - logT0) - stepStartMs
+                    val outcomeTag = when (outcome) {
+                        is StepOutcome.Success -> "success"
+                        is StepOutcome.Failure -> "failure(${outcome.reason.take(40)})"
+                        is StepOutcome.Skipped -> "skipped(${outcome.reason})"
+                    }
+                    log.line(
+                        context,
+                        "调度：结束 ${engine.labelZh}（耗时=${stepElapsedMs}ms，全局剩余=${"%.1f".format(ctx.remainingSec)}s，结果=$outcomeTag）",
+                    )
                     when (outcome) {
                         is StepOutcome.Success -> return@withContext outcome.result
                         is StepOutcome.Failure -> {

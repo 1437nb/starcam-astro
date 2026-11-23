@@ -34,6 +34,10 @@ data class StepContext(
     val pixels: SolvePixels = SolvePixels(display.width, display.height) { LocalStarMatcher.bitmapToGray(display) },
     val onPhase: (SolvePhase) -> Unit = {},
     val recordSuccess: Boolean = true,
+    /** §0.144 当前步骤可用的局部预算（秒）；null 表示直接受全局 [deadlineMs] 约束。 */
+    val stepBudgetSec: Double? = null,
+    /** §0.144 是否处于双引擎并发竞速分支中。 */
+    val isRacing: Boolean = false,
 ) {
     /** 距离全局死线剩余秒数 */
     val remainingSec: Double

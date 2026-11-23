@@ -53,7 +53,28 @@ class LocalMatcherStep : SolveStep {
         var recoveryStars: List<DetectedStar>? = null
         var compactRecoveryStars: List<DetectedStar>? = null
 
+        val stepT0Ms = System.currentTimeMillis()
+        val stepT0MonoMs = System.nanoTime() / 1_000_000
+        val localBudgetSec = ctx.stepBudgetSec
+        val localToken = localBudgetSec?.let { sec ->
+            SolveToken(ctx.token, timeoutMillis = (sec * 1000.0).toLong().coerceAtLeast(1000L))
+        } ?: ctx.token
+        val localDeadlineMonoMs = localBudgetSec?.let {
+            stepT0MonoMs + (it * 1000.0).toLong().coerceAtLeast(1000L)
+        } ?: ctx.deadlineMs
+        fun localRemainingSec(): Double = minOf(
+            ctx.remainingSec,
+            (localDeadlineMonoMs - System.nanoTime() / 1_000_000) / 1000.0,
+        ).coerceAtLeast(0.0)
+
+        var stepTimedOut = false
+        var detectMs = 0L
+        var primaryMs = 0L
+        var skyRetryMs = 0L
+        var recoveryMs = 0L
+
         val stars = try {
+            val tDetect0 = System.currentTimeMillis()
             val extractDiag = StringBuilder()
             fun sepStars(sigma: Double): StellarSolverNative.SepStars? = try {
                 StellarSolverNative.sepDetectStars(
@@ -100,11 +121,12 @@ class LocalMatcherStep : SolveStep {
                     }
                 },
             )
+            detectMs = System.currentTimeMillis() - tDetect0
             extractDiag.append(plan.note)
             lastLocalStarTotal = plan.detectedTotal
             previewStars = plan.preview
             sepListForFallback = plan.fallback
-            ctx.log.line(ctx.context, "提星：$extractDiag")
+            ctx.log.line(ctx.context, "提星(${detectMs}ms)：$extractDiag")
 
             previewStars?.takeIf { it.isNotEmpty() }?.let { det ->
                 val maxB = det.maxOfOrNull { it.brightness } ?: 0f
@@ -137,10 +159,14 @@ class LocalMatcherStep : SolveStep {
         val allowDeep = (ctx.fovDeg != null && ctx.fovDeg <= LocalStarMatcher.DEEP_PATH_MAX_FOV_DEG) ||
             !ctx.scheduledSteps.contains(SolveEngine.ASTROMETRY_NATIVE)
         val recoveryAllowed = ctx.fovDeg == null || ctx.fovDeg >= 10.0
-        // Reserve part of the existing global budget; otherwise a contaminated primary
-        // list can exhaust it before the independent detector ever gets a chance.
-        val primaryToken = if (recoveryAllowed) SolveToken(ctx.token,
-            timeoutMillis = (ctx.remainingSec * 600).toLong().coerceAtLeast(1)) else ctx.token
+        // Reserve part of the step/global budget; otherwise a contaminated primary list
+        // can exhaust all local time before recovery or NativeSolveStep ever runs.
+        val tPrimary0 = System.currentTimeMillis()
+        val primaryToken = if (recoveryAllowed) {
+            SolveToken(localToken, timeoutMillis = (localRemainingSec() * 550).toLong().coerceAtLeast(1L))
+        } else {
+            localToken
+        }
         val primaryAttempt = try {
             LocalStarMatcher.matchWithDiagnostics(
                 stars ?: emptyList(), ctx.display.width, ctx.display.height, hint,
@@ -150,15 +176,24 @@ class LocalMatcherStep : SolveStep {
         } catch (e: Throwable) {
             if (e is CancellationException) throw e
             ctx.token.check()
-            if (e is SolveBudgetExceeded) ctx.log.line(ctx.context, "内置星表主路径时间片耗尽，保留余量给复杂星空补救")
+            if (e is SolveBudgetExceeded) {
+                if (localToken.isBudgetExceeded) {
+                    stepTimedOut = true
+                } else {
+                    ctx.log.line(ctx.context, "内置星表主路径时间片耗尽，保留余量给复杂星空补救")
+                }
+            }
             null
         }
+        primaryMs = System.currentTimeMillis() - tPrimary0
         ctx.token.check()
-        val skyRetry = if (primaryAttempt?.result == null && recoveryAllowed && ctx.remainingSec >= 2.0 &&
-            !FitsImage.isFitsPath(ctx.imagePath)
+
+        val skyRetry = if (!stepTimedOut && primaryAttempt?.result == null && recoveryAllowed &&
+            !localToken.isBudgetExceeded && localRemainingSec() >= 1.5 && !FitsImage.isFitsPath(ctx.imagePath)
         ) {
-            val skyToken = SolveToken(ctx.token, timeoutMillis = minOf(4_000L, (ctx.remainingSec * 500).toLong()))
-            try {
+            val tSky0 = System.currentTimeMillis()
+            val skyToken = SolveToken(localToken, timeoutMillis = minOf(3_500L, (localRemainingSec() * 450).toLong().coerceAtLeast(1L)))
+            val res = try {
                 val edge = SkyRegionRecovery.foregroundEdge(stars, ctx.display.width, ctx.display.height) { ctx.pixels.gray }
                 edge?.let {
                     ctx.onProgress(if (isEn) "Matching the sky away from the foreground…" else "正在避开前景识别天空…")
@@ -167,19 +202,31 @@ class LocalMatcherStep : SolveStep {
             } catch (e: RuntimeException) {
                 if (e is CancellationException) throw e
                 ctx.token.check()
+                if (e is SolveBudgetExceeded && localToken.isBudgetExceeded) stepTimedOut = true
                 ctx.log.line(ctx.context, "天空区域补救中止：${e.javaClass.simpleName}")
                 null
             } catch (_: OutOfMemoryError) {
                 null
             }
+            skyRetryMs = System.currentTimeMillis() - tSky0
+            res
         } else null
-        val attempt = if (skyRetry != null || primaryAttempt?.result != null || !recoveryAllowed || ctx.isBudgetDepleted) primaryAttempt else {
+
+        val attempt = if (stepTimedOut || skyRetry != null || primaryAttempt?.result != null ||
+            !recoveryAllowed || localToken.isBudgetExceeded || localRemainingSec() < 0.8 || ctx.isBudgetDepleted
+        ) {
+            if (!stepTimedOut && primaryAttempt?.result == null && skyRetry == null && localToken.isBudgetExceeded) {
+                stepTimedOut = true
+            }
+            primaryAttempt
+        } else {
+            val tRec0 = System.currentTimeMillis()
             val retry = try {
                 LocalStarMatcher.matchWithDiagnostics(
                     emptyList(), ctx.display.width, ctx.display.height, hint,
                     allowDeepRetry = allowDeep,
                     fovHintDeg = ctx.fovDeg,
-                    token = ctx.token,
+                    token = localToken,
                     recoveryDetected = { recoveryToken ->
                         ctx.onPhase(com.starcam.astro.astro.SolvePhase.DETECTING)
                         ctx.onProgress(if (isEn) "Recovering stars against uneven sky background…"
@@ -204,12 +251,24 @@ class LocalMatcherStep : SolveStep {
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
                 ctx.token.check()
+                if (e is SolveBudgetExceeded && localToken.isBudgetExceeded) {
+                    stepTimedOut = true
+                }
                 null
             }
+            recoveryMs = System.currentTimeMillis() - tRec0
             if (retry?.result != null || primaryAttempt == null) retry else primaryAttempt.copy(
                 diagnostics = primaryAttempt.diagnostics.copy(recoveryDetail = retry?.diagnostics?.recoveryDetail))
         }
         ctx.token.check()
+        if (stepTimedOut && localBudgetSec != null) {
+            ctx.log.line(
+                ctx.context,
+                "内置星表达到步骤预算上限（%.1fs），保留 %.1fs 移交后续引擎"
+                    .format(localBudgetSec, ctx.remainingSec),
+            )
+        }
+        val stepTimingStr = "timing(detect=${detectMs}ms primary=${primaryMs}ms sky=${skyRetryMs}ms rec=${recoveryMs}ms total=${System.currentTimeMillis() - stepT0Ms}ms)"
 
         val matched = skyRetry?.match ?: attempt?.result
         val diag = attempt?.diagnostics
@@ -321,7 +380,13 @@ class LocalMatcherStep : SolveStep {
             else -> "有解但内点仅 ${matched.inlierCount} 颗，被官方复核拒绝"
         }
 
-        val failureReason = diag?.recoveryDetail?.let { "$why；补救：$it" } ?: why
+        val failureReason = buildString {
+            append(diag?.recoveryDetail?.let { "$why；补救：$it" } ?: why)
+            if (stepTimedOut && localBudgetSec != null) {
+                append("（步骤预算 %.1fs 到限）".format(localBudgetSec))
+            }
+            append("；").append(stepTimingStr)
+        }
         ctx.log.line(ctx.context, "内置星表失败：$failureReason")
         SolveLogStore.addStep(ctx.report, "内置星表", "unsolved", failureReason, System.currentTimeMillis() - ctx.logT0)
 

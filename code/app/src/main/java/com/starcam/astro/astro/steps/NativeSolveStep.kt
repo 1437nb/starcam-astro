@@ -61,7 +61,19 @@ class NativeSolveStep : SolveStep {
         var nativeSolve: SolveResult? = null
         var nativeDetail = ""
         val effFov = ctx.fovOverride ?: ctx.fovDeg
+        val tGray0 = System.currentTimeMillis()
         val grayBuffer = ctx.pixels.nativeCopy()
+        val grayMs = System.currentTimeMillis() - tGray0
+        val tIdx0 = System.currentTimeMillis()
+        val nativeIndexes = com.starcam.astro.astro.NativeSolverSupport.ensureIndexes(
+            ctx.context, StellarSolverNative.BUNDLED_INDEX_NAMES,
+        )
+        val idxPrepMs = System.currentTimeMillis() - tIdx0
+        ctx.log.line(
+            ctx.context,
+            "官方引擎准备：grayMs=${grayMs} idxPrepMs=${idxPrepMs} idxCount=${nativeIndexes.size} " +
+                "remSec=${"%.1f".format(ctx.remainingSec)} fov=${effFov?.let { "%.1f°".format(it) } ?: "无EXIF"}",
+        )
 
         // 1) 传感器先验
         val sensorHint = if (ctx.settings.sensorAssistedPointing) {
@@ -77,6 +89,7 @@ class NativeSolveStep : SolveStep {
             val remSec = ctx.remainingSec
             if (remSec > 0.5) {
                 val effectiveTimeLimit = minOf(8.0, StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV * 0.4, remSec * 0.35)
+                val tSeg0 = System.currentTimeMillis()
                 nativeSolve = try {
                     StellarSolverNative.solveBitmapPriors(
                         ctx.context, ctx.display, lo, hi,
@@ -89,6 +102,12 @@ class NativeSolveStep : SolveStep {
                     if (e is CancellationException) throw e
                     null
                 }
+                val segMs = System.currentTimeMillis() - tSeg0
+                ctx.log.line(
+                    ctx.context,
+                    "官方引擎-传感器先验：limit=${"%.1f".format(effectiveTimeLimit)}s elapsed=${segMs}ms " +
+                        "ok=${nativeSolve != null} nstars=${StellarSolverNative.lastFailNStars ?: nativeSolve?.nStars ?: -1}",
+                )
                 if (nativeSolve != null) {
                     nativeDetail = if (isEn) "Sensor Prior (within %.0f°) · FOV %.1f°–%.1f°".format(sensorHint.radiusDeg, lo, hi)
                     else "传感器粗定标（%.0f° 内）· 视场 %.1f°–%.1f°".format(sensorHint.radiusDeg, lo, hi)
@@ -96,7 +115,7 @@ class NativeSolveStep : SolveStep {
             }
         }
 
-        // 2) 天顶天区先验
+        // 2) 天顶天区先验（注意：非 EXIF 的当前定位兜底在历史/异地照片上可能错误，限时收紧）
         val zenith = priors.zenith
         if (nativeSolve == null && zenith != null) {
             val (zenithRa, zenithDec) = zenith
@@ -110,7 +129,12 @@ class NativeSolveStep : SolveStep {
             )
             val remSec = ctx.remainingSec
             if (remSec > 0.5) {
-                val effectiveTimeLimit = minOf(10.0, StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV * 0.5, remSec * 0.45)
+                val effectiveTimeLimit = if (priors.locationIsFallback) {
+                    minOf(4.0, remSec * 0.25)
+                } else {
+                    minOf(8.0, StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV * 0.45, remSec * 0.40)
+                }
+                val tSeg0 = System.currentTimeMillis()
                 nativeSolve = try {
                     StellarSolverNative.solveBitmapPriors(
                         ctx.context, ctx.display, lo, hi,
@@ -123,6 +147,12 @@ class NativeSolveStep : SolveStep {
                     if (e is CancellationException) throw e
                     null
                 }
+                val segMs = System.currentTimeMillis() - tSeg0
+                ctx.log.line(
+                    ctx.context,
+                    "官方引擎-天顶先验(fallback=${priors.locationIsFallback})：limit=${"%.1f".format(effectiveTimeLimit)}s " +
+                        "elapsed=${segMs}ms ok=${nativeSolve != null} nstars=${StellarSolverNative.lastFailNStars ?: nativeSolve?.nStars ?: -1}",
+                )
                 if (nativeSolve != null) {
                     val srcZh = if (priors.locationIsFallback) "当前定位" else "EXIF 定位"
                     val srcEn = if (priors.locationIsFallback) "current location" else "EXIF GPS"
@@ -138,21 +168,24 @@ class NativeSolveStep : SolveStep {
                 val (lo, hi) = FovEstimate.fovRange(effFov)
                 listOf(Triple(lo, hi, StarSolver.NATIVE_TIME_LIMIT_KNOWN_FOV))
             } else {
-                StarSolver.blindSegments()
+                com.starcam.astro.astro.SolverPlanning.nativeBlindSegments()
             }
             for ((index, seg) in nativePlan.withIndex()) {
                 coroutineContext.ensureActive()
                 ctx.token.check()
                 val remSec = ctx.remainingSec
                 if (remSec <= 0.5) break
-                val (lo, hi, timeLimit) = seg
-                val effectiveTimeLimit = minOf(timeLimit, remSec * 0.9)
+                val (lo, hi, _) = seg
+                val effectiveTimeLimit = com.starcam.astro.astro.SolverPlanning
+                    .nativeSegmentTimeLimitSec(index, nativePlan, remSec)
+                if (effectiveTimeLimit < 0.5) break
                 ctx.onProgress(
                     if (isEn) "Astrometry engine solving (FOV %.1f°–%.1f°, segment %d/%d, ~%.0fs)…"
                         .format(lo, hi, index + 1, nativePlan.size, effectiveTimeLimit)
                     else "官方引擎求解中（视场 %.1f°–%.1f°，第 %d/%d 段，约 %.0f 秒）…"
                         .format(lo, hi, index + 1, nativePlan.size, effectiveTimeLimit),
                 )
+                val tSeg0 = System.currentTimeMillis()
                 nativeSolve = try {
                     StellarSolverNative.solveBitmap(
                         ctx.context, ctx.display, lo, hi, effectiveTimeLimit,
@@ -163,6 +196,12 @@ class NativeSolveStep : SolveStep {
                     if (e is CancellationException) throw e
                     null
                 }
+                val segMs = System.currentTimeMillis() - tSeg0
+                ctx.log.line(
+                    ctx.context,
+                    "官方引擎-分段[${index + 1}/${nativePlan.size}] %.1f°..%.1f°：limit=%.1fs elapsed=${segMs}ms ok=${nativeSolve != null} nstars=${StellarSolverNative.lastFailNStars ?: nativeSolve?.nStars ?: -1}"
+                        .format(lo, hi, effectiveTimeLimit),
+                )
                 if (nativeSolve != null) {
                     nativeDetail = if (isEn) "FOV %.1f°–%.1f°".format(lo, hi)
                     else "视场 %.1f°–%.1f°".format(lo, hi)

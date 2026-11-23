@@ -32,6 +32,51 @@ internal object SolverPlanning {
         ),
     )
 
+    /**
+     * §0.144 原生盲解增强分段（覆盖 30°~42° 竖拍手机段与 1.5°~42° 窄/中场，区间重叠防边界漏检）。
+     */
+    fun nativeBlindSegments(): List<Triple<Double, Double, Double>> = listOf(
+        Triple(30.0, 120.0, 14.0),
+        Triple(1.5, 42.0, 12.0),
+    )
+
+    /**
+     * §0.144 按权重切分原生盲解各分段可用时间，确保第一段不会耗尽剩余预算导致后续窄中场分段饿死。
+     */
+    fun nativeSegmentTimeLimitSec(
+        segIndex: Int,
+        segs: List<Triple<Double, Double, Double>>,
+        remainingSec: Double,
+    ): Double {
+        if (segIndex !in segs.indices || remainingSec <= 0.5) return 0.0
+        val usable = (remainingSec * 0.92).coerceAtLeast(0.0)
+        val weight = segs[segIndex].third.coerceAtLeast(1.0)
+        if (segIndex == segs.lastIndex) {
+            return minOf(weight, usable)
+        }
+        val remainingWeightSum = segs.drop(segIndex).sumOf { it.third.coerceAtLeast(1.0) }
+        val share = usable * (weight / remainingWeightSum.coerceAtLeast(1.0))
+        return minOf(weight, share).coerceAtLeast(minOf(1.5, usable * 0.5))
+    }
+
+    /**
+     * §0.144 串行调度时给 [SolveEngine.LOCAL_MATCHER] 分配的时间预算上限，
+     * 保证后续 [SolveEngine.ASTROMETRY_NATIVE] 在默认 30s 预算内必然获得有效搜索窗口。
+     */
+    fun localStepBudgetSec(
+        totalBudgetSec: Double,
+        fovDeg: Double?,
+        hasNativeFollowUp: Boolean,
+    ): Double {
+        if (!hasNativeFollowUp) return totalBudgetSec
+        if (fovDeg != null && fovDeg < 15.0) {
+            val narrowLocal = (totalBudgetSec * 0.35).coerceIn(4.0, 11.0)
+            return minOf(narrowLocal, totalBudgetSec * 0.5).coerceAtLeast(1.0)
+        }
+        val nativeReserve = (totalBudgetSec * 0.45).coerceIn(10.0, 15.0).coerceAtMost(totalBudgetSec * 0.5)
+        return (totalBudgetSec - nativeReserve).coerceAtLeast(1.0)
+    }
+
     /** 天球角距（度） */
     fun angularSepDeg(ra1: Double, dec1: Double, ra2: Double, dec2: Double): Double {
         val r = PI / 180.0
