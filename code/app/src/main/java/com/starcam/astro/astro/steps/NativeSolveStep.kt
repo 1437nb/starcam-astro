@@ -425,6 +425,20 @@ class NativeSolveStep : SolveStep {
         }
 
         if (nativeSolve != null) {
+            if (ctx.remainingSec >= 0.4) {
+                val refineToken = com.starcam.astro.astro.SolveToken(
+                    ctx.token,
+                    timeoutMillis = (minOf(1.5, ctx.remainingSec * 0.5) * 1000.0).toLong().coerceAtLeast(100L),
+                )
+                nativeSolve = com.starcam.astro.astro.OverlayAlignmentRefiner.refineIfNeeded(
+                    solve = nativeSolve,
+                    width = ctx.display.width,
+                    height = ctx.display.height,
+                    grayProvider = { grayBuffer },
+                    token = refineToken,
+                    log = { msg -> ctx.log.line(ctx.context, msg) },
+                ).solve
+            }
             val detail = buildString {
                 append(nativeDetail)
                 nativeSolve.indexId?.let { append(" · index-$it") }

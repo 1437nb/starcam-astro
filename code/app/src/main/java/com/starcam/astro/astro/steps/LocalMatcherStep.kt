@@ -307,8 +307,28 @@ class LocalMatcherStep : SolveStep {
             val verifySec = if (skyRetry != null) minOf(3.0, ctx.remainingSec * 0.5) else ctx.remainingSec
             val verdict = StarSolver.evaluateLocalSolve(ctx.context, ctx.display, matched, ctx.token, verifySec)
             ctx.token.check()
+            fun refineSuccess(
+                solve: com.starcam.astro.astro.SolveResult,
+                hintStars: List<DetectedStar>?,
+            ): com.starcam.astro.astro.SolveResult {
+                if (ctx.remainingSec < 0.4) return solve
+                val refineToken = SolveToken(
+                    ctx.token,
+                    timeoutMillis = (minOf(1.5, ctx.remainingSec * 0.5) * 1000.0).toLong().coerceAtLeast(100L),
+                )
+                return com.starcam.astro.astro.OverlayAlignmentRefiner.refineIfNeeded(
+                    solve = solve,
+                    width = ctx.display.width,
+                    height = ctx.display.height,
+                    grayProvider = { lastGraySnapshot ?: ctx.pixels.gray },
+                    initialStars = hintStars,
+                    token = refineToken,
+                    log = { msg -> ctx.log.line(ctx.context, msg) },
+                ).solve
+            }
             when (verdict) {
                 is StarSolver.LocalAcceptVerdict.AcceptLocal -> {
+                    val refinedSolve = refineSuccess(matched.solve, skyRetry?.stars ?: previewStars ?: stars)
                     val domainTag = when (matched.catalogDomain) {
                         CatalogDomain.SHALLOW -> ""
                         CatalogDomain.INTERMEDIATE -> if (isEn) " · Intermediate catalog" else " · 中间星等"
@@ -326,18 +346,18 @@ class LocalMatcherStep : SolveStep {
                     ctx.log.line(
                         ctx.context,
                         "内置星表成功：$detail scale=%.2f\" 耗时=%dms"
-                            .format(matched.solve.pixScaleArcsec, System.currentTimeMillis() - ctx.logT0),
+                            .format(refinedSolve.pixScaleArcsec, System.currentTimeMillis() - ctx.logT0),
                     )
                     SolveLogStore.addStep(
                         ctx.report, "内置星表", "solved",
-                        ("内点=${matched.inlierCount} scale=%.2f$domainTag$recoveryTag").format(matched.solve.pixScaleArcsec),
+                        ("内点=${matched.inlierCount} scale=%.2f$domainTag$recoveryTag").format(refinedSolve.pixScaleArcsec),
                         System.currentTimeMillis() - ctx.logT0,
                     )
                     if (ctx.recordSuccess) StarSolver.writeSuccessLog(ctx.context, ctx.report, ctx.imagePath, "内置星表", detail)
-                    return StepOutcome.Success(EngineResult(matched.solve, engine, detail, ctx.display))
+                    return StepOutcome.Success(EngineResult(refinedSolve, engine, detail, ctx.display))
                 }
                 is StarSolver.LocalAcceptVerdict.AdoptNative -> {
-                    val nativeSolve = verdict.solve
+                    val nativeSolve = refineSuccess(verdict.solve, previewStars ?: stars)
                     val detail = buildString {
                         append(if (isEn) "Reviewed & corrected · FOV %.1f°".format(nativeSolve.fieldWidthDeg)
                         else "官方复核修正 · 视场 %.1f°".format(nativeSolve.fieldWidthDeg))
