@@ -130,11 +130,16 @@ internal object NativeSolverSupport {
     /**
      * 确保索引文件在 `filesDir/indexes`（首次从 assets 解压，带临时文件原子替换与 FITS 完整性自愈）。
      */
+    /** 与 C 层 `g_index_cache[16]` 匹配的原生索引总数上限。 */
+    internal const val MAX_NATIVE_INDEX_CACHE = 16
+
     @Synchronized
     fun ensureIndexes(context: Context, indexNames: List<String>): Array<String> {
         val dir = File(context.filesDir, "indexes").apply { mkdirs() }
         val result = ArrayList<String>()
+        val seenNames = HashSet<String>()
         for (name in indexNames) {
+            if (result.size >= MAX_NATIVE_INDEX_CACHE) break
             val f = File(dir, name)
             if (!FitsIndexValidator.isValidFitsIndex(f)) {
                 val tmp = File(dir, "$name.tmp")
@@ -153,9 +158,35 @@ internal object NativeSolverSupport {
                     continue
                 }
             }
-            if (FitsIndexValidator.isValidFitsIndex(f)) result.add(f.absolutePath)
+            if (FitsIndexValidator.isValidFitsIndex(f) && seenNames.add(name)) {
+                result.add(f.absolutePath)
+            }
         }
+        appendValidatedExtraIndexes(File(dir, "extra"), seenNames, result, MAX_NATIVE_INDEX_CACHE)
         return result.toTypedArray()
+    }
+
+    /**
+     * §0.144 P2：从 `files/indexes/extra/` 按文件名排序挂载已校验的补充 FITS 索引，
+     * 过滤非法文件并去重，同时严格限制总数不超过原生缓存上限 [maxTotal]。
+     */
+    internal fun appendValidatedExtraIndexes(
+        extraDir: File,
+        seenNames: MutableSet<String>,
+        outPaths: MutableList<String>,
+        maxTotal: Int = MAX_NATIVE_INDEX_CACHE,
+    ) {
+        if (!extraDir.isDirectory || outPaths.size >= maxTotal) return
+        val candidates = extraDir.listFiles { f ->
+            f.isFile && f.name.startsWith("index-") && f.name.endsWith(".fits")
+        }?.sortedBy { it.name } ?: return
+        for (f in candidates) {
+            if (outPaths.size >= maxTotal) break
+            if (!seenNames.add(f.name)) continue
+            if (FitsIndexValidator.isValidFitsIndex(f)) {
+                outPaths.add(f.absolutePath)
+            }
+        }
     }
 
     fun decodeSampled(imagePath: String): Bitmap? =

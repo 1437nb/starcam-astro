@@ -1,6 +1,8 @@
 package com.starcam.astro
 
 import com.starcam.astro.astro.FitsIndexValidator
+import com.starcam.astro.astro.NativeSolverSupport
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -65,5 +67,42 @@ class StellarSolverIndexVerifyTest {
         for (f in indexFiles) {
             assertTrue("离线索引 ${f.name} 必须为合法的 FITS 文件", FitsIndexValidator.isValidFitsIndex(f))
         }
+    }
+
+    private fun writeValidStubFits(file: File) {
+        val data = ByteArray(2880 * 2) { 0x20 }
+        val header = "SIMPLE  =                    T / file does conform to FITS standard             "
+        System.arraycopy(header.toByteArray(Charsets.US_ASCII), 0, data, 0, 80)
+        file.writeBytes(data)
+    }
+
+    @Test
+    fun extraIndexes_discoverSortedValidAndSkipInvalidOrDuplicate() {
+        val extraDir = tempFolder.newFolder("extra")
+        writeValidStubFits(File(extraDir, "index-4111.fits"))
+        writeValidStubFits(File(extraDir, "index-4110.fits"))
+        writeValidStubFits(File(extraDir, "index-4112.fits")) // duplicate with bundled
+        writeValidStubFits(File(extraDir, "other-4111.fits")) // non-index prefix
+        File(extraDir, "index-4109.fits").writeBytes(ByteArray(123)) // invalid FITS
+
+        val seen = mutableSetOf("index-4112.fits", "index-4113.fits")
+        val out = mutableListOf("/base/index-4112.fits", "/base/index-4113.fits")
+        NativeSolverSupport.appendValidatedExtraIndexes(extraDir, seen, out)
+
+        assertEquals(4, out.size)
+        assertTrue(out[2].endsWith("index-4110.fits"))
+        assertTrue(out[3].endsWith("index-4111.fits"))
+    }
+
+    @Test
+    fun extraIndexes_respectSixteenCacheCap() {
+        val extraDir = tempFolder.newFolder("extra-cap")
+        for (i in 0 until 20) {
+            writeValidStubFits(File(extraDir, "index-%04d.fits".format(4100 + i)))
+        }
+        val seen = mutableSetOf<String>()
+        val out = mutableListOf<String>()
+        NativeSolverSupport.appendValidatedExtraIndexes(extraDir, seen, out)
+        assertEquals(NativeSolverSupport.MAX_NATIVE_INDEX_CACHE, out.size)
     }
 }
