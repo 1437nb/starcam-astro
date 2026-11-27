@@ -17,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.starcam.astro.astro.DemoSolver
+import com.starcam.astro.astro.SyntheticSkyMode
 import com.starcam.astro.data.SettingsRepository
 import com.starcam.astro.ui.camera.CameraScreen
 import com.starcam.astro.ui.batch.BatchScreen
@@ -87,8 +88,22 @@ fun StarCamApp(viewModel: AppViewModel = viewModel()) {
         is Screen.OfflineDemo -> OfflineDemoScreen(
             onBack = { viewModel.goBack() },
             onPickImage = { path -> viewModel.navigate(Screen.Result(path)) },
-            onRandomDemo = {
-                val region = DemoSolver.regions.random()
+            skyMode = viewModel.demoSkyMode,
+            onSkyModeChange = { viewModel.demoSkyMode = it },
+            selectedClassicIndex = viewModel.demoClassicIndex,
+            onSelectedClassicIndexChange = { viewModel.demoClassicIndex = it },
+            selectedFullSkyFovDeg = viewModel.demoFullSkyFovDeg,
+            onSelectedFullSkyFovChange = { viewModel.demoFullSkyFovDeg = it },
+            onGenerateDemo = {
+                val region = when (viewModel.demoSkyMode) {
+                    SyntheticSkyMode.CLASSIC -> DemoSolver.nextClassicRegion(
+                        selectedIndex = viewModel.demoClassicIndex,
+                    )
+                    SyntheticSkyMode.FULL_SKY -> DemoSolver.randomFullSkyRegion(
+                        fovPresetDeg = viewModel.demoFullSkyFovDeg,
+                        isEn = com.starcam.astro.ui.theme.LocaleState.isEnglish,
+                    )
+                }
                 val file = DemoSolver.generateDemoImage(context, region)
                 viewModel.navigate(Screen.Result(file.absolutePath, region))
             },

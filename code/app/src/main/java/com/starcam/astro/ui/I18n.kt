@@ -277,6 +277,16 @@ object I18n {
     // ==================== 离线演示 (OfflineDemoScreen) ====================
     object Demo {
         val title: String get() = if (isEn) "Offline Demo" else "离线演示"
+        val modeClassic: String get() = if (isEn) "Classic Sky" else "经典星座"
+        val modeFullSky: String get() = if (isEn) "All-Sky Roam" else "全天漫游"
+        val classicAll: String get() = if (isEn) "All (18)" else "全部轮换 (18)"
+        val fovAuto: String get() = if (isEn) "Auto 28°–68°" else "自动 28°–68°"
+        fun generateClassicRandom(): String =
+            if (isEn) "✨ Generate Random Classic Sky" else "✨ 随机生成经典星空"
+        fun generateClassicSpecific(label: String): String =
+            if (isEn) "✨ Generate $label Sky" else "✨ 生成「$label」模拟星空"
+        fun generateFullSkyRandom(): String =
+            if (isEn) "✨ Generate Random Full Sky" else "✨ 随机生成全天模拟星空"
         val randomSky: String get() = if (isEn) "✨ Random Synthetic Star Field" else "✨ 随机生成模拟星空（合成图）"
         val selectRealPhoto: String get() = if (isEn) "Or choose a built-in real night sky photo (taken with smartphone, offline solving verified, no network or API Key needed):" else "或选择一张内置真实星空照片——均为真实手机拍摄，离线识别链路已验证可识别，无需网络与 API Key："
     }

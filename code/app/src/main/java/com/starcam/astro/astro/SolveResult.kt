@@ -25,4 +25,10 @@ data class SolveResult(
 }
 
 /** 离线演示用的天空区域 */
-data class SkyRegion(val name: String, val raDeg: Double, val decDeg: Double, val fovDeg: Double)
+data class SkyRegion(
+    val name: String,
+    val raDeg: Double,
+    val decDeg: Double,
+    val fovDeg: Double,
+    val rotationDeg: Double = 0.0,
+)

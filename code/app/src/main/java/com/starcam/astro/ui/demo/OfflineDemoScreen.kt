@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -58,6 +60,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.starcam.astro.astro.DemoSolver
+import com.starcam.astro.astro.SyntheticSkyMode
 import com.starcam.astro.ui.AppIcons
 import com.starcam.astro.ui.I18n
 import com.starcam.astro.ui.theme.AppThemeMode
@@ -79,7 +83,13 @@ import kotlinx.coroutines.withContext
 fun OfflineDemoScreen(
     onBack: () -> Unit,
     onPickImage: (String) -> Unit,
-    onRandomDemo: () -> Unit,
+    skyMode: SyntheticSkyMode = SyntheticSkyMode.CLASSIC,
+    onSkyModeChange: (SyntheticSkyMode) -> Unit = {},
+    selectedClassicIndex: Int? = null,
+    onSelectedClassicIndexChange: (Int?) -> Unit = {},
+    selectedFullSkyFovDeg: Double? = null,
+    onSelectedFullSkyFovChange: (Double?) -> Unit = {},
+    onGenerateDemo: () -> Unit,
 ) {
     val context = LocalContext.current
     val isEn = LocaleState.isEnglish
@@ -147,7 +157,13 @@ fun OfflineDemoScreen(
             item(span = { GridItemSpan(maxLineSpan) }) {
                 SyntheticSkyHeroCard(
                     isEn = isEn,
-                    onRandomDemo = onRandomDemo,
+                    skyMode = skyMode,
+                    onSkyModeChange = onSkyModeChange,
+                    selectedClassicIndex = selectedClassicIndex,
+                    onSelectedClassicIndexChange = onSelectedClassicIndexChange,
+                    selectedFullSkyFovDeg = selectedFullSkyFovDeg,
+                    onSelectedFullSkyFovChange = onSelectedFullSkyFovChange,
+                    onGenerateDemo = onGenerateDemo,
                 )
             }
 
@@ -206,7 +222,13 @@ fun OfflineDemoScreen(
 @Composable
 private fun SyntheticSkyHeroCard(
     isEn: Boolean,
-    onRandomDemo: () -> Unit,
+    skyMode: SyntheticSkyMode,
+    onSkyModeChange: (SyntheticSkyMode) -> Unit,
+    selectedClassicIndex: Int?,
+    onSelectedClassicIndexChange: (Int?) -> Unit,
+    selectedFullSkyFovDeg: Double?,
+    onSelectedFullSkyFovChange: (Double?) -> Unit,
+    onGenerateDemo: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -278,34 +300,216 @@ private fun SyntheticSkyHeroCard(
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
+
+            // 生成模式双选：经典星座（18 经典天区可指定/轮换） vs 全天漫游（全天球均匀随机采样）
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ModeTogglePill(
+                    label = I18n.Demo.modeClassic,
+                    selected = skyMode == SyntheticSkyMode.CLASSIC,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onSkyModeChange(SyntheticSkyMode.CLASSIC) },
+                )
+                ModeTogglePill(
+                    label = I18n.Demo.modeFullSky,
+                    selected = skyMode == SyntheticSkyMode.FULL_SKY,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onSkyModeChange(SyntheticSkyMode.FULL_SKY) },
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
 
             Text(
-                if (isEn) {
-                    "Synthesizes a random sky region from the built-in Hipparcos star catalog so you can explore constellation lines, bright star names, and Messier overlays right away."
-                } else {
-                    "基于内置 Hipparcos 星表随机生成天区模拟照片，无需联网或外出拍摄，即可体验星座连线、亮星专名与梅西耶深空天体叠加。"
+                text = when (skyMode) {
+                    SyntheticSkyMode.CLASSIC -> if (isEn) {
+                        "Pick a favorite constellation or rotate through 18 iconic sky regions without repeats, with subtle framing variation."
+                    } else {
+                        "可指定著名星座或从 18 个经典星座天区不重复轮换生成，叠加轻微构图与倾角变化，即刻体验连线与标注。"
+                    }
+                    SyntheticSkyMode.FULL_SKY -> if (isEn) {
+                        "Uniformly samples the entire celestial sphere (RA/Dec, camera roll 0°–360°, and FOV) while filtering sparse fields."
+                    } else {
+                        "在全天球按立体角均匀采样赤经/赤纬、0°–360° 相机旋转角与视场，并自动过滤空天区，每次都是全新星空。"
+                    }
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
+
+            when (skyMode) {
+                SyntheticSkyMode.CLASSIC -> {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(vertical = 2.dp),
+                    ) {
+                        item(key = "classic_all") {
+                            CompactOptionChip(
+                                label = I18n.Demo.classicAll,
+                                selected = selectedClassicIndex == null,
+                                onClick = { onSelectedClassicIndexChange(null) },
+                            )
+                        }
+                        itemsIndexed(
+                            items = DemoSolver.regions,
+                            key = { index, region -> "classic_${index}_${region.name}" },
+                        ) { index, _ ->
+                            CompactOptionChip(
+                                label = DemoSolver.regionShortLabel(index, isEn),
+                                selected = selectedClassicIndex == index,
+                                onClick = { onSelectedClassicIndexChange(index) },
+                            )
+                        }
+                    }
+                }
+                SyntheticSkyMode.FULL_SKY -> {
+                    val fovPresets = remember(isEn) {
+                        listOf<Pair<Double?, String>>(
+                            null to I18n.Demo.fovAuto,
+                            32.0 to (if (isEn) "32° Tele" else "中焦 32°"),
+                            48.0 to (if (isEn) "48° Std" else "标准 48°"),
+                            68.0 to (if (isEn) "68° Wide" else "广角 68°"),
+                        )
+                    }
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(vertical = 2.dp),
+                    ) {
+                        itemsIndexed(
+                            items = fovPresets,
+                            key = { idx, _ -> "fov_$idx" },
+                        ) { _, (fov, label) ->
+                            CompactOptionChip(
+                                label = label,
+                                selected = selectedFullSkyFovDeg == fov,
+                                onClick = { onSelectedFullSkyFovChange(fov) },
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            val buttonLabel = when (skyMode) {
+                SyntheticSkyMode.CLASSIC -> {
+                    if (selectedClassicIndex != null && selectedClassicIndex in DemoSolver.regions.indices) {
+                        I18n.Demo.generateClassicSpecific(
+                            DemoSolver.regionShortLabel(selectedClassicIndex, isEn),
+                        )
+                    } else {
+                        I18n.Demo.generateClassicRandom()
+                    }
+                }
+                SyntheticSkyMode.FULL_SKY -> I18n.Demo.generateFullSkyRandom()
+            }
 
             Button(
-                onClick = onRandomDemo,
+                onClick = onGenerateDemo,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
             ) {
                 Text(
-                    I18n.Demo.randomSky,
+                    buttonLabel,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ModeTogglePill(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val bg = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val fg = if (selected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val borderColor = if (selected) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+    } else {
+        MaterialTheme.colorScheme.outlineVariant
+    }
+    Surface(
+        modifier = modifier
+            .height(38.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.medium,
+        color = bg,
+        border = BorderStroke(1.dp, borderColor),
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = fg,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactOptionChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val bg = if (selected) {
+        MaterialTheme.colorScheme.secondaryContainer
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+    val fg = if (selected) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val borderColor = if (selected) {
+        MaterialTheme.colorScheme.secondary.copy(alpha = 0.65f)
+    } else {
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+    }
+    Surface(
+        modifier = Modifier
+            .height(32.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        shape = CircleShape,
+        color = bg,
+        border = BorderStroke(1.dp, borderColor),
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = fg,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

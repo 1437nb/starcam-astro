@@ -70,7 +70,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         settings: SettingsRepository,
         cachedDisplayPath: String? = null,
     ) {
-        val key = "$imagePath-${demoRegion?.name}-$cachedSolve-$cachedDisplayPath"
+        val key = "$imagePath-${demoRegion?.toString()}-$cachedSolve-$cachedDisplayPath"
         if (key == lastInitiatedKey && solveJob != null && solveJob?.isActive == true) {
             return
         }

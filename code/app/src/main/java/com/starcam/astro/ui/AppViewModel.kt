@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import com.starcam.astro.astro.SkyRegion
 import com.starcam.astro.astro.SolveResult
+import com.starcam.astro.astro.SyntheticSkyMode
 
 /** 界面路由 */
 sealed interface Screen {
@@ -49,6 +50,11 @@ class AppViewModel : ViewModel() {
 
     /** 当前页（Compose 可观察：mutableStateListOf 的读取被快照追踪） */
     val screen: Screen get() = stack[stack.size - 1]
+
+    /** 离线演示页合成星空模式与筛选偏好（会话内保持，返回演示页不丢失选择） */
+    var demoSkyMode by mutableStateOf(SyntheticSkyMode.CLASSIC)
+    var demoClassicIndex by mutableStateOf<Int?>(null)
+    var demoFullSkyFovDeg by mutableStateOf<Double?>(null)
 
     /** 是否可返回上级（根页 Home 返回 false） */
     val canGoBack: Boolean get() = stack.size > 1

@@ -138,7 +138,7 @@ fun ResultScreen(
     onRetake: () -> Unit,
     onSolveCompleted: (ResultUiState.Success) -> Unit = {},
     viewModel: ResultViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
-        key = "$imagePath-${cachedSolve != null}-${demoRegion?.name}",
+        key = "$imagePath-${cachedSolve != null}-${demoRegion?.toString()}",
         factory = ResultViewModel.factory(LocalContext.current.applicationContext as android.app.Application),
     ),
 ) {
