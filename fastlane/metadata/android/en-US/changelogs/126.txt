@@ -1,0 +1,4 @@
+- Fixed nova.astrometry.net online calibration parsing, JPEG WCS orientation/parity, and radius unit conversion
+- Added FOV degwidth scale bounds and 2x downsample hints on upload for fast wide-field online solving (~20s)
+- Isolated online solve time budget (min 150s) and surfaced specific online failure reasons without misleading 0-star diagnostics
+- Added Test Connection & HTTPS validation in Settings and polished online result header layout
