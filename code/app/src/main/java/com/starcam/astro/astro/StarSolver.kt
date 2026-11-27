@@ -105,7 +105,7 @@ object StarSolver {
     const val NATIVE_TIME_LIMIT_KNOWN_FOV = 30.0
 
     /** 在线 nova.astrometry.net 最低独立时间预算（秒），避免默认 30s 本地预算掐断云端排队与解算 */
-    const val ONLINE_MIN_BUDGET_SEC = 90
+    const val ONLINE_MIN_BUDGET_SEC = 150
 
     /** 盲解（无 EXIF 先验）分段试探参数：窄-中场段（度，限时秒） */
     const val NATIVE_BLIND_SEG_LO_DEG = 3.0

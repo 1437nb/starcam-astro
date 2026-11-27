@@ -178,6 +178,9 @@ class PlateSolveClientTest {
                     }
                     "/upload" -> {
                         assertTrue("upload 应标记 publicly_visible=n", body.contains("publicly_visible"))
+                        assertTrue("upload 应携带 downsample_factor", body.contains("downsample_factor"))
+                        assertTrue("提供视场先验时应携带 degwidth 约束", body.contains("degwidth"))
+                        assertTrue("提供视场先验时应携带 scale_lower", body.contains("scale_lower"))
                         Triple(200, """{"status":"success","subid":777}""", emptyMap())
                     }
                     "/submissions/777" -> {
@@ -197,7 +200,7 @@ class PlateSolveClientTest {
         ) { baseUrl ->
             val progress = mutableListOf<String>()
             val client = PlateSolveClient(baseUrl, pollInitialMs = 10L, pollMaxMs = 50L)
-            val result = client.solve(img, "dummy-key", timeoutMs = 10_000L) { progress += it }
+            val result = client.solve(img, "dummy-key", timeoutMs = 10_000L, fovWidthRangeDeg = 1.0 to 2.0) { progress += it }
 
             assertEquals(169.96633791366915, result.raDeg, 1e-6)
             assertEquals(13.221011585315143, result.decDeg, 1e-6)

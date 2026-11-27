@@ -90,6 +90,7 @@ class PlateSolveClient(
         image: File,
         apiKey: String,
         timeoutMs: Long = SOLVE_TIMEOUT_MS,
+        fovWidthRangeDeg: Pair<Double, Double>? = null,
         onProgress: (String) -> Unit,
     ): SolveResult = withContext(Dispatchers.IO) {
         val key = computeFileKey(image)
@@ -105,7 +106,7 @@ class PlateSolveClient(
         }
         try {
             kotlinx.coroutines.withTimeout(timeoutMs.coerceAtLeast(1L)) {
-                solveInner(image, apiKey, timeoutMs, onProgress)
+                solveInner(image, apiKey, timeoutMs, fovWidthRangeDeg, onProgress)
             }
         } finally {
             withContext(kotlinx.coroutines.NonCancellable) {
@@ -118,6 +119,7 @@ class PlateSolveClient(
         image: File,
         apiKey: String,
         timeoutMs: Long,
+        fovWidthRangeDeg: Pair<Double, Double>?,
         onProgress: (String) -> Unit,
     ): SolveResult {
         val overallDeadline = (System.nanoTime() / 1_000_000) + timeoutMs
@@ -126,7 +128,7 @@ class PlateSolveClient(
         val session = login(apiKey)
 
         onProgress(if (isEn) "Uploading photo…" else "正在上传照片…")
-        val subId = upload(session, image)
+        val subId = upload(session, image, fovWidthRangeDeg)
 
         onProgress(if (isEn) "Queued for solving…" else "排队等待解算…")
         val waitBudget = (overallDeadline - (System.nanoTime() / 1_000_000)).coerceAtLeast(1000L)
@@ -286,13 +288,28 @@ class PlateSolveClient(
         return session
     }
 
-    private suspend fun upload(session: String, image: File): Long {
+    private suspend fun upload(
+        session: String,
+        image: File,
+        fovWidthRangeDeg: Pair<Double, Double>? = null,
+    ): Long {
         val isEn = LocaleState.isEnglish
         val meta = JSONObject()
             .put("session", session)
             .put("publicly_visible", "n") // 隐私：图片不进入公开图库
             .put("allow_commercial_use", "d")
             .put("allow_modifications", "d")
+            .put("downsample_factor", 2)
+        if (fovWidthRangeDeg != null) {
+            val lo = fovWidthRangeDeg.first
+            val hi = fovWidthRangeDeg.second
+            if (lo.isFinite() && hi.isFinite() && lo > 0.0 && hi > lo) {
+                meta.put("scale_units", "degwidth")
+                    .put("scale_type", "ul")
+                    .put("scale_lower", lo.coerceIn(0.05, 179.0))
+                    .put("scale_upper", hi.coerceIn(lo + 0.05, 180.0))
+            }
+        }
         val mime = if (image.name.lowercase().endsWith(".png")) "image/png" else "image/jpeg"
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)

@@ -407,11 +407,11 @@ class StarSolverTest {
     }
 
     @Test
-    fun onlineStepBudgetSec_hasMinimum90sAndRespectsHigherSlider() {
-        assertEquals(90.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(10), 1e-9)
-        assertEquals(90.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(30), 1e-9)
-        assertEquals(90.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(90), 1e-9)
-        assertEquals(120.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(120), 1e-9)
+    fun onlineStepBudgetSec_hasMinimum150sAndRespectsHigherSlider() {
+        assertEquals(150.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(10), 1e-9)
+        assertEquals(150.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(30), 1e-9)
+        assertEquals(150.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(120), 1e-9)
+        assertEquals(180.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(180), 1e-9)
     }
 
     @Test

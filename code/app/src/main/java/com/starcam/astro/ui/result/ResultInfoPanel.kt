@@ -163,8 +163,13 @@ internal fun InfoPanel(state: ResultUiState.Success, modifier: Modifier = Modifi
         .trim()
 
     val subtitleParts = buildList {
-        state.engineDetail?.takeIf { it.isNotBlank() }?.let { add(it) }
-        solve.subId?.let { add("${I18n.Result.labelTaskId} #$it") }
+        val detail = state.engineDetail?.takeIf { it.isNotBlank() }
+        detail?.let { add(it) }
+        solve.subId?.let { id ->
+            if (detail?.contains("#$id") != true) {
+                add("${I18n.Result.labelTaskId} #$id")
+            }
+        }
     }
 
     Surface(
@@ -216,6 +221,7 @@ internal fun InfoPanel(state: ResultUiState.Success, modifier: Modifier = Modifi
 
                 val badgeLabel = when {
                     state.isDemo -> if (isEn) "Offline Demo" else "离线演示"
+                    state.engine == SolveEngine.ONLINE_NOVA -> if (isEn) "Nova Online" else "Nova 在线"
                     state.engine != null -> state.engine.label(isEn)
                     else -> null
                 }

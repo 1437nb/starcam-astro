@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -76,6 +77,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.starcam.astro.astro.EngineMode
 import com.starcam.astro.astro.NativeEngineProbe
@@ -818,6 +820,7 @@ fun SettingsScreen(
                                 testConnectionMsg = msg
                             }
                         },
+                        contentPadding = PaddingValues(horizontal = 10.dp),
                         modifier = Modifier
                             .weight(1f)
                             .height(48.dp),
@@ -828,9 +831,19 @@ fun SettingsScreen(
                                 strokeWidth = 2.dp,
                             )
                             Spacer(Modifier.width(6.dp))
-                            Text(I18n.Settings.testingConnection)
+                            Text(
+                                text = I18n.Settings.testingConnection,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         } else {
-                            Text(I18n.Settings.testConnection)
+                            Text(
+                                text = I18n.Settings.testConnection,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
 

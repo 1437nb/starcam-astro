@@ -74,10 +74,25 @@ class OnlineNovaStep : SolveStep {
                     return StepOutcome.Failure(msg)
                 }
 
+                val fovLongDeg = ctx.fovOverride ?: ctx.fovDeg
+                val fovWidthRange = fovLongDeg?.takeIf { it.isFinite() && it > 0.0 }?.let { longDeg ->
+                    val w = onlineDisplay.width
+                    val h = onlineDisplay.height
+                    // readFovDeg 为传感器长边视场，Nova scale_units=degwidth 为水平宽度视场
+                    val widthDeg = if (w > 0 && h > 0 && w < h) {
+                        longDeg * w.toDouble() / h.toDouble()
+                    } else {
+                        longDeg
+                    }
+                    val lo = (widthDeg * 0.65).coerceAtLeast(0.1)
+                    val hi = (widthDeg * 1.45).coerceAtMost(180.0).coerceAtLeast(lo + 0.5)
+                    lo to hi
+                }
+
                 val remainingMs = (ctx.remainingSec * 1000).toLong().coerceAtLeast(1000L)
                 kotlinx.coroutines.withTimeout(remainingMs) {
                     val client = PlateSolveClient(ctx.settings.serverUrl)
-                    client.solve(upload, key, remainingMs) { msg ->
+                    client.solve(upload, key, remainingMs, fovWidthRange) { msg ->
                         ctx.token.check()
                         ctx.onProgress(msg)
                     }
