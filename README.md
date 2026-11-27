@@ -6,82 +6,43 @@
 [![Android](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com)
 [![CI](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml/badge.svg)](https://github.com/1437nb/starcam-astro/actions/workflows/ci.yml)
 
-一款**纯离线优先**的 Android 天文摄影与星空识别 App。拍摄或导入夜空照片，在设备本地盲解天区坐标（RA / Dec / 视场 / 旋转），精确叠加星座连线、恒星专名、梅西耶深空天体与日月行星标注，并提供实时 AR 星图与今日天象指引。
-
-**最新正式版 v1.5.105（versionCode 125，§0.144）**汇集 `v1.5.97 ~ v1.5.105` 全部更新：完成复杂星空离线识别 P1→P4 系统优化与叠加精度重构（原生预算预留与加权分段、`astro_bridge.c` 光通量排序修复与 `.so` 重建、可选补充索引安全挂载、前景感知天空裁剪与局部背景降噪、Holdout 评估与保守 6 参数 TAN 微调，16 图复杂星空基准由 **5/16 提升至 9/16**、0 误判）；修复宽场前景图 `#5057` 主备预算倒挂与重复投票瓶颈并引入 256×256 扁平同心环查表剪枝（冷启动模拟器 `#5057` 由 30s 超时降至 10.0s 解出，32 内点）；修复拍照页右上角图标重叠；离线演示页新增「经典星座（18 个不重复轮换/单选）/ 全天漫游（立体角均匀随机采样 + 视场档位）」双模式自选。同步囊括 v1.5.104 全应用 20 文件 UI 精修、v1.5.103 模块化架构重构与 v1.5.102 28 项稳定性缺陷修复。CI 同口径常规 JVM 回归 **56 类 / 399 项**（0 失败 / 0 错误，公开 12 张演示照 12/12 真解），官方签名 Release 包通过全套安全与 16 KB 二进制审计。详见 [更新说明](docs/release-notes-v1.5.105.md) 与 [§0.144 验证报告](docs/129-验证报告增补-§0.144-复杂星空离线识别P1至P4系统优化v1.5.105.md)。
-
-**本地签名版 v1.5.104（versionCode 124，§0.143）**完成全应用四大界面域共 20 个 Compose UI 文件的交互与视觉体验精修（保持求解算法、JNI 签名与渲染管线不变）：首页新增一键「夜视红」与引擎状态胶囊、`TonightSkyCard` 真实月相几何画布与 5 张 M3 分组卡片化设置页（含 API Key 显隐切换）；相机升级为自定义矢量磨砂胶囊 HUD、单手可折叠 Pro 星空摄影三档预设抽屉与支持搜索筛选的找星选择器；结果页升级为自适应比例画布（零像素偏移）、全屏倍率一键复位查看器与 2×2 天球遥测网格（一键复制坐标）；批量识别支持单张完成即点即看，识别历史新增清空二次确认弹窗，并精修原图相册多选悬浮栏与离线演示英雄卡。已完成 52 类 / 378 项常规单测、`lintDebug` 零错误检查及本地 R8 官方签名 Release 构建与安全审计（`13,032,749` 字节，SHA-256 `559E6ABDC37D7C2468F448384914CEB1E2309F957A2BE553F56DD1A4A540CBB6`，与 v1.5.96 同证书可覆盖升级，尚未公开发布）。[验证报告](docs/128-验证报告增补-§0.143-全应用交互与视觉体验精修v1.5.104.md)
-
-**本地开发版 v1.5.103（versionCode 123，§0.142）**完成全应用模块化架构重构与巨石文件解耦（保持 UI、渲染管线、JNI 签名与求解行为不变）：将 `LocalStarMatcher`（3,227 → 958 行）、`CameraScreen`（1,686 → 682 行）、`ResultScreen`（1,582 → 352 行）、`StarSolver`、`StellarSolverNative` 与 `HomeScreen` 按单一职责拆分为 17 个内聚模块，统一 `SettingsRepository` 跨实例加密存储与内存缓存共享，全仓手写逻辑与 UI 文件全部降至 1,000 行以内，并通过 63 类 / 402 项全量 JVM 回归。[验证报告](docs/127-验证报告增补-§0.142-App模块化架构与巨石文件解耦重构v1.5.103.md)
-
-**本地签名版 v1.5.102（versionCode 122，§0.141）**完成全项目 28 项缺陷审计与稳定性修复（涵盖求解预算/取消与 JNI 异常/内存安全、并行线程局部诊断、HTTP 429/503 退避、FITS 32 位精度与 CD 矩阵视场、极区网格匹配与连通域防溢出、Camera2 Pro AE 释放与 AR 姿态校准、EXIF/WCS 边界防护等），重建原生求解库并通过 62 类 / 400 项全量 JVM 回归与本地签名 Release 审计。[验证报告](docs/126-验证报告增补-§0.141-全量缺陷审计与稳定性修复v1.5.102.md)
-
-**本地开发版 v1.5.101（§0.140）**为可信窄场增加中间星等匹配，在复杂背景下按局部信噪补提紧凑星点。两条路径使用原有总时间预算。[验证报告](docs/125-验证报告增补-§0.140-窄场星表与局部信噪提星v1.5.101.md)
-
-**v1.5.100（§0.139）**修正深域星表的补充星编号处理，按可信视场优先搜索窄场候选，并将天空区域补救扩展到画面的四边。[验证报告](docs/124-验证报告增补-§0.139-复杂星空匹配与侧向前景v1.5.100.md)
-
-**v1.5.99（§0.138）**修复前景照片在天空区域补救成功后的上缘标注偏移，使用未参与拟合的星点校验整图投影。[验证报告](docs/123-验证报告增补-§0.138-天空区域投影校准v1.5.99.md)
-
-**v1.5.98（§0.137）**为前景干扰明显的照片增加上方天空补救。[验证报告](docs/122-验证报告增补-§0.137-前景干扰与天空区域补救v1.5.98.md)
-
-**v1.5.97（§0.136）**增加局部背景、噪声与星点形态检测补救，用于改善部分银河密场、背景不均与暗星环境。修复无原生库时的失败诊断异常。[验证范围与可复现清单](docs/121-验证报告增补-§0.136-复杂星空识别补救v1.5.97.md)
-
-**v1.5.96（versionCode 116，§0.135）**：完成 F-Droid 开源应用商店上架准备，许可证升级为 **GPL-3.0-or-later** 并补齐 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；关闭 AGP 签名块加密依赖信息（`dependenciesInfo`）与 VCS 元数据；原生求解器支持 Windows / Linux（CMake 3.22~4.x）跨平台从固定 SHA-256 源码构建，并随附完整 `fastlane/` 商店元数据与 [F-Droid 构建配方](docs/fdroid/com.starcam.astro.yml)。详见 [更新说明](docs/release-notes-v1.5.96.md) 与 [§0.135 验证报告](docs/120-F-Droid上架准备-§0.135.md)。
-
-**v1.5.95（versionCode 115，§0.134）**：收尾求解取消与时间预算、大 FITS 内存、快速导入隔离、失败项重试同步、在线缓存方向与竞速图片回收；恢复固定源码 native 构建，并修正原生接受门槛及 WCS 参考像素 / 方向。[修复范围与可验证清单](docs/119-验证报告增补-§0.134-稳定性收尾与原生源码重建v1.5.95.md)。
-
-**本地签名版 v1.5.94（versionCode 114，§0.133）**：点击「导入照片」统一选择普通图片、RAW、FITS，支持混合多选，最多 9 个文件；原图相册与兼容模式保留在「从相册选择 / 更多方式」。已完成本地官方签名 Release 构建与验签，可覆盖 v1.5.93 升级；尚未公开发布。详见 [统一导入验证与构建报告](docs/118-验证报告增补-§0.133-照片RAW与FITS统一导入v1.5.94.md)。
-
-**本地签名版 v1.5.93（versionCode 113，§0.132）**：新增预览或原图尺寸标注导出，RAW 使用内嵌预览完整尺寸；已完成本地官方签名 Release 构建与验签，尚未发布。范围和校验见 [§0.132 报告](docs/116-验证报告增补-§0.132-原图尺寸导出v1.5.93.md)。公开下载仍为下方 v1.5.92。
-
-**兼容性实测**：v1.5.95 在 Android 9 / 14 模拟器分别以新 x86_64 原生库和默认 JVM 回退运行，共通过 152 项功能 / UI 测试执行；原生库可用时各 30 功能 + 9 UI，回退时各 28 功能 + 9 UI。实体 ARM 手机、相机和 AR 传感器仍待验收。[逐项结果与范围](docs/119-验证报告增补-§0.134-稳定性收尾与原生源码重建v1.5.95.md)；[模拟器环境](docs/117-安卓模拟器与兼容性记录-20261102.md)。本机窗口启动：`pwsh -File tools/start_android_emulator.ps1 -Api 34`。
-
-**完整本机 JVM 回归**：v1.5.95 强制重跑 59 类 / 373 项，0 失败、错误或跳过，包含常规 352 项和本机照片 / FITS / 窄场回归台。公开照片 12/12 真解；窄场观察台仍有 20/32 未解出。[逐类统计](docs/compatibility/20261103-v1.5.95-jvm-full.json)。
-
-**v1.5.92（versionCode 112）**：批量识别完成后，可逐张进入完整结果页，选择图层并手动导出。成功照片复用已有结果，返回后保留批量列表；**批量不再自动保存全部标注图**。本版还包含此前的导入进度与取消、识别阶段计时、性能及双语体验优化。详见 [更新说明](docs/release-notes-v1.5.92.md) 和 [验收清单](docs/114-验证报告增补-§0.131-批量逐张查看与手动导出v1.5.92.md)。
+一款**纯离线优先**的 Android 天文摄影与星空识别 App。拍摄或导入夜空照片，即可在设备本地盲解天区坐标（RA / Dec / 视场 / 旋转），精确叠加星座连线、中西方恒星专名、梅西耶深空天体与实时日月行星标注，并提供传感器驱动的实时 AR 星图与今日天象指引。
 
 ---
 
 ## 下载安装
 
-最新版本：**[v1.5.105](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.105)**
+最新版本：**[v1.5.105](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.105)**（[更新说明](docs/release-notes-v1.5.105.md) · [全部历史版本](https://github.com/1437nb/starcam-astro/releases)）
 
-| 安装包 | 大小 | 说明 |
+| 安装包 | 大小 | SHA-256 |
 | :--- | :--- | :--- |
-| **[StarCam-v1.5.105-offline-complex-sky-recovery-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.105/StarCam-v1.5.105-offline-complex-sky-recovery-release.apk)** | 12.4 MiB | **推荐**，R8 压缩官方签名包（与 v1.5.96 同证书，可直接覆盖安装升级） |
+| **[StarCam-v1.5.105-offline-complex-sky-recovery-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.105/StarCam-v1.5.105-offline-complex-sky-recovery-release.apk)** | 12.4 MiB | `D14B20DE6C068C0A5E88995214D3A7F79B703DE733E23723C36B3857A026AA6A` |
 
-- **系统要求**：Android 8.0（API 26）及以上，推荐 **arm64-v8a** 64 位真机（离线 `astrometry.net` 原生引擎仅包含 arm64 库；x86_64 模拟器自动回退至纯 JVM 星表引擎）。
-- **使用批量结果**：多选照片并等待完成 → 点击照片 → 调整图层 → 选择「保存当前标注」或「仅星座连线」。只查看后返回不会导出到相册。
-- **近期更新亮点（v1.5.97 ~ v1.5.105）**：
-  - **v1.5.105**：复杂星空离线识别 P1→P4 系统优化与 Holdout 叠加精度微调、`#5057` 宽场前景超时修复与 8× 查表提速、拍照顶栏图标防重叠修复、离线演示模拟星空「经典星座 / 全天漫游」双模式自选；
-  - **v1.5.104**：全应用四大界面域 20 个 Compose UI 文件交互与视觉精修（夜视红胶囊、真实月相盘、相机磨砂 HUD 与可折叠 Pro 预设、结果页自适应画布与 2×2 遥测卡片、批量即完即看）；
-  - **v1.5.102 ~ v1.5.103**：核心巨石文件模块化拆分（17 个内聚模块）与 28 项稳定性/并发/JNI/FITS/WCS 审计缺陷修复；
-  - **v1.5.97 ~ v1.5.101**：局部背景与紧凑信噪提星、四边前景天空补救与全图投影校准、可信窄场中间星等索引。
-- **安装包 SHA-256**：`D14B20DE6C068C0A5E88995214D3A7F79B703DE733E23723C36B3857A026AA6A`。
-- 历史版本与完整发版日志见 **[GitHub Releases](https://github.com/1437nb/starcam-astro/releases)** 与 [`docs/`](docs/)。
+- **系统要求**：Android 8.0（API 26）及以上，推荐 **arm64-v8a** 真机（随包内置离线 `astrometry.net` 原生引擎；x86_64 模拟器自动回退至纯 JVM 星表引擎），官方签名包支持直接覆盖安装升级。
 
 ---
 
 ## 核心特性
 
 ### 1. 三层混合盲解引擎
-- **官方 `astrometry.net` 0.97 本地 NDK 引擎**：随包内置 4100 系列全天 FITS 索引，无需联网即可完成高精度天球 WCS 解算；
-- **自研 8400+ 分级星表匹配引擎**：结合浅域（$\le 4.0$ 等）/ 深域（$\le 6.5$ 等）分级索引、三角形投票与宽场一对一打分轮，覆盖 **10° 窄场至 70°+ 超广角**，大视场下支持与官方引擎并发竞速；
-- **在线 API 兜底（可选）**：支持用户自行配置 `nova.astrometry.net` API Key（采用 `EncryptedSharedPreferences` 加密存储）。
+- **本地 `astrometry.net` 0.97 NDK 引擎**：内置 8 档 4100 系列全天离线 FITS 索引，并支持在应用目录挂载额外补充索引，纯离线即可完成高精度天球 WCS 解算；
+- **自研 8400+ 分级星表匹配引擎**：结合浅/中/深分级索引、扁平同心环三角形查表、宽场一对一打分轮与前景感知天空补救，覆盖 **10° 窄场至 70°+ 超广角**，大视场下支持与原生引擎并发竞速；
+- **可选在线兜底**：支持用户自行配置 `nova.astrometry.net` API Key（通过 `EncryptedSharedPreferences` 加密存储）。
 
-### 2. 星空标注、图层控制与纯净导出
-- **全天体图层**：88 星座官方连线（对齐 Stellarium v23.4）、3800+ 中国传统星官与西方恒星专名、44 个梅西耶深空天体，以及基于拍摄时刻 + GPS 实时解算的**太阳、月球与行星位置**（含站心视差修正与真实视直径绘制）；
-- **智能排版与交互**：梅西耶天体近邻星名自动抑制（消除 M45/M42 内部文字重叠），画幅边缘星名 4 象限防碰撞安全收敛；点击图中任意天体即可弹出中英双语科普卡片；
-- **自由图层与一键导出**：支持单独开关任一图层、长按或进入全屏双指缩放查看器对比原图，并提供 `📐 仅星座连线` 与 `💾 保存当前标注` 双模式导出及最大 9 张照片有界并发批量识别，完成后逐张查看、按需保存标注图。
+### 2. 星空标注、图层控制与原图级导出
+- **全天体图层**：88 星座官方连线（对齐 Stellarium v23.4）、3800+ 中国传统星官与西方恒星专名、44 个梅西耶深空天体，以及基于拍摄时间与 GPS 实时解算的**太阳、月球与五大行星**（含站心视差修正与真实视直径）；
+- **智能排版与交互**：梅西耶近邻星名防遮挡、画幅边缘安全收敛；全屏双指缩放查看器支持一键复位与长按对比原图，点击任意天体弹出中英双语科普卡片，结果页支持一键复制天球坐标；
+- **灵活导出与批量识别**：自由开关任意图层，支持「预览尺寸 / 原图尺寸」以及「保存当前标注 / 仅星座连线」导出；单次可混合导入最多 9 张普通照片、相机 RAW 与 FITS，支持即完即看、按需手动导出。
 
-### 3. AR 实时星图与找星导航
-- **传感器融合零延迟投影**：旋转矢量 + 陀螺仪互补滤波驱动，手持取景平滑不抖动；支持**全天星空模式**（低头可看地平线以下星空与八方位罗盘）；
-- **🎯 找星导航**：选择目标亮星、星座或深空天体后，取景框实时引导方向箭头与脉冲光环。
+### 3. AR 实时星图、Pro 相机与离线演示
+- **实时 AR 找星导航**：旋转矢量 + 陀螺仪互补滤波零延迟投影，支持地平线以下全天星空模式，内置支持搜索与分类筛选的找星选择器，实时箭头引导定位亮星、星座、深空与行星；
+- **星空摄影 Pro 控制**：内置可折叠单手 Pro 曝光面板（广角银河 / 暗夜深空 / 手持夜拍三档预设）与手势对焦；
+- **零门槛离线演示**：无需外出拍星，内置 12 张真实手机星空样张走完整本地盲解链路，并提供**模拟星空双模式自选**（18 个经典星座轮换/单选，或全天球立体角均匀随机漫游与多档视场切换）。
 
-### 4. 天文专业工具与暗适应体验
-- **今日天象卡片**：纯 JVM 太阳系历表实时计算当晚月相照度、月龄、金木土火水五大行星观测窗口与深空摄影建议；
-- **FITS 与相机 RAW 直读**：自研纯 Kotlin FITS 解码器（支持 BITPIX 8/16/32/±32/±64、WCS 先验提取）与相机 RAW（CR2/NEF/ARW/DNG 等内嵌预览提取），并提供原图相册直读模式（绕过系统相册降采样与 EXIF 脱敏）；
-- **四主题与双语切换**：内置深空蓝、纯黑、纯白与夜视红，支持简体中文 / English 全局即时切换。
+### 4. 天文工具与暗适应体验
+- **今日天象卡片**：纯本地历表实时绘制球面月相盘，显示月照度、月龄、金木土火水观测窗口与深空摄影建议；
+- **RAW / FITS 与原图直读**：内置纯 Kotlin FITS 解码器与常见相机 RAW 内嵌预览提取，支持绕开系统相册降采样与 EXIF 脱敏的原图直读模式；
+- **四主题与中英双语**：内置深空蓝、纯黑、纯白与一键「夜视红」暗适应模式，支持简体中文 / English 即时切换。
 
 ---
 
@@ -91,16 +52,16 @@
 .
 ├── code/                   # Android 工程源码（Kotlin + Jetpack Compose Material 3）
 │   └── app/src/
-│       ├── main/java/com/starcam/astro/     # 核心天文算法、求解管线与 Compose UI
+│       ├── main/java/com/starcam/astro/     # 天文算法、求解管线与 Compose UI
 │       ├── main/assets/indexes/             # astrometry.net 离线 FITS 索引（8 档）
 │       ├── main/assets/offline_photos/      # 12 张内置公开星空演示照片
-│       ├── main/jniLibs/arm64-v8a/          # libstellar_solver.so 原生求解库（可由 tools/build_native.py 从源码重建）
+│       ├── main/jniLibs/arm64-v8a/          # libstellar_solver.so 原生求解库
 │       ├── main/cpp/astro_bridge.c          # JNI 桥接层源码
-│       └── test/java/com/starcam/astro/     # 常规回归 56 类 / 399 项（含 12 张公开演示照真值回归与模拟星空校验）
-├── docs/                   # 架构设计与 129+ 篇验证报告（至 §0.144）
-├── tools/                  # 星表构建、真值定标、凭据体检与一键发版脚本
-├── fastlane/metadata/      # F-Droid 应用商店元数据（中英文简介、更新日志、图标、截图）
-├── THIRD_PARTY_NOTICES.md  # 第三方代码、数据与素材的来源和许可
+│       └── test/java/com/starcam/astro/     # 单元测试与 12 张公开演示照真值回归
+├── docs/                   # 架构设计、发版说明与验证报告
+├── tools/                  # 星表构建、真值定标、凭据体检与发版脚本
+├── fastlane/metadata/      # F-Droid 商店元数据（中英文简介、更新日志、图标、截图）
+├── THIRD_PARTY_NOTICES.md  # 第三方代码、数据与素材来源及许可清单
 └── LICENSE                 # GNU General Public License v3.0（GPL-3.0-or-later）
 ```
 
@@ -108,45 +69,37 @@
 
 ## 本地构建与参与贡献
 
-仓库已随包提供预编译的 `libstellar_solver.so`，日常修改 Kotlin 逻辑、UI 或运行单元测试**只需 JDK 17 与 Android SDK 34**，无任何工程外依赖：
+仓库已随包提供预编译的 `libstellar_solver.so`，日常开发或运行测试**只需 JDK 17 与 Android SDK 34**：
 
 ```bash
 git clone https://github.com/1437nb/starcam-astro.git
 cd starcam-astro/code
 echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-# 1. 构建 Debug APK
-./gradlew :app:assembleDebug
-
-# 2. 运行单元测试与 12 张公开演示照片真值回归
-./gradlew :app:testDebugUnitTest --rerun-tasks -PskipPhotoTests=true
-
-# 3. 构建 Release APK（R8 压缩）
-./gradlew :app:assembleRelease -x lintVitalRelease
+./gradlew :app:assembleDebug                                   # 构建 Debug APK
+./gradlew :app:testDebugUnitTest --rerun-tasks -PskipPhotoTests=true  # 运行单测与公开照片真值回归
+./gradlew :app:assembleRelease -x lintVitalRelease             # 构建 Release APK（R8 压缩）
 ```
 
-| 贡献方向 | 所需环境 |
-| :--- | :--- |
-| 修改 Kotlin / 天文算法 / Compose UI / 文档与多语言 | **JDK 17 + Android SDK 34**（克隆即编） |
-| 修改 JNI 桥接 `app/src/main/cpp/astro_bridge.c` | 另需 Python 3.10+、NDK r26d、CMake + Ninja；`python3 tools/build_native.py --fetch` 从固定 SHA-256 的 `astrometry.net` 0.97 与 `cfitsio` 3.47 源码重建（Windows / Linux 均可，详见 [`docs/120`](docs/120-F-Droid上架准备-§0.135.md)） |
+如需修改 `app/src/main/cpp/astro_bridge.c` 并从源码重建 `.so`，另需 Python 3.10+、NDK r26d、CMake 与 Ninja，运行 `python3 tools/build_native.py --fetch` 即可在 Windows / Linux 上从固定 SHA-256 源码构建（详见 [`docs/120`](docs/120-F-Droid上架准备-§0.135.md)）。
 
 ---
 
 ## 隐私声明
 
-1. **默认完全离线**：星图盲解、天体计算与图像渲染默认全部在设备本地完成，照片不离开手机，无广告、无遥测或第三方追踪 SDK。
-2. **在线模式显式受控**：仅当用户在「设置」中主动填写 `astrometry.net` API Key 并开启在线兜底时，才会在本地盲解失败后向 `nova.astrometry.net` 上传当次照片，请求结束后立即清理本地上传缓存。
-3. **最小化权限**：相机与存储权限仅用于拍摄与读取星空图像；可选定位权限仅在本地用于传感器辅助寻星与太阳系天体视差计算，绝不后台追踪或随图上传。
+1. **默认完全离线**：星图盲解、天体历表计算与标注渲染默认全部在设备本地完成，照片不离开手机，无广告、无遥测或第三方追踪 SDK。
+2. **在线模式显式受控**：仅当用户在「设置」中主动填写 `astrometry.net` API Key 并开启在线兜底时，才会在本地盲解失败后上传当次照片，请求结束后立即清理上传缓存。
+3. **最小化权限**：相机与存储权限仅用于拍摄与读取星空图像；可选定位权限仅在本地用于传感器寻星与太阳系视差计算，绝不后台追踪或上传。
 
 ---
 
 ## 开源许可证与致谢
 
-本项目自 v1.5.96 起采用 **[GNU General Public License v3.0 或更高版本](LICENSE)**（GPL-3.0-or-later）开源。原因：随包原生求解库静态链接了 `astrometry.net` 自带的 GSL（GPL-3.0-or-later），`astrometry.net` 官方许可要求整体以 GPL-3.0 或更高版本分发。v1.5.95 及更早的 GPL-2.0 历史版本保持原状。各组件来源与许可的完整清单见 **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**。谨向以下开源项目与科学星表致谢：
+本项目采用 **[GNU General Public License v3.0 或更高版本](LICENSE)**（GPL-3.0-or-later）开源，各组件来源与许可清单见 **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**。谨向以下开源项目与星表致谢：
 
-- **[astrometry.net](https://astrometry.net/)** 0.97（BSD-3-Clause，内含 GSL：GPL-3.0-or-later、qfits：GPL-2.0-or-later）— 盲解核心算法与 4100 系列 FITS 索引（Tycho-2）
-- **[CFITSIO](https://heasarc.gsfc.nasa.gov/fitsio/)** 3.47（NASA / HEASARC 宽松许可）— FITS 读写
-- **[StellarSolver](https://github.com/rlancaste/stellarsolver)**（LGPL-2.1 / MIT）— `astrometry.net` 跨平台封装参考
+- **[astrometry.net](https://astrometry.net/)** 0.97（BSD-3-Clause / GSL GPL-3.0+ / qfits GPL-2.0+）— 盲解核心算法与 4100 系列 FITS 索引
+- **[CFITSIO](https://heasarc.gsfc.nasa.gov/fitsio/)** 3.47 — FITS 读写
+- **[StellarSolver](https://github.com/rlancaste/stellarsolver)**（LGPL-2.1 / MIT）— 跨平台封装参考
 - **[Stellarium](https://stellarium.org/)**（GPL-2.0-or-later）— 88 星座连线与中国传统星官文化数据
-- **[VizieR V/50 Bright Star Catalogue](https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=V/50)**（Public Domain）— 耶鲁亮星星表（BSC5）数据
-- **[Android Jetpack Compose & CameraX](https://developer.android.com/jetpack)**（Apache-2.0）& **[OkHttp](https://github.com/square/okhttp)**（Apache-2.0）
+- **[VizieR V/50 Bright Star Catalogue](https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=V/50)**（Public Domain）— 耶鲁亮星星表（BSC5）
+- **[Android Jetpack Compose & CameraX](https://developer.android.com/jetpack)** & **[OkHttp](https://github.com/square/okhttp)**（Apache-2.0）
