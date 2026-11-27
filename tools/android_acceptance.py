@@ -90,14 +90,28 @@ class Device:
         text = self.run("shell", "ls", "/sdcard/Android/data/com.starcam.astro/files/Pictures/StarCam")
         return sum(line.startswith("StarCam_") for line in text.splitlines())
 
+    def screen_size(self, tree):
+        max_w = max_h = 0
+        for node in tree.iter("node"):
+            bounds = [int(v) for v in re.findall(r"\d+", node.attrib.get("bounds", ""))]
+            if len(bounds) == 4:
+                max_w = max(max_w, bounds[2])
+                max_h = max(max_h, bounds[3])
+        if max_w > 0 and max_h > 0:
+            return max_w, max_h
+        size = self.run("shell", "wm", "size")
+        width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
+        rot = self.run("shell", "settings", "get", "system", "user_rotation").strip()
+        return (height, width) if rot in ("1", "3") else (width, height)
+
     def scroll_to(self, *choices):
-        for _ in range(5):
+        for _ in range(8):
             tree = self.hierarchy()
             if any(any(c in label for c in choices) for label in self.labels(tree)):
                 return
-            size = self.run("shell", "wm", "size")
-            width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
-            self.run("shell", "input", "swipe", str(width // 2), str(height * 4 // 5), str(width // 2), str(height // 3), "350")
+            width, height = self.screen_size(tree)
+            self.run("shell", "input", "swipe", str(width // 2), str(height * 4 // 5), str(width // 2), str(height // 4), "350")
+            time.sleep(.3)
         raise AssertionError(f"Could not scroll to {choices}")
 
 
@@ -141,21 +155,23 @@ def ui_smoke(device):
             return device.screenshot("result")
         record("demo-full-result", demo)
         def export_dialog():
-            device.tap("Save Current", "保存当前标注")
             device.wait("Choose export size", "选择导出尺寸")
-            device.wait("Original size", "原图尺寸")
+            device.wait("Original Size", "Original size", "原图尺寸")
             return device.screenshot("export-size-dialog")
         record("export-size-dialog", export_dialog)
         def landscape():
             device.run("shell", "settings", "put", "system", "accelerometer_rotation", "0")
             device.run("shell", "settings", "put", "system", "user_rotation", "1")
             time.sleep(1)
-            device.scroll_to("Original size", "原图尺寸")
+            device.scroll_to("Original Size", "Original size", "原图尺寸")
             return device.screenshot("export-landscape")
         record("landscape-export-dialog", landscape)
         def save_original():
             before = device.saved_count()
-            device.tap("Original size", "原图尺寸")
+            device.tap("Original Size", "Original size", "原图尺寸")
+            device.wait("Original pixels", "重新读取原图", timeout=15)
+            device.scroll_to("Save Current", "保存当前标注")
+            device.tap("Save Current", "保存当前标注")
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 if device.saved_count() == before + 1:
@@ -164,6 +180,7 @@ def ui_smoke(device):
             raise AssertionError("UI original-size save did not create one output")
         record("original-save-from-ui", save_original)
         device.run("shell", "settings", "put", "system", "user_rotation", "0")
+        time.sleep(.5)
         device.back(); device.back()
         def large_font():
             device.run("shell", "settings", "put", "system", "font_scale", "1.3")
@@ -178,6 +195,7 @@ def ui_smoke(device):
         def bilingual():
             device.scroll_to("Settings (API Key)", "设置（API Key）")
             device.tap("Settings (API Key)", "设置（API Key）")
+            device.scroll_to("Simplified Chinese", "简体中文")
             device.tap("Simplified Chinese", "简体中文")
             device.wait("跟随系统")
             image = device.screenshot("settings-chinese")
@@ -188,15 +206,15 @@ def ui_smoke(device):
         record("language-switch-chinese-and-system", bilingual)
         def batch_return():
             device.run("shell", "am", "start", "-W", "-n", PACKAGE + "/.DeviceAcceptanceActivity")
-            tree = device.wait("Tap a photo", "点击照片查看", timeout=170)
+            tree = device.wait("Batch Solving Complete", "批量识别已完成", "Tap a photo", "点击照片查看", timeout=170)
             summary = " ".join(device.labels(tree))
-            if "Solved 2" not in summary and "识别成功 2" not in summary:
+            if "Solved 2" not in summary and "成功 2" not in summary and "识别成功 2" not in summary:
                 raise AssertionError("Expected both public batch photos to solve")
             for name in ("photo4963.jpg", "photo4974.jpg"):
                 device.tap(name)
                 device.scroll_to("Save Current", "保存当前标注")
                 device.back()
-                device.wait("Tap a photo", "点击照片查看")
+                device.wait("Batch Solving Complete", "批量识别已完成", "Tap a photo", "点击照片查看")
             return device.screenshot("batch-open-return")
         record("batch-open-individually-and-return", batch_return)
     except Exception:
