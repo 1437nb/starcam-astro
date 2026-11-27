@@ -60,6 +60,16 @@ description = "SSH 配置行里的 root 账户"
 regex = '''(?i)\b(ssh_?user|username|user)\s*[:=]\s*["']root["']'''
 tags = ["credential", "ssh"]
 
+[[rules]]
+id = "starcam-personal-home-path"
+description = "个人家目录绝对路径（可能暴露本机用户名）"
+regex = '''(?:[A-Za-z]:[\\/]+Users[\\/]+|/Users/|/home/)[a-z0-9._-]+'''
+tags = ["privacy", "path"]
+[rules.allowlist]
+regexes = [
+  '''(?i)(?:[A-Za-z]:[\\/]+Users[\\/]+|/Users/|/home/)(?:your_?user|user|example|runner|ubuntu|ec2-user|admin|placeholder|xxx|home)''',
+]
+
 # 全局白名单：这些路径不算泄露
 [allowlist]
 paths = [

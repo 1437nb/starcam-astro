@@ -39,9 +39,13 @@ RULES = [
      re.compile(r'''(?i)(?:ssh_?host|ssh_?server|host|server|ip)\s*[:=]\s*["']\d{1,3}(?:\.\d{1,3}){3}["']''')),
     ("root 账户赋值",
      re.compile(r'''(?i)\b(ssh_?user|username|user)\s*[:=]\s*["']root["']''')),
+    ("个人家目录绝对路径",
+     re.compile(r'''(?:[A-Za-z]:[\\/]+Users[\\/]+|/Users/|/home/)[a-z0-9._-]+''')),
 ]
 
 ALLOW = [
+    # 常见占位/通用系统账号家目录与示例代码路径
+    re.compile(r'''(?i)(?:[A-Za-z]:[\\/]+Users[\\/]+|/Users/|/home/)(?:your_?user|user|example|runner|ubuntu|ec2-user|admin|placeholder|xxx|home)'''),
     # 私有/回环/链路本地网段（.gitleaks.toml 同样用 allowlist 表达，RE2 无 lookahead）
     re.compile(r'''(?i)(?:host|server|ip)\s*[:=]\s*["'](?:10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|169\.254\.|0\.)'''),
     # 解析 "password=" 这类字面量（git credential 协议），不是凭据本身
@@ -91,10 +95,10 @@ def main():
     staged = "--staged" in sys.argv
     print("凭据自检%s…" % ("（暂存区）" if staged else "（工作区）"))
     if staged:
-        files = [f for f in git("diff", "--cached", "--name-only", "--diff-filter=ACMR").splitlines() if f]
+        files = [f for f in git("-c", "core.quotePath=false", "diff", "--cached", "--name-only", "--diff-filter=ACMR").splitlines() if f]
         reader = lambda f: git("show", ":" + f)
     else:
-        files = [f for f in git("ls-files").splitlines() if f]
+        files = [f for f in git("-c", "core.quotePath=false", "ls-files").splitlines() if f]
         reader = lambda f: open(os.path.join(WD, f), encoding="utf-8", errors="replace").read()
 
     all_hits = []

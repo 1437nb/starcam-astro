@@ -89,7 +89,7 @@ class RealPhotoMatchTest {
     }
 
     /**
-     * 用户照片（小米 REDMI Turbo 5 Max 2026-09-12 于南宁拍摄，74° 秋季四边形）
+     * 实拍测试样本（Sample Device A 拍摄，74° 秋季四边形宽场）
      * ——§0.62 宽场打分轮的锚点样本。
      *
      * 真值来自 astrometry.net nova 解算（独立于本项目引擎）：
@@ -104,19 +104,19 @@ class RealPhotoMatchTest {
     fun userPhotoNanningWideFieldGroundTruth() {
         val res = solve(photo("user-nanning-20260912.gray"))
         println("PHOTO user-nanning-20260912.gray ${describe(res)}")
-        assertNotNull("南宁宽场照片必须解出（当前 UNSOLVED —— 宽场打分轮回归）", res)
+        assertNotNull("宽场测试样本必须解出（当前 UNSOLVED —— 宽场打分轮回归）", res)
         val s = res!!.solve
         // 真值窗口按 2°（nova 解与自研解的差异实测 <0.02°）
         assertTrue(
-            "南宁照片赤经偏出真值窗口：${s.raDeg}（期望 0.68±2）",
+            "宽场样本赤经偏出真值窗口：${s.raDeg}（期望 0.68±2）",
             abs(s.raDeg - 0.68) < 2.0,
         )
         assertTrue(
-            "南宁照片赤纬偏出真值窗口：${s.decDeg}（期望 23.20±2）",
+            "宽场样本赤纬偏出真值窗口：${s.decDeg}（期望 23.20±2）",
             abs(s.decDeg - 23.20) < 2.0,
         )
         assertTrue(
-            "南宁照片视场偏出真值窗口：${s.fieldWidthDeg}°（期望 68°~82°）",
+            "宽场样本视场偏出真值窗口：${s.fieldWidthDeg}°（期望 68°~82°）",
             s.fieldWidthDeg in 68.0..82.0,
         )
     }
