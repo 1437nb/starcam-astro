@@ -2,6 +2,7 @@ package com.starcam.astro.ui.camera
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -38,6 +40,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathBuilder
 import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -320,18 +323,22 @@ private fun CameraTopCapsule(
     val containerColor = if (active) palette.activeBg else palette.inactiveBg
     val borderColor = if (active) palette.activeBorder else palette.inactiveBorder
     val contentColor = if (active) palette.activeContent else palette.inactiveContent
+    val shape = if (label == null) CircleShape else RoundedCornerShape(50)
+    // 使用 clip + clickable 而非 Surface(onClick=...)，避免 Material 3 minimumInteractiveComponentSize
+    // 把 36dp 胶囊强行撑成 48dp 导致窄屏下右上角按钮被挤出屏幕或彼此紧贴重合。
     Surface(
-        onClick = onClick,
-        shape = if (label == null) CircleShape else RoundedCornerShape(50),
+        shape = shape,
         color = containerColor,
         border = BorderStroke(if (active) 1.2.dp else 1.dp, borderColor),
-        modifier = if (label == null) {
-            Modifier.size(38.dp)
+        modifier = (if (label == null) {
+            Modifier.size(36.dp)
         } else {
             Modifier
-                .height(38.dp)
-                .defaultMinSize(minWidth = 38.dp)
-        },
+                .height(36.dp)
+                .defaultMinSize(minWidth = 36.dp)
+        })
+            .clip(shape)
+            .clickable(role = Role.Button, onClick = onClick),
     ) {
         if (label == null) {
             Box(contentAlignment = Alignment.Center) {
@@ -339,22 +346,22 @@ private fun CameraTopCapsule(
                     imageVector = icon,
                     contentDescription = contentDescription,
                     tint = contentColor,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(17.dp),
                 )
             }
         } else {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(horizontal = 10.dp),
+                modifier = Modifier.padding(horizontal = 8.dp),
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = contentDescription,
                     tint = contentColor,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(15.dp),
                 )
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(3.dp))
                 Text(
                     text = label,
                     color = contentColor,
@@ -395,8 +402,7 @@ internal fun CameraTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 10.dp, start = 10.dp, end = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .padding(top = 10.dp, start = 8.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CameraTopCapsule(
@@ -406,67 +412,72 @@ internal fun CameraTopBar(
             palette = palette,
             onClick = onBack,
         )
-        Spacer(Modifier.width(8.dp))
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Spacer(Modifier.width(6.dp))
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterEnd,
         ) {
-            CameraTopCapsule(
-                icon = ArStarMapIcon,
-                contentDescription = I18n.Ar.toggleDesc,
-                active = arEnabled,
-                palette = palette,
-                onClick = onToggleAr,
-                label = "AR",
-            )
-            if (arEnabled && sensorAssistedPointing) {
-                val shortTarget = arTargetLabel?.trim()?.let {
-                    if (it.length > 6) "${it.take(5)}…" else it
-                }
-                val targetPillLabel = if (hasArTarget) {
-                    shortTarget ?: if (isEn) "Clear" else "清除"
-                } else {
-                    if (isEn) "Find" else "找星"
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CameraTopCapsule(
+                    icon = ArStarMapIcon,
+                    contentDescription = I18n.Ar.toggleDesc,
+                    active = arEnabled,
+                    palette = palette,
+                    onClick = onToggleAr,
+                    label = "AR",
+                )
+                if (arEnabled && sensorAssistedPointing) {
+                    val shortTarget = arTargetLabel?.trim()?.let {
+                        if (it.length > 6) "${it.take(5)}…" else it
+                    }
+                    val targetPillLabel = if (hasArTarget) {
+                        shortTarget ?: if (isEn) "Clear" else "清除"
+                    } else {
+                        if (isEn) "Find" else "找星"
+                    }
+                    CameraTopCapsule(
+                        icon = if (hasArTarget) TargetClearReticleIcon else TargetReticleIcon,
+                        contentDescription = if (hasArTarget) I18n.Ar.clearTarget else I18n.Ar.targetBtn,
+                        active = hasArTarget,
+                        palette = palette,
+                        onClick = onArTargetAction,
+                        label = targetPillLabel,
+                    )
                 }
                 CameraTopCapsule(
-                    icon = if (hasArTarget) TargetClearReticleIcon else TargetReticleIcon,
-                    contentDescription = if (hasArTarget) I18n.Ar.clearTarget else I18n.Ar.targetBtn,
-                    active = hasArTarget,
+                    icon = LiveStarDetectIcon,
+                    contentDescription = I18n.Camera.liveOverlayDesc,
+                    active = livePreview,
                     palette = palette,
-                    onClick = onArTargetAction,
-                    label = targetPillLabel,
+                    onClick = onToggleLivePreview,
+                    label = if (isEn) "Live" else "认星",
+                )
+                CameraTopCapsule(
+                    icon = AppIcons.FlashOn,
+                    contentDescription = I18n.Camera.flashDesc,
+                    active = flashOn,
+                    palette = palette,
+                    onClick = onToggleFlash,
+                )
+                CameraTopCapsule(
+                    icon = AppIcons.Night,
+                    contentDescription = I18n.Camera.nightModeDesc,
+                    active = nightEvActive,
+                    palette = palette,
+                    onClick = onToggleNightEv,
+                )
+                CameraTopCapsule(
+                    icon = AppIcons.CameraSwitch,
+                    contentDescription = I18n.Camera.switchCameraDesc,
+                    active = false,
+                    palette = palette,
+                    onClick = onSwitchCamera,
                 )
             }
-            CameraTopCapsule(
-                icon = LiveStarDetectIcon,
-                contentDescription = I18n.Camera.liveOverlayDesc,
-                active = livePreview,
-                palette = palette,
-                onClick = onToggleLivePreview,
-                label = if (isEn) "Live" else "认星",
-            )
-            CameraTopCapsule(
-                icon = AppIcons.FlashOn,
-                contentDescription = I18n.Camera.flashDesc,
-                active = flashOn,
-                palette = palette,
-                onClick = onToggleFlash,
-            )
-            CameraTopCapsule(
-                icon = AppIcons.Night,
-                contentDescription = I18n.Camera.nightModeDesc,
-                active = nightEvActive,
-                palette = palette,
-                onClick = onToggleNightEv,
-            )
-            CameraTopCapsule(
-                icon = AppIcons.CameraSwitch,
-                contentDescription = I18n.Camera.switchCameraDesc,
-                active = false,
-                palette = palette,
-                onClick = onSwitchCamera,
-            )
         }
     }
 }

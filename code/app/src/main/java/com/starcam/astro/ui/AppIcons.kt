@@ -103,7 +103,7 @@ object AppIcons {
         }.build()
     }
 
-    /** 切换镜头图标（Material cameraswitch） */
+    /** 切换镜头图标（双弧循环箭头 + 中心镜头，零路径重叠） */
     val CameraSwitch: ImageVector by lazy {
         ImageVector.Builder(
             name = "CameraSwitch",
@@ -112,80 +112,41 @@ object AppIcons {
             viewportWidth = 24f,
             viewportHeight = 24f,
         ).apply {
-            path(fill = SolidColor(Color.Black)) {
-                moveTo(16f, 7f)
-                horizontalLineTo(15f)
-                lineTo(14f, 6f)
-                horizontalLineTo(10f)
-                lineTo(9f, 7f)
-                horizontalLineTo(8f)
-                curveTo(6.9f, 7f, 6f, 7.9f, 6f, 9f)
-                verticalLineTo(19f)
-                curveTo(6f, 20.1f, 6.9f, 21f, 8f, 21f)
-                horizontalLineTo(16f)
-                curveTo(17.1f, 21f, 18f, 20.1f, 18f, 19f)
-                verticalLineTo(9f)
-                curveTo(18f, 7.9f, 17.1f, 7f, 16f, 7f)
-                moveTo(9.8f, 12.5f)
-                horizontalLineTo(7.5f)
-                curveTo(7.6f, 11f, 8.9f, 9.8f, 10.4f, 9.8f)
-                lineTo(10f, 11.3f)
-                curveTo(9.5f, 11.3f, 9.2f, 11.9f, 9.8f, 12.5f)
-                moveTo(13f, 16.5f)
-                curveTo(11.5f, 16.5f, 10.3f, 15.3f, 10.1f, 14f)
-                horizontalLineTo(12.4f)
-                curveTo(12.5f, 14.6f, 12.9f, 15.2f, 13.6f, 15.2f)
-                verticalLineTo(16.5f)
-                curveTo(13.4f, 16.5f, 13.2f, 16.5f, 13f, 16.5f)
-                moveTo(12.2f, 13.2f)
-                lineTo(10.7f, 11.7f)
-                lineTo(12.2f, 10.2f)
-                lineTo(13.7f, 11.7f)
-                lineTo(12.2f, 13.2f)
-                moveTo(13f, 13.2f)
-                lineTo(14.5f, 11.7f)
-                lineTo(13f, 10.2f)
-                lineTo(11.5f, 11.7f)
-                lineTo(13f, 13.2f)
-                moveTo(17.5f, 9.5f)
-                lineTo(19f, 9.5f)
-                curveTo(21.2f, 9.5f, 23f, 11.3f, 23f, 13.5f)
-                curveTo(23f, 14f, 22.9f, 14.5f, 22.8f, 14.9f)
-                horizontalLineTo(21.2f)
-                curveTo(21.3f, 14.4f, 21.4f, 14f, 21.4f, 13.5f)
-                curveTo(21.4f, 11.9f, 20.2f, 10.6f, 18.6f, 10.5f)
-                lineTo(19.5f, 10.5f)
-                lineTo(17.5f, 9.5f)
-                moveTo(20.8f, 15.9f)
-                horizontalLineTo(22.4f)
-                curveTo(22.5f, 16.4f, 22.6f, 16.9f, 22.6f, 17.4f)
-                curveTo(22.6f, 17.9f, 22.5f, 18.4f, 22.4f, 18.8f)
-                horizontalLineTo(20.8f)
-                curveTo(20.9f, 18.3f, 21f, 17.9f, 21f, 17.4f)
-                curveTo(21f, 16.9f, 20.9f, 16.4f, 20.8f, 15.9f)
-                moveTo(16f, 2.5f)
-                lineTo(13.5f, 5f)
-                lineTo(16f, 7.5f)
-                verticalLineTo(6f)
-                curveTo(17.5f, 6f, 18.8f, 7f, 19.2f, 8.3f)
-                lineTo(20.8f, 8.1f)
-                curveTo(20.2f, 5.8f, 18.3f, 4f, 16f, 4f)
-                verticalLineTo(2.5f)
-                moveTo(4.5f, 12.5f)
-                curveTo(4.5f, 10.9f, 5.7f, 9.6f, 7.3f, 9.5f)
-                lineTo(6.4f, 9.5f)
-                lineTo(8.4f, 8.5f)
-                lineTo(6.4f, 7.5f)
-                lineTo(8f, 7.5f)
-                verticalLineTo(6.5f)
-                curveTo(5.8f, 6.5f, 4f, 8.3f, 4f, 10.5f)
-                curveTo(4f, 11f, 4.1f, 11.5f, 4.2f, 11.9f)
-                horizontalLineTo(5.8f)
-                curveTo(5.6f, 11.4f, 5.5f, 11f, 5.5f, 10.5f)
-                curveTo(5.5f, 9.8f, 5.9f, 9.3f, 6.5f, 9f)
-                verticalLineTo(9.4f)
-                lineTo(4.5f, 12.5f)
+            path(
+                fill = SolidColor(Color.Black),
+                pathFillType = PathFillType.EvenOdd,
+            ) {
+                // 顶部顺时针旋转弧 + 右上箭头
+                moveTo(12f, 3.2f)
+                curveTo(15.7f, 3.2f, 18.85f, 5.5f, 20.15f, 8.75f)
+                lineTo(18.25f, 9.5f)
+                curveTo(17.25f, 7.0f, 14.85f, 5.2f, 12f, 5.2f)
+                curveTo(9.85f, 5.2f, 7.95f, 6.2f, 6.7f, 7.75f)
+                lineTo(5.15f, 6.5f)
+                curveTo(6.75f, 4.5f, 9.25f, 3.2f, 12f, 3.2f)
                 close()
+                // 右上箭头三角形
+                moveTo(21.2f, 5.4f)
+                lineTo(20.65f, 10.6f)
+                lineTo(15.65f, 9.25f)
+                close()
+                // 底部顺时针旋转弧 + 左下箭头
+                moveTo(12f, 20.8f)
+                curveTo(8.3f, 20.8f, 5.15f, 18.5f, 3.85f, 15.25f)
+                lineTo(5.75f, 14.5f)
+                curveTo(6.75f, 17.0f, 9.15f, 18.8f, 12f, 18.8f)
+                curveTo(14.15f, 18.8f, 16.05f, 17.8f, 17.3f, 16.25f)
+                lineTo(18.85f, 17.5f)
+                curveTo(17.25f, 19.5f, 14.75f, 20.8f, 12f, 20.8f)
+                close()
+                // 左下箭头三角形
+                moveTo(2.8f, 18.6f)
+                lineTo(3.35f, 13.4f)
+                lineTo(8.35f, 14.75f)
+                close()
+                // 中心镜头圆环（外径 3.4，内径 1.6）
+                circleSubpath(12f, 12f, 3.4f)
+                circleSubpath(12f, 12f, 1.6f)
             }
         }.build()
     }
