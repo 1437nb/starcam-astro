@@ -11,8 +11,17 @@ data class SolveDiagnostics(
     val stars: List<DiagStar>,
     /** 依次尝试过的引擎标签 */
     val enginesTried: List<String>,
+    /** 若尝试了在线 nova 求解并失败，保留其具体错误原因（如 API Key 无效、网络异常、超时等） */
+    val onlineFailureReason: String? = null,
 ) {
     data class DiagStar(val x: Float, val y: Float, val brightness01: Float)
+
+    /** 仅走了在线引擎（未做本地提星）时，不能把 starCount=0 误判成“画面里看不到星点”。 */
+    val isOnlineOnlyFailure: Boolean
+        get() = !onlineFailureReason.isNullOrBlank() &&
+            starCount == 0 &&
+            enginesTried.isNotEmpty() &&
+            enginesTried.all { it == SolveEngine.ONLINE_NOVA.labelZh || it == "在线识别" }
 
     val verdict: Verdict = when {
         starCount < 8 -> Verdict.TOO_FEW
@@ -22,21 +31,30 @@ data class SolveDiagnostics(
 
     enum class Verdict { TOO_FEW, FEW, PLENTY_UNSOLVED }
 
-    fun verdictTitle(isEnglish: Boolean = false): String = if (isEnglish) {
-        when (verdict) {
-            Verdict.TOO_FEW -> "Barely any stars detected"
-            Verdict.FEW -> "Only a few stars detected"
-            Verdict.PLENTY_UNSOLVED -> "Plenty of stars, but catalog match failed"
+    fun verdictTitle(isEnglish: Boolean = false): String {
+        if (isOnlineOnlyFailure) {
+            return if (isEnglish) "Online solve failed" else "在线识别失败"
         }
-    } else {
-        when (verdict) {
-            Verdict.TOO_FEW -> "画面里几乎看不到星点"
-            Verdict.FEW -> "只检测到少量星点"
-            Verdict.PLENTY_UNSOLVED -> "星点充足，但没能匹配星表"
+        return if (isEnglish) {
+            when (verdict) {
+                Verdict.TOO_FEW -> "Barely any stars detected"
+                Verdict.FEW -> "Only a few stars detected"
+                Verdict.PLENTY_UNSOLVED -> "Plenty of stars, but catalog match failed"
+            }
+        } else {
+            when (verdict) {
+                Verdict.TOO_FEW -> "画面里几乎看不到星点"
+                Verdict.FEW -> "只检测到少量星点"
+                Verdict.PLENTY_UNSOLVED -> "星点充足，但没能匹配星表"
+            }
         }
     }
 
-    fun verdictDetail(isEnglish: Boolean = false): String = if (isEnglish) {
+    fun verdictDetail(isEnglish: Boolean = false): String {
+        if (isOnlineOnlyFailure) {
+            return onlineFailureReason.orEmpty()
+        }
+        return if (isEnglish) {
         when (verdict) {
             Verdict.TOO_FEW ->
                 "Detected $starCount stars (fewer than 8). Common causes: exposure too short or ISO too low, " +
@@ -62,6 +80,7 @@ data class SolveDiagnostics(
                     "变焦视场太窄（亮星表覆盖有限，可到设置改用官方引擎优先）、" +
                     "画面以深空天体为主，或星点被抖动拉成了线。"
         }
+    }
     }
 
     fun enginesText(isEnglish: Boolean = false): String =

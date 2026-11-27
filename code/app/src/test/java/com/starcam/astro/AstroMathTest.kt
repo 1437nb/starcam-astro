@@ -196,6 +196,25 @@ class AstroMathTest {
         assertEquals(-1.0, w2.cd11, 1e-12)
         assertEquals(1.0, w2.cd22, 1e-12)
         assertTrue("parity-1 行列式应为负", w2.detForTest() < 0)
+
+        // Nova JPEG/PNG (yDownImage=true): parity=+1, θ=0° → 北在上、东在左（普通星空照片）
+        val jpegNormal = WcsTransform.fromCalibration(10.0, 20.0, 0.0, 3600.0, 1, 4000, 3000, yDownImage = true)
+        assertEquals(-1.0, jpegNormal.cd11, 1e-12)
+        assertEquals(0.0, jpegNormal.cd12, 1e-12)
+        assertEquals(0.0, jpegNormal.cd21, 1e-12)
+        assertEquals(1.0, jpegNormal.cd22, 1e-12)
+        val northPx = jpegNormal.skyToScreen(10.0, 21.0, 4000, 3000)
+        val eastPx = jpegNormal.skyToScreen(11.0, 20.0, 4000, 3000)
+        val centerPx = jpegNormal.skyToScreen(10.0, 20.0, 4000, 3000)
+        assertTrue("北侧星应在屏幕上方（y 更小）", northPx[1] < centerPx[1])
+        assertTrue("东侧星应在屏幕左侧（x 更小）", eastPx[0] < centerPx[0])
+
+        // Nova JPEG/PNG (yDownImage=true): parity=-1, θ=0° → 北在上、东在右（镜像照片）
+        val jpegFlipped = WcsTransform.fromCalibration(10.0, 20.0, 0.0, 3600.0, -1, 4000, 3000, yDownImage = true)
+        assertEquals(1.0, jpegFlipped.cd11, 1e-12)
+        assertEquals(1.0, jpegFlipped.cd22, 1e-12)
+        val eastFlipped = jpegFlipped.skyToScreen(11.0, 20.0, 4000, 3000)
+        assertTrue("镜像照片东侧星应在屏幕右侧（x 更大）", eastFlipped[0] > centerPx[0])
     }
 
     @Test

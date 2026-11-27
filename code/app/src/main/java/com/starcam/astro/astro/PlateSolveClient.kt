@@ -37,6 +37,8 @@ class PlateSolveException(message: String, val kind: Kind = Kind.OTHER) : Except
  */
 class PlateSolveClient(
     serverUrl: String = SettingsRepository.DEFAULT_SERVER,
+    private val pollInitialMs: Long = POLL_INTERVAL_INITIAL_MS,
+    private val pollMaxMs: Long = POLL_INTERVAL_MAX_MS,
 ) {
 
     /** 服务器地址：强制 HTTPS。
@@ -56,6 +58,32 @@ class PlateSolveClient(
     }
 
     private val client = sharedClient
+
+    /** 仅验证服务器连通性与 API Key 有效性（不上传图片）。成功返回 session 标识，失败抛 [PlateSolveException]。 */
+    suspend fun verifyApiKey(
+        apiKey: String,
+        timeoutMs: Long = VERIFY_TIMEOUT_MS,
+    ): String = withContext(Dispatchers.IO) {
+        val trimmed = apiKey.trim()
+        if (trimmed.isEmpty()) {
+            throw PlateSolveException(
+                if (LocaleState.isEnglish) "Please enter an API Key first."
+                else "请先填写 API Key。",
+                PlateSolveException.Kind.AUTH,
+            )
+        }
+        try {
+            kotlinx.coroutines.withTimeout(timeoutMs.coerceAtLeast(1L)) {
+                login(trimmed)
+            }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            throw PlateSolveException(
+                if (LocaleState.isEnglish) "Connection timed out (${timeoutMs / 1000}s). Check network or server URL."
+                else "连接超时（${timeoutMs / 1000} 秒），请检查网络或服务器地址。",
+                PlateSolveException.Kind.TIMEOUT,
+            )
+        }
+    }
 
     /** 上传并求解；onProgress 回调进度文案。返回与 [image] 像素尺寸一致的定标结果。 */
     suspend fun solve(
@@ -107,7 +135,7 @@ class PlateSolveClient(
         val remainingBudget = (overallDeadline - (System.nanoTime() / 1_000_000)).coerceAtLeast(1000L)
         val deadline = (System.nanoTime() / 1_000_000) + minOf(SOLVE_TIMEOUT_MS, remainingBudget)
         var lastStatus = ""
-        var interval = POLL_INTERVAL_INITIAL_MS
+        var interval = pollInitialMs.coerceAtLeast(1L)
         while (true) {
             if ((System.nanoTime() / 1_000_000) > deadline) {
                 throw PlateSolveException(
@@ -149,10 +177,12 @@ class PlateSolveClient(
      * 且完全不看 Retry-After，被限流后只会继续撞。
      */
     private fun backoff(current: Long, retryAfterMs: Long?): Long {
+        val lo = pollInitialMs.coerceAtLeast(1L)
+        val hi = pollMaxMs.coerceAtLeast(lo)
         if (retryAfterMs != null && retryAfterMs > 0) {
-            return retryAfterMs.coerceIn(POLL_INTERVAL_INITIAL_MS, POLL_INTERVAL_MAX_MS)
+            return retryAfterMs.coerceIn(lo, hi)
         }
-        return (current * 3 / 2).coerceAtMost(POLL_INTERVAL_MAX_MS)
+        return (current * 3 / 2).coerceIn(lo, hi)
     }
 
     private fun progressText(status: String): String {
@@ -176,16 +206,17 @@ class PlateSolveClient(
     private suspend fun postJsonWithRetry(url: String, body: RequestBody): Pair<JSONObject, Long?> {
         var lastError: IOException? = null
         val isEn = LocaleState.isEnglish
+        val retryMaxSec = (pollMaxMs / 1000L).coerceAtLeast(1L)
         for (attempt in 0 until MAX_NETWORK_RETRIES) {
             try {
                 val req = Request.Builder().url(url).post(body).build()
                 client.newCall(req).awaitText().let { resp ->
                     val text = resp.text
                     val retryAfterMs = resp.retryAfter?.trim()?.toLongOrNull()
-                        ?.coerceIn(1L, POLL_INTERVAL_MAX_MS / 1000)?.times(1000L)
+                        ?.coerceIn(1L, retryMaxSec)?.times(1000L)
                     if (resp.code == 429 || resp.code == 503) {
                         if (attempt < MAX_NETWORK_RETRIES - 1) {
-                            delay(retryAfterMs ?: POLL_INTERVAL_INITIAL_MS)
+                            delay(minOf(retryAfterMs ?: pollInitialMs, pollMaxMs).coerceAtLeast(1L))
                             return@let
                         }
                         throw PlateSolveException(
@@ -200,7 +231,15 @@ class PlateSolveClient(
                             PlateSolveException.Kind.NETWORK,
                         )
                     }
-                    return JSONObject(text) to retryAfterMs
+                    val parsed = try {
+                        JSONObject(text)
+                    } catch (_: Exception) {
+                        throw PlateSolveException(
+                            if (isEn) "Invalid JSON response from solve server" else "服务器返回格式异常，请检查服务器地址",
+                            PlateSolveException.Kind.SOLVE_ERROR,
+                        )
+                    }
+                    return parsed to retryAfterMs
                 }
             } catch (e: IOException) {
                 lastError = e
@@ -214,6 +253,14 @@ class PlateSolveClient(
         )
     }
 
+    private fun extractErrorMessage(obj: JSONObject, fallback: String): String {
+        for (field in listOf("errormessage", "errormsg", "error")) {
+            val v = obj.optString(field, "").trim()
+            if (v.isNotEmpty() && !v.equals("null", ignoreCase = true)) return v
+        }
+        return fallback
+    }
+
     private suspend fun login(apiKey: String): String {
         val isEn = LocaleState.isEnglish
         val json = JSONObject().put("apikey", apiKey).toString()
@@ -221,12 +268,22 @@ class PlateSolveClient(
         val obj = postJson("$serverUrl/login", body)
         if (obj.optString("status") != "success") {
             val defaultMsg = if (isEn) "Invalid API Key, please check Settings" else "API Key 无效，请到「设置」中检查"
+            val detail = extractErrorMessage(obj, "")
+            val msg = if (detail.isNotEmpty() && detail != defaultMsg) {
+                if (isEn) "Invalid API Key ($detail)" else "API Key 无效（$detail）"
+            } else {
+                defaultMsg
+            }
+            throw PlateSolveException(msg, PlateSolveException.Kind.AUTH)
+        }
+        val session = obj.optString("session", "").trim()
+        if (session.isEmpty()) {
             throw PlateSolveException(
-                obj.optString("errormsg", defaultMsg),
+                if (isEn) "Login succeeded without session token" else "登录响应缺少 session，请检查服务器地址",
                 PlateSolveException.Kind.AUTH,
             )
         }
-        return obj.getString("session")
+        return session
     }
 
     private suspend fun upload(session: String, image: File): Long {
@@ -244,7 +301,7 @@ class PlateSolveClient(
             .build()
         val obj = postJson("$serverUrl/upload", body)
         if (obj.optString("status") != "success") {
-            val detail = obj.optString("errormsg", obj.toString().take(120))
+            val detail = extractErrorMessage(obj, obj.toString().take(120))
             throw PlateSolveException(
                 if (isEn) "Upload failed: $detail" else "上传失败：$detail",
                 PlateSolveException.Kind.SOLVE_ERROR,
@@ -255,11 +312,11 @@ class PlateSolveClient(
 
     private fun emptyBody(): RequestBody = "".toRequestBody(null)
 
-    /** 轮询 submissions/{id} 直到拿到第一个非空 job id */
+    /** 轮询 submissions/{id} 直到拿到第一个非空且为正的 job id */
     private suspend fun waitForJob(subId: Long, maxWaitMs: Long = WAIT_FOR_JOB_TIMEOUT_MS): Long {
         val isEn = LocaleState.isEnglish
         val deadline = (System.nanoTime() / 1_000_000) + maxWaitMs
-        var interval = POLL_INTERVAL_INITIAL_MS
+        var interval = pollInitialMs.coerceAtLeast(1L)
         while (true) {
             if ((System.nanoTime() / 1_000_000) > deadline) {
                 throw PlateSolveException(
@@ -272,7 +329,10 @@ class PlateSolveClient(
             val jobs = obj.optJSONArray("jobs")
             if (jobs != null && jobs.length() > 0) {
                 for (i in 0 until jobs.length()) {
-                    if (!jobs.isNull(i)) return jobs.getLong(i)
+                    if (!jobs.isNull(i)) {
+                        val id = jobs.optLong(i, -1L)
+                        if (id > 0L) return id
+                    }
                 }
             }
             interval = backoff(interval, retryAfter)
@@ -288,26 +348,49 @@ class PlateSolveClient(
     private suspend fun fetchCalibration(jobId: Long, image: File): SolveResult {
         val isEn = LocaleState.isEnglish
         val obj = postJson("$serverUrl/jobs/$jobId/calibration", emptyBody())
-        if (obj.optString("status") != "success") {
+        // 官方 net/api.py:calibration 成功时直接返回 {ra, dec, orientation, pixscale, parity, radius, ...}，
+        // 不含 "status" 字段；仅在未定标时返回 {"error": "no calibration data available..."}。
+        if (obj.has("error") || obj.optString("status") == "error") {
+            val detail = extractErrorMessage(
+                obj,
+                if (isEn) "Calibration data missing, please retry" else "定标数据缺失，请重试",
+            )
+            throw PlateSolveException(detail, PlateSolveException.Kind.SOLVE_ERROR)
+        }
+
+        val ra = obj.optDouble("ra", Double.NaN)
+        val dec = obj.optDouble("dec", Double.NaN)
+        val orientation = obj.optDouble("orientation", Double.NaN)
+        val pixscale = obj.optDouble("pixscale", Double.NaN)
+        val parityRaw = obj.optDouble("parity", Double.NaN)
+        if (!ra.isFinite() || !dec.isFinite() || !orientation.isFinite() ||
+            !pixscale.isFinite() || pixscale <= 0.0 || !parityRaw.isFinite()
+        ) {
             throw PlateSolveException(
                 if (isEn) "Calibration data missing, please retry" else "定标数据缺失，请重试",
                 PlateSolveException.Kind.SOLVE_ERROR,
             )
         }
+        val parity = if (parityRaw < 0.0) -1 else 1
+        // Nova calibration.radius 单位为度（deg），SolveResult.fieldRadiusArcmin 单位为角分（arcmin）
+        val radiusArcmin = obj.optDouble("radius", Double.NaN)
+            .takeIf { it.isFinite() && it > 0.0 }
+            ?.times(60.0)
 
-        val ra = obj.getDouble("ra")
-        val dec = obj.getDouble("dec")
-        val orientation = obj.getDouble("orientation")
-        val pixscale = obj.getDouble("pixscale")
-        val parity = obj.getInt("parity")
-        val radius = obj.optDouble("radius", Double.NaN).takeIf { !it.isNaN() }
-
-        // 图像尺寸以实际上传文件为准（calibration 里不保证返回像素宽高）
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(image.absolutePath, bounds)
-        var width = if (bounds.outWidth > 0) bounds.outWidth else 0
-        var height = if (bounds.outHeight > 0) bounds.outHeight else 0
-        if ((width == 0 || height == 0) && FitsImage.isFitsPath(image.absolutePath)) {
+        // 图像尺寸优先取实际上传文件；不可解码时回退 calibration 返回的 width_arcsec / height_arcsec
+        val isFits = FitsImage.isFitsPath(image.absolutePath)
+        var width = 0
+        var height = 0
+        try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(image.absolutePath, bounds)
+            if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+                width = bounds.outWidth
+                height = bounds.outHeight
+            }
+        } catch (_: Throwable) {
+        }
+        if ((width == 0 || height == 0) && isFits) {
             FitsImage.readMeta(image.absolutePath)?.let { meta ->
                 if (meta.naxis1 > 0 && meta.naxis2 > 0) {
                     width = meta.naxis1
@@ -315,8 +398,29 @@ class PlateSolveClient(
                 }
             }
         }
+        if (width == 0 || height == 0) {
+            val wArcsec = obj.optDouble("width_arcsec", Double.NaN)
+            val hArcsec = obj.optDouble("height_arcsec", Double.NaN)
+            if (wArcsec.isFinite() && hArcsec.isFinite() && wArcsec > 0.0 && hArcsec > 0.0) {
+                width = kotlin.math.round(wArcsec / pixscale).toInt().coerceAtLeast(1)
+                height = kotlin.math.round(hArcsec / pixscale).toInt().coerceAtLeast(1)
+            }
+        }
 
-        val wcs = WcsTransform.fromCalibration(ra, dec, orientation, pixscale, parity, width, height)
+        val wcs = if (width > 0 && height > 0) {
+            WcsTransform.fromCalibration(
+                raDeg = ra,
+                decDeg = dec,
+                orientationDeg = orientation,
+                pixScaleArcsec = pixscale,
+                parity = parity,
+                width = width,
+                height = height,
+                yDownImage = !isFits,
+            )
+        } else {
+            null
+        }
 
         return SolveResult(
             raDeg = ra,
@@ -327,7 +431,7 @@ class PlateSolveClient(
             imageWidth = width,
             imageHeight = height,
             subId = jobId,
-            fieldRadiusArcmin = radius,
+            fieldRadiusArcmin = radiusArcmin,
             wcs = wcs,
         )
     }
@@ -335,6 +439,7 @@ class PlateSolveClient(
     companion object {
         const val SOLVE_TIMEOUT_MS = 240_000L
         const val WAIT_FOR_JOB_TIMEOUT_MS = 120_000L
+        const val VERIFY_TIMEOUT_MS = 15_000L
         private const val POLL_INTERVAL_INITIAL_MS = 2_000L
         private const val POLL_INTERVAL_MAX_MS = 15_000L
         private const val MAX_NETWORK_RETRIES = 2

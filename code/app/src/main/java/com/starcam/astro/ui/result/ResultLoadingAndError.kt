@@ -629,10 +629,12 @@ internal fun ErrorContent(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         diagnostics?.let { diag ->
-                            DiagMetricPill(
-                                label = if (isEn) "Detected Stars" else "检出星点",
-                                value = if (isEn) "${diag.starCount}" else "${diag.starCount} 颗",
-                            )
+                            if (!diag.isOnlineOnlyFailure) {
+                                DiagMetricPill(
+                                    label = if (isEn) "Detected Stars" else "检出星点",
+                                    value = if (isEn) "${diag.starCount}" else "${diag.starCount} 颗",
+                                )
+                            }
                             if (diag.enginesTried.isNotEmpty()) {
                                 DiagMetricPill(
                                     label = if (isEn) "Engines Tried" else "已尝试引擎",
@@ -758,6 +760,9 @@ private fun SolveLogDetails(diagnostics: SolveDiagnostics?) {
             if (isEn) {
                 appendLine("Stars detected: ${diagnostics?.starCount ?: 0}")
                 appendLine("Engine trace: ${diagnostics?.enginesTried?.joinToString(" → ") ?: "-"}")
+                diagnostics?.onlineFailureReason?.takeIf { it.isNotBlank() }?.let {
+                    appendLine("Online error: $it")
+                }
                 fun rate(best: Int?, inFrame: Int?): String =
                     if (best != null && inFrame != null && inFrame > 0) {
                         val r = best.toFloat() / inFrame
@@ -785,6 +790,9 @@ private fun SolveLogDetails(diagnostics: SolveDiagnostics?) {
             } else {
                 appendLine("检星 ${diagnostics?.starCount ?: 0} 颗")
                 appendLine("引擎轨迹：${diagnostics?.enginesTried?.joinToString(" → ") ?: "-"}")
+                diagnostics?.onlineFailureReason?.takeIf { it.isNotBlank() }?.let {
+                    appendLine("在线失败原因：$it")
+                }
                 fun rate(best: Int?, inFrame: Int?): String =
                     if (best != null && inFrame != null && inFrame > 0) {
                         val r = best.toFloat() / inFrame

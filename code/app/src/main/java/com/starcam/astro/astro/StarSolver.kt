@@ -104,6 +104,9 @@ object StarSolver {
     /** 官方引擎单次求解时间上限（秒）：fov 已知时给足，未知盲解时收紧 */
     const val NATIVE_TIME_LIMIT_KNOWN_FOV = 30.0
 
+    /** 在线 nova.astrometry.net 最低独立时间预算（秒），避免默认 30s 本地预算掐断云端排队与解算 */
+    const val ONLINE_MIN_BUDGET_SEC = 90
+
     /** 盲解（无 EXIF 先验）分段试探参数：窄-中场段（度，限时秒） */
     const val NATIVE_BLIND_SEG_LO_DEG = 3.0
     const val NATIVE_BLIND_SEG_MID_DEG = 40.0
@@ -281,7 +284,15 @@ object StarSolver {
         onPhase: (SolvePhase) -> Unit = {},
         onProgress: (String) -> Unit,
     ): EngineResult? {
-        val operationToken = SolveToken(token, settings.solveBudgetSec.toLong() * 1000L)
+        val localBudgetSec = settings.solveBudgetSec.toDouble()
+        val onlineBudgetSec = SolverPlanning.onlineStepBudgetSec(settings.solveBudgetSec)
+        val hasOnlinePotential = settings.hasApiKey && settings.engineMode != EngineMode.OFFLINE_ONLY
+        val overallBudgetMs = when {
+            settings.engineMode == EngineMode.ONLINE_ONLY -> (onlineBudgetSec * 1000.0).toLong()
+            hasOnlinePotential -> ((localBudgetSec + onlineBudgetSec) * 1000.0).toLong()
+            else -> (localBudgetSec * 1000.0).toLong()
+        }
+        val operationToken = SolveToken(token, overallBudgetMs)
         return withContext(Dispatchers.IO) {
             withSolveCancellation(operationToken) {
                 solveInternal(context, display, imagePath, settings, operationToken,
@@ -314,12 +325,17 @@ object StarSolver {
         if (steps.isEmpty()) return@withContext null
 
         val budgetSec = settings.solveBudgetSec.toDouble()
-        val deadlineMs = System.nanoTime() / 1_000_000 + (budgetSec * 1000).toLong()
+        val onlineBudgetSec = SolverPlanning.onlineStepBudgetSec(settings.solveBudgetSec)
+        val hasOnlineStep = steps.contains(SolveEngine.ONLINE_NOVA)
+        val localStepsOnly = steps.filter { it != SolveEngine.ONLINE_NOVA }
+        val localDeadlineMs = System.nanoTime() / 1_000_000 + (budgetSec * 1000).toLong()
+        val localToken = SolveToken(token, (budgetSec * 1000).toLong())
 
         val enginesTried = ArrayList<String>()
         var lastLocalStars: List<DetectedStar>? = null
         var lastLocalStarTotal = 0
         var lastDetectedDiagStars: List<SolveDiagnostics.DiagStar>? = null
+        var lastOnlineFailure: String? = null
         var fovOverride: Double? = null
         val logT0 = System.currentTimeMillis()
         val report = com.starcam.astro.data.SolveLogStore.newReport(
@@ -338,7 +354,8 @@ object StarSolver {
             "=== 开始识别 ${java.io.File(imagePath).name} ${display.width}x${display.height} " +
                 "计划=${steps.joinToString(",")} " +
                 "fov=${fov?.let { "%.1f°".format(it) } ?: "无EXIF"} " +
-                "App=v$appVer 预算=${budgetSec.toInt()}s",
+                "App=v$appVer 本地预算=${budgetSec.toInt()}s" +
+                (if (hasOnlineStep) " 在线预算=${onlineBudgetSec.toInt()}s" else ""),
         )
 
         val localStep = LocalMatcherStep()
@@ -359,8 +376,8 @@ object StarSolver {
             fovDeg = fov,
             fovOverride = null,
             scheduledSteps = steps,
-            token = token,
-            deadlineMs = deadlineMs,
+            token = localToken,
+            deadlineMs = localDeadlineMs,
             report = report,
             log = log,
             logT0 = logT0,
@@ -379,123 +396,163 @@ object StarSolver {
 
         var budgetExceededError: SolveBudgetExceeded? = null
         try {
-            if (shouldRace) {
-                log.line(context, "双引擎并发竞速（LocalMatcher + Native）开启")
-                enginesTried.add("内置星表")
-                enginesTried.add("官方引擎")
+            if (localStepsOnly.isNotEmpty()) {
+                try {
+                    if (shouldRace) {
+                        log.line(context, "双引擎并发竞速（LocalMatcher + Native）开启")
+                        enginesTried.add("内置星表")
+                        enginesTried.add("官方引擎")
 
-                val raceTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
-                val raceOutcome = kotlinx.coroutines.withTimeoutOrNull(raceTimeout) {
-                    raceSteps(ctx, localStep, nativeStep)
-                } ?: run {
-                    log.line(context, "双引擎并发竞速超时（耗尽剩余预算 ${raceTimeout}ms）")
-                    StepOutcome.Failure(reason = "竞速超时")
-                }
-                when (raceOutcome) {
-                    is StepOutcome.Success -> return@withContext raceOutcome.result
-                    is StepOutcome.Failure -> {
-                        raceOutcome.fovOverride?.let { fovOverride = it }
-                        raceOutcome.diagStars?.let { lastLocalStars = it }
-                        if (raceOutcome.diagStarTotal > 0) lastLocalStarTotal = raceOutcome.diagStarTotal
-                        raceOutcome.graySnapshot?.let {
-                            lastGraySnapshot = it
-                            lastGrayW = raceOutcome.grayW
-                            lastGrayH = raceOutcome.grayH
-                        }
-                    }
-                    is StepOutcome.Skipped -> {}
-                }
-
-                if (steps.contains(SolveEngine.ONLINE_NOVA)) {
-                    coroutineContext.ensureActive()
-                    token.check()
-                    if (!ctx.isBudgetDepleted) {
-                        enginesTried.add("在线识别")
-                        val onlineTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
-                        val onlineOutcome = kotlinx.coroutines.withTimeoutOrNull(onlineTimeout) {
-                            onlineStep.execute(ctx.copy(fovOverride = fovOverride))
+                        val raceTimeout = (localDeadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
+                        val raceOutcome = kotlinx.coroutines.withTimeoutOrNull(raceTimeout) {
+                            raceSteps(ctx, localStep, nativeStep)
                         } ?: run {
-                            log.line(context, "在线识别超时（耗尽剩余预算 ${onlineTimeout}ms）")
-                            StepOutcome.Failure(reason = "在线识别超时")
+                            log.line(context, "双引擎并发竞速超时（耗尽本地预算 ${raceTimeout}ms）")
+                            StepOutcome.Failure(reason = "竞速超时")
                         }
-                        if (onlineOutcome is StepOutcome.Success) {
-                            return@withContext onlineOutcome.result
+                        when (raceOutcome) {
+                            is StepOutcome.Success -> return@withContext raceOutcome.result
+                            is StepOutcome.Failure -> {
+                                raceOutcome.fovOverride?.let { fovOverride = it }
+                                raceOutcome.diagStars?.let { lastLocalStars = it }
+                                if (raceOutcome.diagStarTotal > 0) lastLocalStarTotal = raceOutcome.diagStarTotal
+                                raceOutcome.graySnapshot?.let {
+                                    lastGraySnapshot = it
+                                    lastGrayW = raceOutcome.grayW
+                                    lastGrayH = raceOutcome.grayH
+                                }
+                            }
+                            is StepOutcome.Skipped -> {}
                         }
-                    }
-                }
-            } else {
-                val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-                val isLowRam = am?.isLowRamDevice == true
-                val maxMemMb = Runtime.getRuntime().maxMemory() / (1024 * 1024)
-                log.line(
-                    context,
-                    "串行调度（racing=${settings.parallelEngineRacing}, canRace=false, " +
-                        "mode=${settings.engineMode.key}, maxMem=${maxMemMb}MB, lowRam=$isLowRam, native=${NativeEngineProbe.available}）",
-                )
-                for ((stepIdx, engine) in steps.withIndex()) {
-                    coroutineContext.ensureActive()
-                    token.check()
-
-                    if (ctx.isBudgetDepleted) {
-                        log.line(context, "全局时间预算耗尽（上限 ${budgetSec.toInt()}s），终止后续引擎尝试")
-                        break
-                    }
-
-                    val step = stepMap[engine] ?: continue
-                    enginesTried.add(engine.labelZh)
-
-                    val hasNativeFollowUp = (stepIdx + 1 until steps.size).any {
-                        steps[it] == SolveEngine.ASTROMETRY_NATIVE
-                    }
-                    val allocatedBudgetSec = if (engine == SolveEngine.LOCAL_MATCHER && hasNativeFollowUp) {
-                        SolverPlanning.localStepBudgetSec(budgetSec, fov, hasNativeFollowUp = true)
                     } else {
-                        null
-                    }
-                    val stepStartMs = System.currentTimeMillis() - logT0
-                    log.line(
-                        context,
-                        "调度：开始 ${engine.labelZh}（offset=${stepStartMs}ms，全局剩余=${"%.1f".format(ctx.remainingSec)}s" +
-                            (allocatedBudgetSec?.let { "，步骤上限=${"%.1f".format(it)}s" } ?: "") + "）",
-                    )
-
-                    val stepTimeout = (deadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
-                    val outcome = kotlinx.coroutines.withTimeoutOrNull(stepTimeout) {
-                        step.execute(
-                            ctx.copy(
-                                fovOverride = fovOverride,
-                                stepBudgetSec = allocatedBudgetSec,
-                                isRacing = false,
-                            ),
+                        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+                        val isLowRam = am?.isLowRamDevice == true
+                        val maxMemMb = Runtime.getRuntime().maxMemory() / (1024 * 1024)
+                        log.line(
+                            context,
+                            "串行调度（racing=${settings.parallelEngineRacing}, canRace=false, " +
+                                "mode=${settings.engineMode.key}, maxMem=${maxMemMb}MB, lowRam=$isLowRam, native=${NativeEngineProbe.available}）",
                         )
-                    } ?: run {
-                        log.line(context, "${engine.labelZh}：单步执行超时（耗尽剩余预算 ${stepTimeout}ms），跳过")
-                        StepOutcome.Failure(reason = "单步超过预算")
-                    }
-                    val stepElapsedMs = (System.currentTimeMillis() - logT0) - stepStartMs
-                    val outcomeTag = when (outcome) {
-                        is StepOutcome.Success -> "success"
-                        is StepOutcome.Failure -> "failure(${outcome.reason.take(40)})"
-                        is StepOutcome.Skipped -> "skipped(${outcome.reason})"
-                    }
-                    log.line(
-                        context,
-                        "调度：结束 ${engine.labelZh}（耗时=${stepElapsedMs}ms，全局剩余=${"%.1f".format(ctx.remainingSec)}s，结果=$outcomeTag）",
-                    )
-                    when (outcome) {
-                        is StepOutcome.Success -> return@withContext outcome.result
-                        is StepOutcome.Failure -> {
-                            outcome.fovOverride?.let { fovOverride = it }
-                            outcome.diagStars?.let { lastLocalStars = it }
-                            if (outcome.diagStarTotal > 0) lastLocalStarTotal = outcome.diagStarTotal
-                            outcome.graySnapshot?.let {
-                                lastGraySnapshot = it
-                                lastGrayW = outcome.grayW
-                                lastGrayH = outcome.grayH
+                        for ((stepIdx, engine) in localStepsOnly.withIndex()) {
+                            coroutineContext.ensureActive()
+                            localToken.check()
+
+                            if (ctx.isBudgetDepleted) {
+                                log.line(context, "本地时间预算耗尽（上限 ${budgetSec.toInt()}s），终止后续本地引擎尝试")
+                                break
+                            }
+
+                            val step = stepMap[engine] ?: continue
+                            enginesTried.add(engine.labelZh)
+
+                            val hasNativeFollowUp = (stepIdx + 1 until localStepsOnly.size).any {
+                                localStepsOnly[it] == SolveEngine.ASTROMETRY_NATIVE
+                            }
+                            val allocatedBudgetSec = if (engine == SolveEngine.LOCAL_MATCHER && hasNativeFollowUp) {
+                                SolverPlanning.localStepBudgetSec(budgetSec, fov, hasNativeFollowUp = true)
+                            } else {
+                                null
+                            }
+                            val stepStartMs = System.currentTimeMillis() - logT0
+                            log.line(
+                                context,
+                                "调度：开始 ${engine.labelZh}（offset=${stepStartMs}ms，本地剩余=${"%.1f".format(ctx.remainingSec)}s" +
+                                    (allocatedBudgetSec?.let { "，步骤上限=${"%.1f".format(it)}s" } ?: "") + "）",
+                            )
+
+                            val stepTimeout = (localDeadlineMs - System.nanoTime() / 1_000_000).coerceAtLeast(1L)
+                            val outcome = kotlinx.coroutines.withTimeoutOrNull(stepTimeout) {
+                                step.execute(
+                                    ctx.copy(
+                                        fovOverride = fovOverride,
+                                        stepBudgetSec = allocatedBudgetSec,
+                                        isRacing = false,
+                                    ),
+                                )
+                            } ?: run {
+                                log.line(context, "${engine.labelZh}：单步执行超时（耗尽本地预算 ${stepTimeout}ms），跳过")
+                                StepOutcome.Failure(reason = "单步超过预算")
+                            }
+                            val stepElapsedMs = (System.currentTimeMillis() - logT0) - stepStartMs
+                            val outcomeTag = when (outcome) {
+                                is StepOutcome.Success -> "success"
+                                is StepOutcome.Failure -> "failure(${outcome.reason.take(40)})"
+                                is StepOutcome.Skipped -> "skipped(${outcome.reason})"
+                            }
+                            log.line(
+                                context,
+                                "调度：结束 ${engine.labelZh}（耗时=${stepElapsedMs}ms，本地剩余=${"%.1f".format(ctx.remainingSec)}s，结果=$outcomeTag）",
+                            )
+                            when (outcome) {
+                                is StepOutcome.Success -> return@withContext outcome.result
+                                is StepOutcome.Failure -> {
+                                    outcome.fovOverride?.let { fovOverride = it }
+                                    outcome.diagStars?.let { lastLocalStars = it }
+                                    if (outcome.diagStarTotal > 0) lastLocalStarTotal = outcome.diagStarTotal
+                                    outcome.graySnapshot?.let {
+                                        lastGraySnapshot = it
+                                        lastGrayW = outcome.grayW
+                                        lastGrayH = outcome.grayH
+                                    }
+                                }
+                                is StepOutcome.Skipped -> {}
                             }
                         }
-                        is StepOutcome.Skipped -> {}
                     }
+                } catch (e: SolveBudgetExceeded) {
+                    if (hasOnlineStep) {
+                        log.line(context, "本地引擎耗尽 ${budgetSec.toInt()}s 预算，转入在线识别兜底（独立预算 ${onlineBudgetSec.toInt()}s）")
+                    } else {
+                        throw e
+                    }
+                }
+            }
+
+            if (hasOnlineStep) {
+                coroutineContext.ensureActive()
+                token.check()
+                val onlineBudgetMs = (onlineBudgetSec * 1000.0).toLong().coerceAtLeast(1000L)
+                val onlineDeadlineMs = System.nanoTime() / 1_000_000 + onlineBudgetMs
+                val onlineToken = SolveToken(token, onlineBudgetMs)
+                val stepStartMs = System.currentTimeMillis() - logT0
+                enginesTried.add(SolveEngine.ONLINE_NOVA.labelZh)
+                log.line(
+                    context,
+                    "调度：开始 ${SolveEngine.ONLINE_NOVA.labelZh}（offset=${stepStartMs}ms，在线独立预算=${onlineBudgetSec.toInt()}s）",
+                )
+                val onlineOutcome = kotlinx.coroutines.withTimeoutOrNull(onlineBudgetMs) {
+                    onlineStep.execute(
+                        ctx.copy(
+                            token = onlineToken,
+                            deadlineMs = onlineDeadlineMs,
+                            fovOverride = fovOverride,
+                            stepBudgetSec = onlineBudgetSec,
+                            isRacing = false,
+                        ),
+                    )
+                } ?: run {
+                    val timeoutMsg = if (com.starcam.astro.ui.theme.LocaleState.isEnglish) {
+                        "Online solve timed out (${onlineBudgetSec.toInt()}s)"
+                    } else {
+                        "在线识别超时（${onlineBudgetSec.toInt()} 秒）"
+                    }
+                    log.line(context, "在线识别超时（耗尽在线预算 ${onlineBudgetMs}ms）")
+                    StepOutcome.Failure(reason = timeoutMsg)
+                }
+                val stepElapsedMs = (System.currentTimeMillis() - logT0) - stepStartMs
+                val outcomeTag = when (onlineOutcome) {
+                    is StepOutcome.Success -> "success"
+                    is StepOutcome.Failure -> "failure(${onlineOutcome.reason.take(60)})"
+                    is StepOutcome.Skipped -> "skipped(${onlineOutcome.reason})"
+                }
+                log.line(
+                    context,
+                    "调度：结束 ${SolveEngine.ONLINE_NOVA.labelZh}（耗时=${stepElapsedMs}ms，结果=$outcomeTag）",
+                )
+                when (onlineOutcome) {
+                    is StepOutcome.Success -> return@withContext onlineOutcome.result
+                    is StepOutcome.Failure -> lastOnlineFailure = onlineOutcome.reason
+                    is StepOutcome.Skipped -> lastOnlineFailure = onlineOutcome.reason
                 }
             }
         } catch (e: SolveBudgetExceeded) {
@@ -524,6 +581,7 @@ object StarSolver {
                 starCount = diagStarCount,
                 stars = diagStarList,
                 enginesTried = enginesTried,
+                onlineFailureReason = lastOnlineFailure,
             ),
         )
 

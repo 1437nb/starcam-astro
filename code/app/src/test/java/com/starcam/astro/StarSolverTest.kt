@@ -405,4 +405,26 @@ class StarSolverTest {
         )
         assertEquals(listOf(SolveEngine.LOCAL_MATCHER), nativeFirstNoKey)
     }
+
+    @Test
+    fun onlineStepBudgetSec_hasMinimum90sAndRespectsHigherSlider() {
+        assertEquals(90.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(10), 1e-9)
+        assertEquals(90.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(30), 1e-9)
+        assertEquals(90.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(90), 1e-9)
+        assertEquals(120.0, com.starcam.astro.astro.SolverPlanning.onlineStepBudgetSec(120), 1e-9)
+    }
+
+    @Test
+    fun solveDiagnostics_onlineOnlyFailure_doesNotMisreportZeroStars() {
+        val diag = com.starcam.astro.astro.SolveDiagnostics(
+            starCount = 0,
+            stars = emptyList(),
+            enginesTried = listOf(SolveEngine.ONLINE_NOVA.labelZh),
+            onlineFailureReason = "API Key 无效（bad apikey）",
+        )
+        assertTrue(diag.isOnlineOnlyFailure)
+        assertEquals("在线识别失败", diag.verdictTitle(isEnglish = false))
+        assertEquals("Online solve failed", diag.verdictTitle(isEnglish = true))
+        assertEquals("API Key 无效（bad apikey）", diag.verdictDetail(isEnglish = false))
+    }
 }

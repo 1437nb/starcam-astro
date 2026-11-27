@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -78,6 +79,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.starcam.astro.astro.EngineMode
 import com.starcam.astro.astro.NativeEngineProbe
+import com.starcam.astro.astro.PlateSolveClient
+import com.starcam.astro.astro.PlateSolveException
 import com.starcam.astro.data.AppLanguage
 import com.starcam.astro.data.SettingsRepository
 import com.starcam.astro.data.SolveLogStore
@@ -122,6 +125,10 @@ fun SettingsScreen(
     var arFovDeg by remember { mutableFloatStateOf(settings.arFovDeg) }
     var parallelRacing by remember { mutableStateOf(settings.parallelEngineRacing) }
     var saved by remember { mutableStateOf(false) }
+    var serverUrlError by remember { mutableStateOf<String?>(null) }
+    var testingConnection by remember { mutableStateOf(false) }
+    var testConnectionOk by remember { mutableStateOf<Boolean?>(null) }
+    var testConnectionMsg by remember { mutableStateOf<String?>(null) }
     var confirmClearLogs by remember { mutableStateOf(false) }
 
     // §0.70 识别日志
@@ -696,6 +703,8 @@ fun SettingsScreen(
                     onValueChange = {
                         apiKey = it
                         saved = false
+                        testConnectionOk = null
+                        testConnectionMsg = null
                     },
                     label = { Text("API Key") },
                     placeholder = { Text(I18n.Settings.apiKeyPlaceholder) },
@@ -757,8 +766,13 @@ fun SettingsScreen(
                     onValueChange = {
                         serverUrl = it
                         saved = false
+                        serverUrlError = null
+                        testConnectionOk = null
+                        testConnectionMsg = null
                     },
                     label = { Text(I18n.Settings.serverLabel) },
+                    isError = serverUrlError != null,
+                    supportingText = serverUrlError?.let { err -> { Text(err) } },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -770,25 +784,115 @@ fun SettingsScreen(
                 )
 
                 Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = {
-                        settings.apiKey = apiKey
-                        settings.serverUrl = serverUrl
-                        saved = true
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(
-                        text = I18n.save,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    OutlinedButton(
+                        enabled = !testingConnection,
+                        onClick = {
+                            val normalizedUrl = serverUrl.trim().ifEmpty { SettingsRepository.DEFAULT_SERVER }
+                            if (!PlateSolveClient.isSecureServerUrl(normalizedUrl)) {
+                                serverUrlError = I18n.Settings.serverUrlHttpsError
+                                testConnectionOk = false
+                                testConnectionMsg = I18n.Settings.serverUrlHttpsError
+                                return@OutlinedButton
+                            }
+                            serverUrlError = null
+                            testingConnection = true
+                            testConnectionOk = null
+                            testConnectionMsg = null
+                            scope.launch {
+                                val (ok, msg) = withContext(Dispatchers.IO) {
+                                    try {
+                                        PlateSolveClient(normalizedUrl).verifyApiKey(apiKey)
+                                        true to I18n.Settings.testConnectionSuccess
+                                    } catch (e: PlateSolveException) {
+                                        false to (e.message ?: if (isEn) "Connection failed" else "连接失败")
+                                    } catch (e: Throwable) {
+                                        false to (e.message ?: if (isEn) "Connection failed" else "连接失败")
+                                    }
+                                }
+                                testingConnection = false
+                                testConnectionOk = ok
+                                testConnectionMsg = msg
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                    ) {
+                        if (testingConnection) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(I18n.Settings.testingConnection)
+                        } else {
+                            Text(I18n.Settings.testConnection)
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            val normalizedUrl = serverUrl.trim().ifEmpty { SettingsRepository.DEFAULT_SERVER }
+                            if (!PlateSolveClient.isSecureServerUrl(normalizedUrl)) {
+                                serverUrlError = I18n.Settings.serverUrlHttpsError
+                                saved = false
+                                return@Button
+                            }
+                            serverUrl = normalizedUrl
+                            serverUrlError = null
+                            settings.apiKey = apiKey
+                            settings.serverUrl = normalizedUrl
+                            saved = true
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    ) {
+                        Text(
+                            text = I18n.save,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = testConnectionMsg != null,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                ) {
+                    val ok = testConnectionOk == true
+                    Surface(
+                        modifier = Modifier
+                            .padding(top = 10.dp)
+                            .fillMaxWidth(),
+                        shape = MaterialTheme.shapes.small,
+                        color = if (ok) {
+                            MaterialTheme.colorScheme.successContainer
+                        } else {
+                            MaterialTheme.colorScheme.errorContainer
+                        },
+                    ) {
+                        Text(
+                            text = testConnectionMsg.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = if (ok) {
+                                MaterialTheme.colorScheme.onSuccessContainer
+                            } else {
+                                MaterialTheme.colorScheme.onErrorContainer
+                            },
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
                 }
 
                 AnimatedVisibility(

@@ -157,12 +157,19 @@ class WcsTransform(
         }
 
         /**
-         * 由 astrometry.net calibration 字段重建 WCS（CD 矩阵公式与官方源码
-         * net/wcs.py + util/sip.c 一致，已经数值验证）：
-         *   s = pixscale/3600（度/像素），θ = orientation（度）
-         *   parity +1: [cd11,cd12,cd21,cd22] = [ s·cosθ,  s·sinθ, -s·sinθ,  s·cosθ]
-         *   parity -1: [cd11,cd12,cd21,cd22] = [-s·cosθ,  s·sinθ,  s·sinθ,  s·cosθ]
-         * 参考像素 crpix = (W/2+0.5, H/2+0.5)（FITS 1 起始），即图像中心。
+         * 由 astrometry.net calibration 字段重建 WCS（输出统一为本应用 FITS y-up 约定，
+         * 与 [skyToScreen] 的 `screenY = height - fy` 配套）：
+         *
+         * - `yDownImage = false`（FITS 原生 y-up，与 `util/sip.c` `tan_get_orientation` 互逆）：
+         *   - `parity >= 0`: `[ s·cosθ,  s·sinθ; -s·sinθ,  s·cosθ]`
+         *   - `parity <  0`: `[-s·cosθ,  s·sinθ;  s·sinθ,  s·cosθ]`
+         * - `yDownImage = true`（nova.astrometry.net 处理 JPEG/PNG 上传图时的 y-down 约定）：
+         *   官方 `net/models.py` 对 `is_jpeglike()` 输出 `orient = (180 - raw_orient) % 360`，
+         *   再经 `y_raw = (H + 1) - y_fits` 翻转为 FITS y-up（CD 第 2 列取反），得：
+         *   - `parity >= 0`: `[-s·cosθ, -s·sinθ; -s·sinθ,  s·cosθ]`（普通未镜像手机星空照片）
+         *   - `parity <  0`: `[ s·cosθ, -s·sinθ;  s·sinθ,  s·cosθ]`（镜像翻转照片）
+         *
+         * 参考像素 `crpix = (W/2+0.5, H/2+0.5)`（FITS 1 起始），即图像中心。
          */
         fun fromCalibration(
             raDeg: Double,
@@ -172,12 +179,33 @@ class WcsTransform(
             parity: Int,
             width: Int,
             height: Int,
+            yDownImage: Boolean = false,
         ): WcsTransform {
             val s = pixScaleArcsec / 3600.0
             val th = orientationDeg * PI / 180.0
             val cosTh = cos(th)
             val sinTh = sin(th)
-            return if (parity >= 0) {
+            return if (yDownImage) {
+                if (parity >= 0) {
+                    WcsTransform(
+                        crpix1 = width / 2.0 + 0.5,
+                        crpix2 = height / 2.0 + 0.5,
+                        crval1 = raDeg,
+                        crval2 = decDeg,
+                        cd11 = -s * cosTh, cd12 = -s * sinTh,
+                        cd21 = -s * sinTh, cd22 = s * cosTh,
+                    )
+                } else {
+                    WcsTransform(
+                        crpix1 = width / 2.0 + 0.5,
+                        crpix2 = height / 2.0 + 0.5,
+                        crval1 = raDeg,
+                        crval2 = decDeg,
+                        cd11 = s * cosTh, cd12 = -s * sinTh,
+                        cd21 = s * sinTh, cd22 = s * cosTh,
+                    )
+                }
+            } else if (parity >= 0) {
                 WcsTransform(
                     crpix1 = width / 2.0 + 0.5,
                     crpix2 = height / 2.0 + 0.5,

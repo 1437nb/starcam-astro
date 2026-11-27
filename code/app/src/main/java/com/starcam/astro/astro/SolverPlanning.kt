@@ -77,6 +77,15 @@ internal object SolverPlanning {
         return (totalBudgetSec - nativeReserve).coerceAtLeast(1.0)
     }
 
+    /**
+     * 为在线 nova.astrometry.net 分配合理的时间窗口（秒）：
+     * 本地求解默认 30s 预算不足以覆盖云端上传 + 排队 + 解算（通常 15–90s），
+     * 因此在线步骤至少获得 [StarSolver.ONLINE_MIN_BUDGET_SEC]（90s），
+     * 若用户已将预算滑块调高（如 120s），则尊重更高预算。
+     */
+    fun onlineStepBudgetSec(userBudgetSec: Int): Double =
+        maxOf(userBudgetSec, StarSolver.ONLINE_MIN_BUDGET_SEC).toDouble()
+
     /** 天球角距（度） */
     fun angularSepDeg(ra1: Double, dec1: Double, ra2: Double, dec2: Double): Double {
         val r = PI / 180.0

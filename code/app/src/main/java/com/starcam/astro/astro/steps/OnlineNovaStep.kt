@@ -34,10 +34,15 @@ class OnlineNovaStep : SolveStep {
             return StepOutcome.Skipped(if (isEn) "Global time budget exhausted" else "全局时间预算耗尽")
         }
 
+        val isOnlineOnly = ctx.scheduledSteps == listOf(SolveEngine.ONLINE_NOVA)
         ctx.onPhase(com.starcam.astro.astro.SolvePhase.ONLINE)
         ctx.onProgress(
-            if (isEn) "Local engines unmatched, uploading for online solve…"
-            else "本地引擎未匹配，正在上传在线求解…",
+            if (isOnlineOnly) {
+                if (isEn) "Preparing photo for online solve…" else "正在准备照片进行在线求解…"
+            } else {
+                if (isEn) "Local engines unmatched, uploading for online solve…"
+                else "本地引擎未匹配，正在上传在线求解…"
+            },
         )
 
         val upload = File.createTempFile("starcam-upload-", ".jpg", ctx.context.cacheDir)

@@ -167,7 +167,13 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                     return@launch
                 }
                 errorDisplay = display
-                state = ResultUiState.Loading(display, I18n.Result.preparingSolve, budgetSec = settings.solveBudgetSec)
+                val onlineBudget = maxOf(settings.solveBudgetSec, StarSolver.ONLINE_MIN_BUDGET_SEC)
+                val initialBudgetSec = if (settings.engineMode == com.starcam.astro.astro.EngineMode.ONLINE_ONLY) {
+                    onlineBudget
+                } else {
+                    settings.solveBudgetSec
+                }
+                state = ResultUiState.Loading(display, I18n.Result.preparingSolve, budgetSec = initialBudgetSec)
                 solveStartedAt = System.currentTimeMillis()
 
                 val result = StarSolver.solve(
@@ -183,7 +189,17 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                     },
                     onPhase = { phase ->
                         if (!token.isCancelled) {
-                            (state as? ResultUiState.Loading)?.let { state = it.copy(phase = phase) }
+                            (state as? ResultUiState.Loading)?.let { loading ->
+                                val nextBudget = if (
+                                    phase == com.starcam.astro.astro.SolvePhase.ONLINE &&
+                                    settings.engineMode != com.starcam.astro.astro.EngineMode.ONLINE_ONLY
+                                ) {
+                                    settings.solveBudgetSec + onlineBudget
+                                } else {
+                                    loading.budgetSec
+                                }
+                                state = loading.copy(phase = phase, budgetSec = nextBudget)
+                            }
                         }
                     },
                     onDiagnostics = { diag = it },
@@ -198,10 +214,18 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                     withContext(Dispatchers.IO) {
                         StatsStore.record(getApplication(), ok = false, engine = "无", ms = elapsedMs)
                     }
-                    val message = if (!settings.hasApiKey) {
-                        I18n.Result.solveFailedNoKey
-                    } else {
-                        I18n.Result.solveFailedWithKey
+                    val onlineReason = diag?.onlineFailureReason?.takeIf { it.isNotBlank() }
+                    val message = when {
+                        settings.engineMode == com.starcam.astro.astro.EngineMode.ONLINE_ONLY && !settings.hasApiKey ->
+                            I18n.Result.onlineOnlyNoKey
+                        diag?.isOnlineOnlyFailure == true ->
+                            I18n.Result.onlineFailedHint
+                        onlineReason != null ->
+                            I18n.Result.onlineFallbackFailedWithReason(onlineReason)
+                        !settings.hasApiKey ->
+                            I18n.Result.solveFailedNoKey
+                        else ->
+                            I18n.Result.solveFailedWithKey
                     }
                     state = ResultUiState.Error(message, display, diag, elapsedMs)
                     return@launch

@@ -94,6 +94,10 @@ object I18n {
         val serverSection: String get() = if (isEn) "Advanced: Server URL" else "高级：服务器地址"
         val serverLabel: String get() = if (isEn) "Server URL" else "服务器地址"
         val serverHelp: String get() = if (isEn) "Default: https://nova.astrometry.net/api; change if using a self-hosted instance." else "默认 https://nova.astrometry.net/api；自建 astrometry.net 服务时可修改。"
+        val serverUrlHttpsError: String get() = if (isEn) "Server URL must use https:// (only 127.0.0.1 / localhost allows http://)." else "服务器地址必须以 https:// 开头（仅本机 127.0.0.1 / localhost 允许 http://）。"
+        val testConnection: String get() = if (isEn) "Test Connection" else "测试连接"
+        val testingConnection: String get() = if (isEn) "Testing…" else "测试中…"
+        val testConnectionSuccess: String get() = if (isEn) "Connection OK · API Key verified" else "连接成功 · API Key 有效"
         val privacySection: String get() = if (isEn) "Privacy Notice" else "隐私说明"
         val privacyContent: String get() = if (isEn) "• For online solving, photos are uploaded to the chosen server (default astrometry.net).\n• Photos are stripped of EXIF data (GPS location, camera parameters) before upload.\n• Uploads are flagged as private by default and will not be added to public galleries.\n• Offline solving does not upload photos." else "• 在线识别时，照片会上传到所选服务器（默认 astrometry.net）。\n• 上传前照片会被重新编码：拍摄位置（GPS）、时间、相机参数等 EXIF 信息已剥离，仅上传像素内容。\n• 上传默认标记为「不公开」，不会被加入公开星图库。\n• 位置信息仅在本地用于天区先验（缩小搜索范围），绝不上传。\n• 无需网络时可使用主页「离线演示」功能完整体验。"
 
@@ -127,6 +131,11 @@ object I18n {
         val solveFailedNoKey: String get() = if (isEn) "Local solving did not match catalog.\n\nEnter free astrometry.net API Key in Settings to enable online solving\n(https://nova.astrometry.net/api_help).\n💡 Turn on location when shooting to narrow search area." else "本地识别未能匹配星图。\n\n可到「设置」中填写 astrometry.net 免费 API Key 启用在线识别\n（https://nova.astrometry.net/api_help 注册即可获得）。\n💡 拍摄时开启定位可缩小搜索天区、提高成功率。"
         val solveFailedWithKey: String get() = if (isEn) "Both local and online solvers failed to match.\nTry shooting again (avoid overexposure or blur), or adjust engine mode in Settings.\n💡 Turn on location when shooting to narrow search area." else "本地与在线引擎均未能匹配星图。\n可尝试重新拍摄（避免过曝或抖动），或在「设置」中调整识别引擎模式。\n💡 拍摄时开启定位可缩小搜索天区、提高成功率。"
         val solveFailed: String get() = if (isEn) "Solving Failed" else "识别失败"
+        val onlineOnlyNoKey: String get() = if (isEn) "Engine mode is set to Online Only, but no astrometry.net API Key is configured.\n\nEnter your API Key in Settings or switch Engine Mode to Auto / Offline Only." else "当前引擎模式为「仅在线」，但尚未配置 astrometry.net API Key。\n\n请到「设置」中填写 API Key 并测试连接，或将引擎模式切换为「自动」/「仅离线」。"
+        val onlineFailedHint: String get() = if (isEn) "Check your network connection, API Key, and HTTPS server URL in Settings, or switch to Auto / Offline Only mode." else "请检查网络连接，或到「设置」中点击「测试连接」核对 API Key 与 HTTPS 服务器地址；也可切换为「自动」或「仅离线」模式。"
+        fun onlineFallbackFailedWithReason(reason: String): String =
+            if (isEn) "Online fallback failed: $reason\n\n$solveFailedWithKey"
+            else "在线识别失败：$reason\n\n$solveFailedWithKey"
         val backHome: String get() = if (isEn) "Back to Home" else "返回主页"
 
         val titleDemo: String get() = if (isEn) "✨ Offline Demo · Solved" else "✨ 离线演示 · 识别成功"
