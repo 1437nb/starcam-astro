@@ -43,6 +43,7 @@ internal object TriangleStarIndex {
 
     class StarIndex(
         val triMap: HashMap<Int, MutableList<TriEntry>>,
+        val flatBuckets: Array<Array<TriEntry>?> = arrayOfNulls(256 * 256),
     )
 
     class ScoreTable(
@@ -180,7 +181,11 @@ internal object TriangleStarIndex {
                 }
             }
         }
-        return StarIndex(triMap)
+        val flatBuckets = arrayOfNulls<Array<TriEntry>>(256 * 256)
+        for ((k, v) in triMap) {
+            if (k in flatBuckets.indices) flatBuckets[k] = v.toTypedArray()
+        }
+        return StarIndex(triMap, flatBuckets)
     }
 
     private fun cellKey(col: Int, row: Int): Long = col.toLong() * 1000L + row.toLong()

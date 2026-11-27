@@ -6,6 +6,7 @@ import com.starcam.astro.astro.LocalMatchResult
 import com.starcam.astro.astro.LocalStarMatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -285,6 +286,63 @@ class OfflinePhotosTruthTest {
                     ) + " " + verdict.label,
         )
         assertEquals("带备用表的这次匹配必须解出真值天区", DemoPhotoTruth.Verdict.TRUE_SOLVE, verdict)
+    }
+
+    /**
+     * 回归（真机/模拟器 photo5057.jpg 30s 超时根因）：
+     * 生产环境 primary = 紧凑 box-blur（85 颗）、fallback = 大列表 SEP（~194 颗）。
+     * 当 primary 列表本身比 fallback 更小时，必须直接给 primary 完整预算，
+     * 不得先被 2000 候选试探截断再转去把时间片耗死在 194 颗 SEP 上。
+     */
+    @Test
+    fun compactPrimaryNotStarvedByLargeFallbackOn5057() {
+        val c = runCase("photo5057.jpg")
+        val w = c.w
+        val h = c.h
+        val primary = c.detected
+        // 模拟 SEP 194 颗：包含原表 + 110 颗随机噪声星（与 box-blur 重合率高但总星数 > 2 倍）
+        val largeFallback = (primary + noise(w, h, seed = 50570, lo = 10f, hi = 240f) +
+            noise(w, h, seed = 50571, lo = 10f, hi = 120f).take(10))
+            .sortedByDescending { it.brightness }
+        val plan = DetectorSelection.plan(
+            boxBlur = primary,
+            sep = largeFallback,
+            sepTrustworthy = true,
+            detectedTotal = 6182,
+        )
+        assertSame("主表必须为紧凑 box-blur", primary, plan.primary)
+        assertSame("大 SEP 表应作为备用表", largeFallback, plan.fallback)
+
+        val token = com.starcam.astro.astro.SolveToken(timeoutMillis = 5_000L)
+        val t0 = System.currentTimeMillis()
+        val attempt = LocalStarMatcher.matchWithDiagnostics(
+            detected = plan.primary!!,
+            width = w,
+            height = h,
+            pointingHint = null,
+            allowDeepRetry = false,
+            fallbackDetected = plan.fallback,
+            fovHintDeg = 75.0,
+            token = token,
+        )
+        println(
+            "CI-5057-DIAG elapsed=${System.currentTimeMillis() - t0}ms " +
+                "phases=${LocalStarMatcher.debugPhaseTimings} " +
+                "vote=${attempt.diagnostics.voteStats} " +
+                "scored=${attempt.diagnostics.scoredStats} " +
+                "best=${attempt.diagnostics.scoredBest}/${attempt.diagnostics.scoredInFrame} " +
+                "usedFallback=${attempt.diagnostics.usedFallback}",
+        )
+        val res = attempt.result
+        assertNotNull("photo5057 在带大 SEP 备用表时必须在 5s 内由紧凑主表解出", res)
+        assertFalse("应由紧凑主表直接命中，而非回退到大 SEP 表", attempt.diagnostics.usedFallback)
+        val truth = DemoPhotoTruth.byId.getValue("5057")
+        val solved = DemoPhotoTruth.Solved(
+            res!!.solve.raDeg,
+            res.solve.decDeg,
+            maxOf(res.solve.fieldWidthDeg, res.solve.fieldHeightDeg),
+        )
+        assertEquals("photo5057 必须落在真值窗口内", DemoPhotoTruth.Verdict.TRUE_SOLVE, DemoPhotoTruth.classify(truth, solved))
     }
 
     /** 固定种子的噪声星：位置随机、亮度落在 [lo, hi]（与真星同量级时用来挤坏候选生成）。 */

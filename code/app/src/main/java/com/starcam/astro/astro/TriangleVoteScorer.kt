@@ -83,7 +83,8 @@ internal object TriangleVoteScorer {
     }
 
     private fun scoreHypothesis(
-        work: List<DetectedStar>,
+        workX: FloatArray,
+        workY: FloatArray,
         a: DetectedStar,
         b: DetectedStar,
         c: DetectedStar,
@@ -93,6 +94,13 @@ internal object TriangleVoteScorer {
         pointingHint: PointingHint?,
         tbl: TriangleStarIndex.ScoreTable,
         fovRange: Pair<Double, Double>? = null,
+        wideFovHint: Double? = null,
+        px: FloatArray,
+        py: FloatArray,
+        pyFlip: FloatArray,
+        sx: FloatArray,
+        sy: FloatArray,
+        used: BooleanArray,
     ): IntArray {
         val eA = TriangleStarIndex.hipMap[t.hipA] ?: return ZERO_SCORE
         val eB = TriangleStarIndex.hipMap[t.hipB] ?: return ZERO_SCORE
@@ -104,26 +112,40 @@ internal object TriangleVoteScorer {
         var fit: DoubleArray? = null
         var useFlip = false
         var parityKnown = false
-        val px = floatArrayOf(a.x, b.x, c.x)
-        val py = floatArrayOf(a.y, b.y, c.y)
-        val pyFlip = floatArrayOf(-a.y, -b.y, -c.y)
+        px[0] = a.x; px[1] = b.x; px[2] = c.x
+        py[0] = a.y; py[1] = b.y; py[2] = c.y
+        pyFlip[0] = -a.y; pyFlip[1] = -b.y; pyFlip[2] = -c.y
+        val longEdge = max(width, height).toDouble()
         for (iter in 0 until StarFieldFitter.ORIGIN_ITERATIONS) {
             val txA = StarFieldGeometry.tanXY(eA.ra, eA.dec, ra0, dec0)
             val txB = StarFieldGeometry.tanXY(eB.ra, eB.dec, ra0, dec0)
             val txC = StarFieldGeometry.tanXY(eC.ra, eC.dec, ra0, dec0)
-            val sx = floatArrayOf(txA.first.toFloat(), txB.first.toFloat(), txC.first.toFloat())
-            val sy = floatArrayOf(txA.second.toFloat(), txB.second.toFloat(), txC.second.toFloat())
-            val f0 = StarFieldGeometry.fitSimilarity(px, py, sx, sy)
-            val f1 = StarFieldGeometry.fitSimilarity(px, pyFlip, sx, sy)
-            if (!parityKnown) {
+            sx[0] = txA.first.toFloat(); sx[1] = txB.first.toFloat(); sx[2] = txC.first.toFloat()
+            sy[0] = txA.second.toFloat(); sy[1] = txB.second.toFloat(); sy[2] = txC.second.toFloat()
+            val f = if (!parityKnown) {
+                val f0 = StarFieldGeometry.fitSimilarity(px, py, sx, sy)
+                val f1 = StarFieldGeometry.fitSimilarity(px, pyFlip, sx, sy)
                 val r0 = if (f0 != null) StarFieldGeometry.fitResid(f0, px, py, sx, sy) else Double.MAX_VALUE
                 val r1 = if (f1 != null) StarFieldGeometry.fitResid(f1, px, pyFlip, sx, sy) else Double.MAX_VALUE
                 useFlip = r1 < r0
                 parityKnown = true
-            }
-            val f = if (useFlip) f1 else f0
-            if (f == null) return ZERO_SCORE
+                if (useFlip) f1 else f0
+            } else {
+                StarFieldGeometry.fitSimilarity(px, if (useFlip) pyFlip else py, sx, sy)
+            } ?: return ZERO_SCORE
             fit = f
+            if (iter == 0) {
+                val det0Check = f[0] * f[0] + f[1] * f[1]
+                if (det0Check < 1e-12) return ZERO_SCORE
+                val roughFov = longEdge * sqrt(det0Check)
+                if (roughFov < 1.5 || roughFov > 220.0) return ZERO_SCORE
+                if (fovRange != null && (roughFov < fovRange.first * 0.65 || roughFov > fovRange.second * 1.45)) {
+                    return ZERO_SCORE
+                }
+                if (wideFovHint != null && (roughFov < wideFovHint * 0.45 || roughFov > wideFovHint * 2.20)) {
+                    return ZERO_SCORE
+                }
+            }
             if (iter == StarFieldFitter.ORIGIN_ITERATIONS - 1) break
             val s0 = f[0]
             val ss0 = f[1]
@@ -151,9 +173,13 @@ internal object TriangleVoteScorer {
         val ty = fitV[3]
         val det = s * s + ss * ss
         if (det < 1e-12) return ZERO_SCORE
+        val candidateFov = longEdge * sqrt(det)
+        if (candidateFov < 2.0 || candidateFov > 185.0) return ZERO_SCORE
         if (fovRange != null) {
-            val candidateFov = max(width, height) * sqrt(det)
             if (candidateFov < fovRange.first * 0.8 || candidateFov > fovRange.second * 1.2) return ZERO_SCORE
+        }
+        if (wideFovHint != null && (candidateFov < wideFovHint * 0.50 || candidateFov > wideFovHint * 2.00)) {
+            return ZERO_SCORE
         }
 
         val invDet = 1.0 / det
@@ -165,7 +191,7 @@ internal object TriangleVoteScorer {
         val minCenterDot = 1.0 / sqrt(1.0 + farTangentSquared)
         var hits = 0
         var inFrame = 0
-        val used = BooleanArray(work.size)
+        used.fill(false)
         val r0 = ra0 * (PI / 180.0)
         val d0 = dec0 * (PI / 180.0)
         val c0x = cos(d0) * cos(r0)
@@ -192,6 +218,9 @@ internal object TriangleVoteScorer {
             hy = 0.0
             hz = 0.0
         }
+        val wCount = workX.size
+        val maxU = width + 20f
+        val maxV = height + 20f
         for (i in tbl.entries.indices) {
             val uxi = tbl.ux[i]
             val uyi = tbl.uy[i]
@@ -209,17 +238,18 @@ internal object TriangleVoteScorer {
             val u = ((s * (X - tx) + ss * (Y - ty)) * invDet).toFloat()
             val vRaw = ((-ss * (X - tx) + s * (Y - ty)) * invDet).toFloat()
             val v = if (useFlip) -vRaw else vRaw
-            if (u < -20f || u > width + 20f || v < -20f || v > height + 20f) continue
+            if (!(u >= -20f && u <= maxU && v >= -20f && v <= maxV)) continue
             inFrame++
             var bestI = -1
             var bestD = ALIGN_TOL_PX
-            for (wi in work.indices) {
+            for (wi in 0 until wCount) {
                 if (used[wi]) continue
-                val dd = maxOf(abs(u - work[wi].x), abs(v - work[wi].y))
-                if (dd < bestD) {
-                    bestD = dd
-                    bestI = wi
-                }
+                val dx = abs(u - workX[wi])
+                if (!(dx < bestD)) continue
+                val dy = abs(v - workY[wi])
+                if (!(dy < bestD)) continue
+                bestD = if (dx > dy) dx else dy
+                bestI = wi
             }
             if (bestI >= 0) {
                 used[bestI] = true
@@ -264,7 +294,23 @@ internal object TriangleVoteScorer {
         var cutByTime = false
         ctx.scoredWinAt = -1
 
+        val cap = candidateCap()
+        val sel = arrayOfNulls<TriangleStarIndex.TriEntry>(cap)
+        val selDist = FloatArray(cap)
+        val selKey = LongArray(cap)
+        val workX = FloatArray(work.size) { work[it].x }
+        val workY = FloatArray(work.size) { work[it].y }
+        val pxBuf = FloatArray(3)
+        val pyBuf = FloatArray(3)
+        val pyFlipBuf = FloatArray(3)
+        val sxBuf = FloatArray(3)
+        val syBuf = FloatArray(3)
+        val usedBuf = BooleanArray(work.size)
+        val longEdge = max(width, height).toDouble()
+        val wideFovHint = ctx.wideFovHint
+
         for (pi in work.indices) {
+            ctx.token?.check()
             val a = work[pi]
             val nbrs = work.mapIndexed { j, s -> j to StarFieldGeometry.dist(a, s) }
                 .filter { it.second in 1.5f..maxSide }
@@ -280,13 +326,16 @@ internal object TriangleVoteScorer {
                     val lab = nbrs[i].second
                     val lac = nbrs[j].second
                     val lbc = StarFieldGeometry.dist(b, c)
-                    val sides = floatArrayOf(lab, lac, lbc).sortedDescending()
-                    if (sides[0] <= 0f) continue
-                    val r2 = sides[1] / sides[0]
-                    val r3 = sides[2] / sides[0]
+                    var s0 = lab; var s1 = lac; var s2 = lbc
+                    if (s0 < s1) { val tmp = s0; s0 = s1; s1 = tmp }
+                    if (s1 < s2) { val tmp = s1; s1 = s2; s2 = tmp }
+                    if (s0 < s1) { val tmp = s0; s0 = s1; s1 = tmp }
+                    if (s0 <= 0f) continue
+                    val r2 = s1 / s0
+                    val r3 = s2 / s0
                     if (r2 < 0.12f) continue
-                    val expectedSide = ctx.narrowFovHint?.let { sides[0] * it / max(width, height) }
-                    val pointsByRank = if (expectedSide == null) null else {
+                    val narrowExpectedSide = ctx.narrowFovHint?.let { s0 * it / longEdge }
+                    val pointsByRank = if (narrowExpectedSide == null) null else {
                         val ranks = TriangleStarIndex.vertexRanks(lab.toDouble(), lac.toDouble(), lbc.toDouble())
                         IntArray(3).also {
                             it[ranks and 3] = pi
@@ -298,43 +347,43 @@ internal object TriangleVoteScorer {
                         val triangle = (pointsByRank[0] * work.size + pointsByRank[1]) * work.size + pointsByRank[2]
                         if (!visitedTriangles.add(triangle)) continue
                     }
-                    val sideMin = expectedSide?.times(0.55) ?: 0.0
-                    val sideMax = expectedSide?.times(1.65) ?: Double.POSITIVE_INFINITY
-                    val merged = HashMap<Long, TriangleStarIndex.TriEntry>()
-                    for (key in TriangleStarIndex.quantizeKeys(r2, r3, window = 2)) {
-                        idx.triMap[key]?.let { list ->
-                            for (t in list) {
-                                if (t.longestSideDeg >= sideMin && t.longestSideDeg <= sideMax &&
-                                    abs(t.r2 - r2) < 0.012f && abs(t.r3 - r3) < 0.012f
-                                ) merged[TriangleStarIndex.triKey(t)] = t
-                            }
-                        }
+                    val sideMin: Double
+                    val sideMax: Double
+                    if (narrowExpectedSide != null) {
+                        sideMin = narrowExpectedSide * 0.55
+                        sideMax = narrowExpectedSide * 1.65
+                    } else if (wideFovHint != null) {
+                        val wideExpectedSide = s0 * wideFovHint / longEdge
+                        sideMin = wideExpectedSide * 0.45
+                        sideMax = wideExpectedSide * 2.20
+                    } else {
+                        sideMin = 0.0
+                        sideMax = Double.POSITIVE_INFINITY
                     }
-                    for (key in TriangleStarIndex.quantizeKeys(r2, r3, window = 14)) {
-                        idx.triMap[key]?.let { list ->
-                            for (t in list) {
-                                if (t.longestSideDeg >= sideMin && t.longestSideDeg <= sideMax &&
-                                    abs(t.r2 - r2) < 0.05f && abs(t.r3 - r3) < 0.05f
-                                ) merged[TriangleStarIndex.triKey(t)] = t
-                            }
-                        }
-                    }
-                    if (merged.isEmpty()) continue
-                    val candidates = merged.values
-                        .sortedWith(compareBy({
-                            val scaleError = if (expectedSide != null) 0.10 * abs(it.longestSideDeg / expectedSide - 1.0) else 0.0
-                            abs(it.r2 - r2) + abs(it.r3 - r3) + scaleError
-                        }, { it.hipA }, { it.hipB }, { it.hipC }))
-                        .take(candidateCap())
-                    nCand += candidates.size
-                    for (t in candidates) {
+                    val n = collectTopCandidates(
+                        flatBuckets = idx.flatBuckets,
+                        r2 = r2,
+                        r3 = r3,
+                        cap = cap,
+                        sideMin = sideMin,
+                        sideMax = sideMax,
+                        narrowExpectedSide = narrowExpectedSide,
+                        sel = sel,
+                        selDist = selDist,
+                        selKey = selKey,
+                    )
+                    if (n == 0) continue
+                    nCand += n
+                    for (ciIdx in 0 until n) {
+                        val t = sel[ciIdx]!!
                         val ia = pointsByRank?.get(t.vertexRanks and 3) ?: pi
                         val ib = pointsByRank?.get((t.vertexRanks shr 2) and 3) ?: bi
                         val ic = pointsByRank?.get(t.vertexRanks shr 4) ?: ci
                         nScored++
                         val sc = scoreHypothesis(
-                            work, work[ia], work[ib], work[ic], t, width, height,
-                            pointingHint, tbl, ctx.scoredFovRange,
+                            workX, workY, work[ia], work[ib], work[ic], t, width, height,
+                            pointingHint, tbl, ctx.scoredFovRange, wideFovHint,
+                            pxBuf, pyBuf, pyFlipBuf, sxBuf, syBuf, usedBuf,
                         )
                         val aligned = sc[0]
                         val inFrame = sc[1]
@@ -479,24 +528,128 @@ internal object TriangleVoteScorer {
         return best
     }
 
-    fun votePairs(
+    class VoteTable(
+        val byPhoto: HashMap<Int, HashMap<Int, Int>>,
+        val stats: String,
+    )
+
+    private const val BUCKET_INV = 1f / 256f
+
+    /**
+     * 在扁平 256×256 三角形桶上按切比雪夫同心环（rad = 0..13）收集与 `(r2, r3)` 最近的 top-cap 候选。
+     *
+     * 外环 rad 内的任意桶与查询点至少相隔 `(rad - 1) / 256`，因此一旦已集满 `cap` 个候选且
+     * `(rad - 1) / 256 - 1e-6 > selDist[cap - 1]`，更外环在数学上不可能进入 top-cap，
+     * 可无损提前终止（结果与全量扫 window=14 严格一致，零装箱、零 HashMap 探测）。
+     */
+    private fun collectTopCandidates(
+        flatBuckets: Array<Array<TriangleStarIndex.TriEntry>?>,
+        r2: Float,
+        r3: Float,
+        cap: Int,
+        sideMin: Double,
+        sideMax: Double,
+        narrowExpectedSide: Double?,
+        sel: Array<TriangleStarIndex.TriEntry?>,
+        selDist: FloatArray,
+        selKey: LongArray,
+        scanStats: LongArray? = null,
+    ): Int {
+        val b2 = (r2 * 256f).toInt().coerceIn(0, 255)
+        val b3 = (r3 * 256f).toInt().coerceIn(0, 255)
+        var n = 0
+        var buckets = 0L
+        var entries = 0L
+
+        fun scanBucket(rIdx: Int, cIdx: Int) {
+            buckets++
+            val list = flatBuckets[(rIdx shl 8) or cIdx] ?: return
+            for (t in list) {
+                entries++
+                if (t.longestSideDeg < sideMin || t.longestSideDeg > sideMax) continue
+                val dr2 = abs(t.r2 - r2)
+                if (dr2 >= 0.05f) continue
+                val dr3 = abs(t.r3 - r3)
+                if (dr3 >= 0.05f) continue
+                val scaleError = if (narrowExpectedSide != null) {
+                    (0.10 * abs(t.longestSideDeg / narrowExpectedSide - 1.0)).toFloat()
+                } else 0f
+                val d = dr2 + dr3 + scaleError
+                val k = TriangleStarIndex.triKey(t)
+                var at = -1
+                for (q in 0 until n) {
+                    if (selKey[q] == k) {
+                        at = q
+                        break
+                    }
+                }
+                if (at >= 0) {
+                    if (sel[at] !== t) sel[at] = t
+                    continue
+                }
+                if (n >= cap && d > selDist[n - 1]) continue
+                var p = n
+                while (p > 0 && TriangleStarIndex.triBefore(t, d, sel[p - 1]!!, selDist[p - 1])) p--
+                if (p == cap) continue
+                if (n < cap) n++
+                var q = n - 1
+                while (q > p) {
+                    sel[q] = sel[q - 1]
+                    selDist[q] = selDist[q - 1]
+                    selKey[q] = selKey[q - 1]
+                    q--
+                }
+                sel[p] = t
+                selDist[p] = d
+                selKey[p] = k
+            }
+        }
+
+        scanBucket(b2, b3)
+        for (rad in 1..13) {
+            if (n >= cap && (rad - 1) * BUCKET_INV - 1e-6f > selDist[cap - 1]) break
+            val rLo = max(0, b2 - rad)
+            val rHi = min(255, b2 + rad)
+            val cLo = max(0, b3 - rad)
+            val cHi = min(255, b3 + rad)
+            val topR = b2 - rad
+            if (topR >= 0) {
+                for (c in cLo..cHi) scanBucket(topR, c)
+            }
+            val botR = b2 + rad
+            if (botR <= 255) {
+                for (c in cLo..cHi) scanBucket(botR, c)
+            }
+            val leftC = b3 - rad
+            val midRLo = max(0, topR + 1)
+            val midRHi = min(255, botR - 1)
+            if (leftC >= 0 && midRLo <= midRHi) {
+                for (r in midRLo..midRHi) scanBucket(r, leftC)
+            }
+            val rightC = b3 + rad
+            if (rightC <= 255 && midRLo <= midRHi) {
+                for (r in midRLo..midRHi) scanBucket(r, rightC)
+            }
+        }
+        if (scanStats != null) {
+            scanStats[0] += buckets
+            scanStats[1] += entries
+        }
+        return n
+    }
+
+    fun computeVoteTable(
         ctx: LocalStarMatcher.MatchContext,
-        detected: List<DetectedStar>,
+        work: List<DetectedStar>,
         width: Int,
         height: Int,
-        threshold: Float,
-        multi: Boolean = false,
-        pointingHint: PointingHint? = null,
-    ): List<Pair<Int, StarEntry>> {
+    ): VoteTable {
         ctx.token?.check()
         val idx = TriangleStarIndex.index(ctx.catalogMag, ctx.token)
         val grid = TriangleStarIndex.catGrid(ctx.catalogMag)
 
         val votes = HashMap<Long, Int>()
         val maxSide = max(width, height) * 0.45f
-        val work = detected
-            .filter { it.brightness >= threshold }
-            .take(45)
 
         if (work.size <= 8) {
             voteChunk(votes, work, 0, work.size, idx, maxSide, grid, ctx.token)
@@ -540,22 +693,29 @@ internal object TriangleVoteScorer {
             val hip = TriangleStarIndex.catalogIdFromVote(key)
             byPhoto.getOrPut(photoIdx) { HashMap() }[hip] = v
         }
-        run {
-            var topV = 0
-            var sumMargin = 0.0
-            var nPhoto = 0
-            for ((_, m) in byPhoto) {
-                if (m.isEmpty()) continue
-                nPhoto++
-                val s = m.values.sortedDescending()
-                topV = maxOf(topV, s[0])
-                if (s.size > 1) sumMargin += s[0].toDouble() / s[1]
-            }
-            val avgMarginStr = if (nPhoto > 0) String.format(java.util.Locale.ROOT, "%.2f", sumMargin / nPhoto) else "-"
-            ctx.voteStats = "work=${work.size} votedStars=$nPhoto topVote=$topV avgMargin=$avgMarginStr"
+        var topV = 0
+        var sumMargin = 0.0
+        var nPhoto = 0
+        for ((_, m) in byPhoto) {
+            if (m.isEmpty()) continue
+            nPhoto++
+            val s = m.values.sortedDescending()
+            topV = maxOf(topV, s[0])
+            if (s.size > 1) sumMargin += s[0].toDouble() / s[1]
         }
+        val avgMarginStr = if (nPhoto > 0) String.format(java.util.Locale.ROOT, "%.2f", sumMargin / nPhoto) else "-"
+        val stats = "work=${work.size} votedStars=$nPhoto topVote=$topV avgMargin=$avgMarginStr"
+        ctx.voteStats = stats
+        return VoteTable(byPhoto, stats)
+    }
+
+    fun extractVotePairs(
+        table: VoteTable,
+        multi: Boolean = false,
+        pointingHint: PointingHint? = null,
+    ): List<Pair<Int, StarEntry>> {
         val pairs = ArrayList<Pair<Int, StarEntry>>()
-        for ((photoIdx, m) in byPhoto) {
+        for ((photoIdx, m) in table.byPhoto) {
             val sorted = m.entries.sortedWith(compareByDescending<Map.Entry<Int, Int>> { it.value }.thenBy { it.key })
             if (sorted.isEmpty()) continue
             val (hip, v) = sorted[0]
@@ -592,6 +752,22 @@ internal object TriangleVoteScorer {
         return pairs
     }
 
+    fun votePairs(
+        ctx: LocalStarMatcher.MatchContext,
+        detected: List<DetectedStar>,
+        width: Int,
+        height: Int,
+        threshold: Float,
+        multi: Boolean = false,
+        pointingHint: PointingHint? = null,
+    ): List<Pair<Int, StarEntry>> {
+        val work = detected
+            .filter { it.brightness >= threshold }
+            .take(45)
+        val table = computeVoteTable(ctx, work, width, height)
+        return extractVotePairs(table, multi, pointingHint)
+    }
+
     private fun voteChunk(
         votes: HashMap<Long, Int>,
         work: List<DetectedStar>,
@@ -603,10 +779,17 @@ internal object TriangleVoteScorer {
         token: SolveToken? = null,
     ) {
         var cTriangles = 0L
-        var cBuckets = 0L
-        var cEntries = 0L
         var cMerged = 0L
         var cTaken = 0L
+        val scanStats = LongArray(2)
+        val cap = candidateCap()
+        val sel = arrayOfNulls<TriangleStarIndex.TriEntry>(cap)
+        val selDist = FloatArray(cap)
+        val selKey = LongArray(cap)
+        val xsBuf = FloatArray(3)
+        val ysBuf = FloatArray(3)
+        val sxBuf = FloatArray(3)
+        val syBuf = FloatArray(3)
         for (pi in from until to) {
             token?.check()
             if (Thread.currentThread().isInterrupted) throw CancellationException()
@@ -626,76 +809,48 @@ internal object TriangleVoteScorer {
                     val lab = nbrs[i].second
                     val lac = nbrs[j].second
                     val lbc = StarFieldGeometry.dist(b, c)
-                    val sides = floatArrayOf(lab, lac, lbc).sortedDescending()
-                    val r2 = sides[1] / sides[0]
-                    val r3 = sides[2] / sides[0]
+                    var s0 = lab; var s1 = lac; var s2 = lbc
+                    if (s0 < s1) { val tmp = s0; s0 = s1; s1 = tmp }
+                    if (s1 < s2) { val tmp = s1; s1 = s2; s2 = tmp }
+                    if (s0 < s1) { val tmp = s0; s0 = s1; s1 = tmp }
+                    if (s0 <= 0f) continue
+                    val r2 = s1 / s0
+                    val r3 = s2 / s0
                     if (r2 < 0.12f) continue
 
-                    val cap = candidateCap()
-                    val sel = arrayOfNulls<TriangleStarIndex.TriEntry>(cap)
-                    val selDist = FloatArray(cap)
-                    val selKey = LongArray(cap)
-                    var n = 0
-                    for (key in TriangleStarIndex.quantizeKeys(r2, r3, window = 14)) {
-                        cBuckets++
-                        val list = idx.triMap[key] ?: continue
-                        for (t in list) {
-                            cEntries++
-                            val dr2 = abs(t.r2 - r2)
-                            if (dr2 >= 0.05f) continue
-                            val dr3 = abs(t.r3 - r3)
-                            if (dr3 >= 0.05f) continue
-                            val d = dr2 + dr3
-                            val k = TriangleStarIndex.triKey(t)
-                            var at = -1
-                            for (q in 0 until n) {
-                                if (selKey[q] == k) {
-                                    at = q
-                                    break
-                                }
-                            }
-                            if (at >= 0) {
-                                if (sel[at] !== t) sel[at] = t
-                                continue
-                            }
-                            if (n >= cap && d > selDist[n - 1]) continue
-                            var p = n
-                            while (p > 0 && TriangleStarIndex.triBefore(t, d, sel[p - 1]!!, selDist[p - 1])) p--
-                            if (p == cap) continue
-                            if (n < cap) n++
-                            var q = n - 1
-                            while (q > p) {
-                                sel[q] = sel[q - 1]
-                                selDist[q] = selDist[q - 1]
-                                selKey[q] = selKey[q - 1]
-                                q--
-                            }
-                            sel[p] = t
-                            selDist[p] = d
-                            selKey[p] = k
-                        }
-                    }
+                    val n = collectTopCandidates(
+                        flatBuckets = idx.flatBuckets,
+                        r2 = r2,
+                        r3 = r3,
+                        cap = cap,
+                        sideMin = 0.0,
+                        sideMax = Double.POSITIVE_INFINITY,
+                        narrowExpectedSide = null,
+                        sel = sel,
+                        selDist = selDist,
+                        selKey = selKey,
+                        scanStats = scanStats,
+                    )
                     cTriangles++
                     cMerged += n.toLong()
                     cTaken += n.toLong()
-                    val candidates = ArrayList<TriangleStarIndex.TriEntry>(n)
-                    for (q in 0 until n) candidates.add(sel[q]!!)
-
-                    val verified = candidates.filter { verifyCandidate(a, b, c, it, nbrs, work, grid) }
-                    for (t in verified) {
-                        vote(votes, pi, t.hipA)
-                        vote(votes, bi, t.hipB)
-                        vote(votes, ci, t.hipC)
-                        vote(votes, pi, t.hipA)
-                        vote(votes, bi, t.hipC)
-                        vote(votes, ci, t.hipB)
+                    for (q in 0 until n) {
+                        val t = sel[q]!!
+                        if (verifyCandidate(a, b, c, t, nbrs, work, grid, xsBuf, ysBuf, sxBuf, syBuf)) {
+                            vote(votes, pi, t.hipA)
+                            vote(votes, bi, t.hipB)
+                            vote(votes, ci, t.hipC)
+                            vote(votes, pi, t.hipA)
+                            vote(votes, bi, t.hipC)
+                            vote(votes, ci, t.hipB)
+                        }
                     }
                 }
             }
         }
         nTriangles.addAndGet(cTriangles)
-        nBucketLookups.addAndGet(cBuckets)
-        nEntriesScanned.addAndGet(cEntries)
+        nBucketLookups.addAndGet(scanStats[0])
+        nEntriesScanned.addAndGet(scanStats[1])
         nMerged.addAndGet(cMerged)
         nVerified.addAndGet(cTaken)
     }
@@ -713,6 +868,10 @@ internal object TriangleVoteScorer {
         nbrs: List<Pair<Int, Float>>,
         stars: List<DetectedStar>,
         grid: Map<Int, List<StarEntry>>,
+        xs: FloatArray = FloatArray(3),
+        ys: FloatArray = FloatArray(3),
+        sx: FloatArray = FloatArray(3),
+        sy: FloatArray = FloatArray(3),
     ): Boolean {
         val eA = TriangleStarIndex.hipMap[t.hipA] ?: return false
         val eB = TriangleStarIndex.hipMap[t.hipB] ?: return false
@@ -723,48 +882,30 @@ internal object TriangleVoteScorer {
         val (xA, yA) = StarFieldGeometry.tanXY(eA.ra, eA.dec, ra0, dec0)
         val (xB, yB) = StarFieldGeometry.tanXY(eB.ra, eB.dec, ra0, dec0)
         val (xC, yC) = StarFieldGeometry.tanXY(eC.ra, eC.dec, ra0, dec0)
-        val xs = floatArrayOf(a.x, b.x, c.x)
-        val ys = floatArrayOf(a.y, b.y, c.y)
-        val sideMax = maxOf(
-            StarFieldGeometry.angularDist(eA, eB),
-            StarFieldGeometry.angularDist(eA, eC),
-            StarFieldGeometry.angularDist(eB, eC),
-        )
-        val tolShape = max(0.05, 0.04 * sideMax)
-        val fitVariants = ArrayList<Pair<DoubleArray?, Boolean>>(4)
-        for (negX in listOf(false, true)) {
-            val signX = { v: Double -> if (negX) -v else v }
-            fitVariants.add(
-                StarFieldGeometry.fitSimilarity(
-                    xs, ys,
-                    floatArrayOf(signX(xA).toFloat(), signX(xB).toFloat(), signX(xC).toFloat()),
-                    floatArrayOf(yA.toFloat(), yB.toFloat(), yC.toFloat()),
-                ) to negX,
-            )
-            fitVariants.add(
-                StarFieldGeometry.fitSimilarity(
-                    xs, ys,
-                    floatArrayOf(signX(xA).toFloat(), signX(xC).toFloat(), signX(xB).toFloat()),
-                    floatArrayOf(yA.toFloat(), yC.toFloat(), yB.toFloat()),
-                ) to negX,
-            )
-        }
-        for ((fit, negX) in fitVariants) {
-            if (fit == null) continue
+        xs[0] = a.x; xs[1] = b.x; xs[2] = c.x
+        ys[0] = a.y; ys[1] = b.y; ys[2] = c.y
+        val tolShape = max(0.05, 0.04 * t.longestSideDeg.toDouble())
+        val maxK = min(8, nbrs.size)
+
+        for (variant in 0 until 4) {
+            val negX = (variant and 2) != 0
+            val swapBC = (variant and 1) != 0
+            val txA = if (negX) -xA else xA
+            val txB = if (negX) -(if (swapBC) xC else xB) else (if (swapBC) xC else xB)
+            val txC = if (negX) -(if (swapBC) xB else xC) else (if (swapBC) xB else xC)
+            val tyB = if (swapBC) yC else yB
+            val tyC = if (swapBC) yB else yC
+            sx[0] = txA.toFloat(); sx[1] = txB.toFloat(); sx[2] = txC.toFloat()
+            sy[0] = yA.toFloat(); sy[1] = tyB.toFloat(); sy[2] = tyC.toFloat()
+            val fit = StarFieldGeometry.fitSimilarity(xs, ys, sx, sy) ?: continue
             val s = fit[0]
             val ss = fit[1]
             val tx = fit[2]
             val ty = fit[3]
-            val bx = if (fit === fitVariants[0].first || fit === fitVariants[2].first) xB else xC
-            val by = if (fit === fitVariants[0].first || fit === fitVariants[2].first) yB else yC
-            val cx2 = if (fit === fitVariants[0].first || fit === fitVariants[2].first) xC else xB
-            val cy2 = if (fit === fitVariants[0].first || fit === fitVariants[2].first) yC else yB
-            fun residual(px: Float, py: Float, X: Double, Y: Double): Double =
-                hypot(s * px - ss * py + tx - X, ss * px + s * py + ty - Y)
-            if (residual(a.x, a.y, if (negX) -xA else xA, yA) > tolShape) continue
-            if (residual(b.x, b.y, if (negX) -bx else bx, by) > tolShape) continue
-            if (residual(c.x, c.y, if (negX) -cx2 else cx2, cy2) > tolShape) continue
-            for (k in 3 until min(8, nbrs.size)) {
+            if (hypot(s * a.x - ss * a.y + tx - txA, ss * a.x + s * a.y + ty - yA) > tolShape) continue
+            if (hypot(s * b.x - ss * b.y + tx - txB, ss * b.x + s * b.y + ty - tyB) > tolShape) continue
+            if (hypot(s * c.x - ss * c.y + tx - txC, ss * c.x + s * c.y + ty - tyC) > tolShape) continue
+            for (k in 3 until maxK) {
                 val d = stars[nbrs[k].first]
                 val xm = s * d.x - ss * d.y + tx
                 val ym = ss * d.x + s * d.y + ty
@@ -822,9 +963,13 @@ internal object TriangleVoteScorer {
                     val lab = nbrs[i].second
                     val lac = nbrs[j].second
                     val lbc = StarFieldGeometry.dist(b, c)
-                    val sides = floatArrayOf(lab, lac, lbc).sortedDescending()
-                    val r2 = sides[1] / sides[0]
-                    val r3 = sides[2] / sides[0]
+                    var s0 = lab; var s1 = lac; var s2 = lbc
+                    if (s0 < s1) { val tmp = s0; s0 = s1; s1 = tmp }
+                    if (s1 < s2) { val tmp = s1; s1 = s2; s2 = tmp }
+                    if (s0 < s1) { val tmp = s0; s0 = s1; s1 = tmp }
+                    if (s0 <= 0f) continue
+                    val r2 = s1 / s0
+                    val r3 = s2 / s0
                     if (r2 < 0.12f) continue
                     val strictRaw = ArrayList<TriangleStarIndex.TriEntry>()
                     for (key in TriangleStarIndex.quantizeKeys(r2, r3, window = 2)) {

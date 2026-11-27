@@ -191,6 +191,7 @@ object LocalStarMatcher {
         var recoveryDetail: String? = null
         var scoredFovRange: Pair<Double, Double>? = null
         var narrowFovHint: Double? = null
+        var wideFovHint: Double? = null
 
         fun copyMatchDiagnostics(from: MatchContext) {
             voteStats = from.voteStats
@@ -490,8 +491,10 @@ object LocalStarMatcher {
         compactRecoveryDetected: ((SolveToken) -> List<DetectedStar>)? = null,
     ): LocalMatchResult? {
         ctx.token?.check()
-        // A trusted narrow-field scale lets the scored search prioritize plausible triangles.
+        // A trusted FOV scale lets the scored search prune impossible-scale triangles early
+        // (narrow: tight 0.55..1.65 band; wide: generous 0.45..2.2 band tolerating TAN distortion & EXIF drift).
         ctx.narrowFovHint = fovHintDeg?.takeIf { it in 10.0..25.0 }
+        ctx.wideFovHint = fovHintDeg?.takeIf { it > 25.0 && it <= 140.0 }
         ctx.scoredFovRange = ctx.narrowFovHint?.let { FovEstimate.fovRange(it) }
         val tryIntermediate = allowDeepRetry && !debugDisableDeepCatalog &&
             debugForceCatalogMag == null && ctx.narrowFovHint != null
@@ -523,6 +526,7 @@ object LocalStarMatcher {
             val child = SolveToken(ctx.token, timeoutMillis = 30_000)
             val recovery = MatchContext(ctx.catalogMag, ctx.scoredCap, child)
             recovery.narrowFovHint = ctx.narrowFovHint
+            recovery.wideFovHint = ctx.wideFovHint
             recovery.scoredFovRange = fovHintDeg?.let { FovEstimate.fovRange(it) }
             return try {
                 child.check()
@@ -609,25 +613,42 @@ object LocalStarMatcher {
         val hasAlt = fallbackDetected != null && fallbackDetected !== detected &&
             fallbackDetected.size >= 5
         if (hasAlt) {
-            ctx.token?.check()
-            val savedCap = ctx.scoredCap
-            ctx.scoredCap = SCORED_PROBE_CANDIDATES
-            val probe = try {
-                matchInternal(ctx, detected, width, height, null)
-            } finally {
-                ctx.scoredCap = savedCap
+            val altList = fallbackDetected!!
+            if (detected.size <= altList.size) {
+                // §0.97b 起生产默认 primary=box-blur(≤100)、fallback=SEP(≤200)：
+                // 主星表本身就是更廉价的紧凑表，必须先给满预算，不能先用 2000 候选试探截断后
+                // 让大 SEP 备用表吃满 2 万候选把步骤预算耗尽（真机/模拟器 photo5057 复现根因）。
+                ctx.token?.check()
+                val full = matchInternal(ctx, detected, width, height, null)
+                if (full != null) return full
+                ctx.token?.check()
+                val alt = matchInternal(ctx, altList, width, height, null)
+                if (alt != null) {
+                    ctx.usedFallback = true
+                    return alt
+                }
+            } else {
+                // 主星表更大时沿用 §0.89 试探顺序：低成本试探主表 → 完整跑更小备用表 → 完整主表
+                ctx.token?.check()
+                val savedCap = ctx.scoredCap
+                ctx.scoredCap = SCORED_PROBE_CANDIDATES
+                val probe = try {
+                    matchInternal(ctx, detected, width, height, null)
+                } finally {
+                    ctx.scoredCap = savedCap
+                }
+                if (probe != null) return probe
+                ctx.token?.check()
+                val alt = matchInternal(ctx, altList, width, height, null)
+                if (alt != null) {
+                    ctx.usedFallback = true
+                    return alt
+                }
+                ctx.token?.check()
+                // 备用列表也没解出：回到主星表的完整预算（即未启用备用时的默认搜索）
+                val full = matchInternal(ctx, detected, width, height, null)
+                if (full != null) return full
             }
-            if (probe != null) return probe
-            ctx.token?.check()
-            val alt = matchInternal(ctx, fallbackDetected!!, width, height, null)
-            if (alt != null) {
-                ctx.usedFallback = true
-                return alt
-            }
-            ctx.token?.check()
-            // 备用列表也没解出：回到主星表的完整预算（即未启用备用时的默认搜索）
-            val full = matchInternal(ctx, detected, width, height, null)
-            if (full != null) return full
         } else {
             ctx.token?.check()
             val shallow = matchInternal(ctx, detected, width, height, null)
@@ -715,11 +736,20 @@ object LocalStarMatcher {
                 "backup=$msBackup;backupMulti=$msBackupMulti;scored=$msScored;" +
                 "total=${System.currentTimeMillis() - tStart}"
 
-        // 投票与 parity（镜像）无关：每个阈值只投一次，normal/mirrored 共享结果。
-        // （v1.5.8 的双阈值曾按"每 parity × 每阈值"各投一次，投票最多 4 轮，
-        //  失败/弱解照片识别耗时从 ~2s 涨到 ~9s；本重构降回最多 2 轮，成功率不变）
+        val voteTables = HashMap<List<DetectedStar>, TriangleVoteScorer.VoteTable>(4)
+        fun voteFor(threshold: Float, multi: Boolean = false): List<Pair<Int, StarEntry>> {
+            val work = detected.filter { it.brightness >= threshold }.take(45)
+            val table = voteTables.getOrPut(work) {
+                TriangleVoteScorer.computeVoteTable(ctx, work, width, height)
+            }
+            ctx.voteStats = table.stats
+            return TriangleVoteScorer.extractVotePairs(table, multi, pointingHint)
+        }
+
+        // 投票与 parity（镜像）无关：每个阈值只投一次，normal/mirrored 共享结果；
+        // 同一 work 子集在 multi / weak / backup 间复用投票表，避免重复扫描索引。
         val tA = System.currentTimeMillis()
-        val primaryPairs = votePairs(ctx, detected, width, height, t1, pointingHint = pointingHint)
+        val primaryPairs = voteFor(t1, multi = false)
         fun candidate(pairs: List<Pair<Int, StarEntry>>): LocalMatchResult? =
             bestCandidate(detected, width, height, pairs, pointingHint, ctx.catalogMag, ctx.scoredFovRange)
                 ?.takeIf { ctx.catalogMag != INTERMEDIATE_CATALOG_MAG || it.inlierCount >= NARROW_SCORED_MIN_REFINED_INLIERS }
@@ -734,9 +764,7 @@ object LocalStarMatcher {
         if (best == null) {
             ctx.token?.check()
             val tB = System.currentTimeMillis()
-            best = candidate(
-                votePairs(ctx, detected, width, height, t1, multi = true, pointingHint = pointingHint),
-            )
+            best = candidate(voteFor(t1, multi = true))
             msMulti = System.currentTimeMillis() - tB
             if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
                 ctx.phaseTimings = formatPhaseTimings()
@@ -760,9 +788,7 @@ object LocalStarMatcher {
             // 避免亮照片（top 上万）把弱星轮下限抬到 77+ 整片切掉（5057/5087 回归实测）
             val weakT = maxOf(minOf(top * WEAK_FLOOR_RATIO, 25f), anchor20 * 0.25f)
             if (weakT < t1) {
-                best = candidate(
-                    votePairs(ctx, detected, width, height, weakT, pointingHint = pointingHint),
-                )
+                best = candidate(voteFor(weakT, multi = false))
                 if (best?.inlierCount != null && best.inlierCount >= DUAL_THRESHOLD_STRONG_INLIERS) {
                     msWeak = System.currentTimeMillis() - tC
                     ctx.phaseTimings = formatPhaseTimings()
@@ -774,15 +800,13 @@ object LocalStarMatcher {
         if (t2 != t1) {
             ctx.token?.check()
             val tD = System.currentTimeMillis()
-            val backupPairs = votePairs(ctx, detected, width, height, t2, pointingHint = pointingHint)
+            val backupPairs = voteFor(t2, multi = false)
             var alt = candidate(backupPairs)
             msBackup = System.currentTimeMillis() - tD
             if (alt == null) {
                 ctx.token?.check()
                 val tE = System.currentTimeMillis()
-                alt = candidate(
-                    votePairs(ctx, detected, width, height, t2, multi = true, pointingHint = pointingHint),
-                )
+                alt = candidate(voteFor(t2, multi = true))
                 msBackupMulti = System.currentTimeMillis() - tE
             }
             // 备用轮只有拿到强解才反超主轮：弱解之间以主轮为准（主口味优先，
