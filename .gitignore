@@ -16,6 +16,8 @@ testdata/
 # --- 构建产物与打包输出 ---
 # 同样锚定根目录：避免误伤 src 下任何名为 apk 的目录
 /apk/
+/release apk/
+/debug apk/
 **/build/
 .gradle/
 .kotlin/
