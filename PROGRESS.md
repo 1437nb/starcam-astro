@@ -5,10 +5,10 @@
 >
 > 关联：AI 工具入口 `AGENTS.md` ・ 项目总纲 `交接说明.md` ・ 代码地图 `docs/01-项目架构与代码地图.md`
 
-**最后更新**：2026-11-23（v1.5.105 §0.144 复杂星空离线识别 P1→P4 系统优化 + 完整 JVM 回归与 Debug 包审计完成）
-**当前基线**：本地开发版 Debug v1.5.105（versionCode 125，§0.144 复杂星空离线识别与叠加精度优化，`StarCam-v1.5.105-offline-complex-sky-recovery-debug.apk`，25,378,446 字节，SHA-256 `cea2e812ebc2650bc26fe2e4f7f5c72acc8928606565fff9ac086dc7ef2d369f`；`libstellar_solver.so` SHA-256 `db3808cee065379c5b57b36f7f054f051ec2fd6590db3b78a1d2e4599859a101`）；本地签名版 Release 仍为 v1.5.104（`apk/StarCam-v1.5.104-polish-ui-and-interactions-release.apk`），最近公开 Release 为 v1.5.96 / tag `v1.5.96`。
+**最后更新**：2026-11-27（v1.5.105 相机图标防重叠、`#5057` 30s 超时修复、模拟星空双模式自选 + 官方签名 Release APK 归档与全套安全/二进制审计完成）
+**当前基线**：本地官方签名 Release **v1.5.105**（versionCode 125，`release apk/StarCam-v1.5.105-offline-complex-sky-recovery-release.apk`，`13,049,129` 字节 / `12.44 MiB`，SHA-256 `D14B20DE6C068C0A5E88995214D3A7F79B703DE733E23723C36B3857A026AA6A`，官方证书 `CN=StarCam` 指纹 `b04a854f...` 与 `v1.5.96`/`v1.5.104` 一致；`libstellar_solver.so` SHA-256 `db3808cee065379c5b57b36f7f054f051ec2fd6590db3b78a1d2e4599859a101`）；同期 Debug 包已同步至 `debug apk/StarCam-v1.5.105-offline-complex-sky-recovery-debug.apk`；最近公开 Release 仍为 `v1.5.96`（待推送 GitHub 与发布 `v1.5.105`）。
 **工作区**：`C:\starcam`（本地唯一主力工作区：Windows 11，i9-14900HX 24核32线程，JDK 17 + Android SDK 34 全套本机构建）
-**构建环境**：v1.5.105 完整本机 JVM 回归（不含 `skipPhotoTests`）**66 套 / 417 项全通**（0 失败 / 0 错误，仅 1 项依赖可选本地文件的 `Assume` 跳过）；`lintDebug` **0 错误 / 9 警告**；默认 `arm64-v8a` Debug APK 通过 8 档 FITS 逐字节一致、`libstellar_solver.so`（`db3808ce...`）未压缩且 16 KB 对齐（偏移 `13,303,808`）、零 `testdata` 与零 `x86_64` 泄漏审计；Android 14 `x86_64` 模拟器 `complex-sky-20261123-v1` 16 图离线基准由 **5/16 → 9/16**（0 误判），`android_acceptance.py` 功能 **34/34 通过**（2026-11-27 同步 `tools/android_acceptance.py` UI 选择器与横屏滚动后，默认 Debug APK 在 API 34 模拟器实跑功能 **32/32 通过**、UI **9/9 全通**）。本轮未构建 Release、未推送。工具链与辅助机器见 `AGENTS.md` §0 与 §2。
+**构建环境**：CI 同口径常规 JVM 回归（`-PskipPhotoTests=true`）**56 类 / 399 项全通**（0 失败 / 0 错误，仅 1 项依赖可选本地文件的 `Assume` 跳过；公开 12 张演示照 `12/12 TRUE-SOLVE`）；v1.5.105 签名 Release APK 通过 `check_secrets.py`（482 文件 0 命中）、`git ls-files`（0 敏感文件）、`apksigner` v2 同证书验签、`zipalign -c -p 4`、8 档 FITS 与 12 张演示照逐字节一致、`libstellar_solver.so`（`db3808ce...`）未压缩且 16 KB 对齐（偏移 `2,490,368`）、无 `debuggable`/测试入口/`vcsInfo`/`SDKP` 全套二进制审计；API 34 模拟器（含 `x86_64/libstellar_solver.so`）冷启动复测 `#5057` 由 `30.6s` 超时降至 `10.0s` 解出（32 内点，`p50=1.93px`），相机顶栏图标与离线演示双模式 UI 均已实机截图验收。待用户下达推送与发版指令。工具链与辅助机器见 `AGENTS.md` §0 与 §2。
 
 ---
 

@@ -8,7 +8,7 @@
 
 An **offline-first** Android app for astrophotography plate-solving and night sky identification. Capture or import night-sky photos to perform on-device blind plate-solving (RA, Dec, FOV, orientation, parity), overlay constellation lines, proper star names, Messier deep-sky objects, and real-time Sun/Moon/planet positions, or explore the sky with the sensor-driven AR live star map.
 
-**Local development v1.5.105 (versionCode 125, §0.144)** completes systematic P1–P4 offline complex-sky recognition and overlay accuracy optimizations (keeping UI, rendering, and JNI signatures untouched): reserves native solver time budget and weighted blind segments in serial scheduling; fixes missing descending flux sorting (`starxy_sort_by_flux`) in `astro_bridge.c` and rebuilds `.so` binaries; supports validated optional extra FITS indexes (`files/indexes/extra/`); adds budgeted sky-region cropping (with exact FITS `crpix` remapping), local tile-quantile skyglow subtraction + hot-spot despiking, and widened-FOV fallback; and introduces holdout overlay quality evaluation with conservative 6-parameter affine TAN refitting (`suburban-skyglow` holdout P50 `17.71 → 3.92 px`, Nova center delta `0.059° → 0.033°`). On the 16-photo 30s offline complex-sky benchmark, solved rate improves from **5/16 to 9/16** (0 false solves), passing full JVM regression (**66 suites / 417 tests**, 0 failures/errors) and `lintDebug` (0 errors). [Validation report](docs/129-验证报告增补-§0.144-复杂星空离线识别P1至P4系统优化v1.5.105.md)
+**Latest release v1.5.105 (versionCode 125, §0.144)** rolls up all updates from `v1.5.97` through `v1.5.105`: delivers systematic P1–P4 offline complex-sky recognition and overlay accuracy improvements (reserved native budget & weighted blind segments, `starxy_sort_by_flux` fix in `astro_bridge.c` with rebuilt `.so`, validated optional extra FITS indexes, budgeted sky-region cropping with exact `crpix` remapping & local skyglow subtraction, plus holdout evaluation with conservative 6-parameter TAN refitting — lifting the 16-photo 30s offline complex-sky benchmark from **5/16 to 9/16** with 0 false solves); resolves the `#5057` wide-field 30s timeout via compact-primary budget ordering, cached triangle vote tables, and a flat 256×256 concentric-ring lookup (cold emulator solve `30s+ fail → 10.0s`, 32 inliers); fixes top-right camera HUD icon overlap; and adds a user-selectable dual-mode synthetic star field generator on Offline Demo (**Classic Sky** with 18 non-repeating constellations or direct pick, and **All-Sky Roam** with solid-angle uniform sampling & FOV presets). Also includes v1.5.104 UI/UX polish across 20 screens/components, v1.5.103 modular architecture refactoring, and v1.5.102 28 audited stability fixes. Passes **56 suites / 399 CI unit tests** (0 failures/errors, 12/12 public demo photos true-solved) and full release signature + 16 KB binary auditing. See [release notes](docs/release-notes-v1.5.105.md) and [§0.144 validation report](docs/129-验证报告增补-§0.144-复杂星空离线识别P1至P4系统优化v1.5.105.md).
 
 **Local signed build v1.5.104 (versionCode 124, §0.143)** polishes UI and interaction flows across 20 Compose UI files in all four feature domains while keeping plate-solving algorithms, JNI signatures, and the rendering pipeline untouched: adds a 1-tap Night Vision Red & engine status strip on Home, a spherical Canvas Moon-phase disc in `TonightSkyCard`, and a 5-card Material 3 `SettingsScreen` with API Key visibility toggle; upgrades the Camera viewfinder with custom vector frosted HUD capsules, a collapsible one-handed Pro exposure drawer with 3 clamped astrophotography presets, and a searchable/filterable `ArTargetPicker`; refines `ResultScreen` with an adaptive aspect-ratio photo viewport (preserving zero-pixel WCS alignment), a 1-tap zoom-reset full-screen viewer HUD, and a 2×2 telemetry grid with clipboard coordinate copy; and unlocks immediate per-photo inspection while a batch is still running, adds a clear-all confirmation dialog in `HistoryScreen`, and upgrades the `GalleryScreen` floating multi-select bar and `OfflineDemoScreen` hero card — passing 52 test classes / 378 unit tests, `lintDebug` (0 errors), and a locally archived official signed R8 Release APK (`13,032,749` bytes, SHA-256 `559E6ABDC37D7C2468F448384914CEB1E2309F957A2BE553F56DD1A4A540CBB6`, same `CN=StarCam` certificate as v1.5.96 for in-place upgrades; not yet published). [Validation report](docs/128-验证报告增补-§0.143-全应用交互与视觉体验精修v1.5.104.md)
 
@@ -30,7 +30,7 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 ## Download
 
-**Latest release v1.5.96 (versionCode 116, §0.135)** prepares StarCam for F-Droid inclusion: upgrades the license to **GPL-3.0-or-later** with a complete [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), disables the AGP encrypted `dependenciesInfo` signing block and `vcsInfo`, makes `tools/build_native.py` build cleanly from SHA-256-pinned sources across Linux (CMake 3.22–4.x) and Windows, and adds Fastlane metadata plus the [F-Droid build recipe](docs/fdroid/com.starcam.astro.yml). See the [release notes](docs/release-notes-v1.5.96.md) and [§0.135 report](docs/120-F-Droid上架准备-§0.135.md).
+**v1.5.96 (versionCode 116, §0.135)** prepares StarCam for F-Droid inclusion: upgrades the license to **GPL-3.0-or-later** with a complete [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), disables the AGP encrypted `dependenciesInfo` signing block and `vcsInfo`, makes `tools/build_native.py` build cleanly from SHA-256-pinned sources across Linux (CMake 3.22–4.x) and Windows, and adds Fastlane metadata plus the [F-Droid build recipe](docs/fdroid/com.starcam.astro.yml). See the [release notes](docs/release-notes-v1.5.96.md) and [§0.135 report](docs/120-F-Droid上架准备-§0.135.md).
 
 **v1.5.95 (versionCode 115, §0.134)** hardens cancellation and time budgets, large-FITS memory use, import isolation, individual retry synchronization, online cache orientation, and raced bitmap ownership. It restores a pinned source build of the native solver and fixes its acceptance threshold and WCS reference pixels / axis direction. See the [changes and verifiable checklist](docs/119-验证报告增补-§0.134-稳定性收尾与原生源码重建v1.5.95.md).
 
@@ -44,19 +44,20 @@ An **offline-first** Android app for astrophotography plate-solving and night sk
 
 **v1.5.92 (versionCode 112)** lets you open each completed batch photo in the full result viewer, reuse its solution, choose layers, and export only the photos you want. Returning preserves the batch list. **Batch solving no longer saves every annotated photo automatically.** This release also includes import progress and cancellation, solving phases and elapsed time, performance improvements, and bilingual refinements. See the [release notes](docs/release-notes-v1.5.92.md) and [validation checklist](docs/114-验证报告增补-§0.131-批量逐张查看与手动导出v1.5.92.md).
 
-Latest release: **[v1.5.96](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.96)**
+Latest release: **[v1.5.105](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.105)**
 
 | Package | Size | Notes |
 | :--- | :--- | :--- |
-| **[StarCam-v1.5.96-fdroid-readiness-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.96/StarCam-v1.5.96-fdroid-readiness-release.apk)** | 12.3 MiB | **Recommended** — R8-minified official signed APK (in-place upgrade) |
+| **[StarCam-v1.5.105-offline-complex-sky-recovery-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.105/StarCam-v1.5.105-offline-complex-sky-recovery-release.apk)** | 12.4 MiB | **Recommended** — R8-minified official signed APK (same `CN=StarCam` cert as v1.5.96 for in-place upgrades) |
 
 - **Requirements**: Android 8.0 (API 26) or newer on an **arm64-v8a** device (the bundled native `astrometry.net` engine targets arm64; x86_64 emulators gracefully fall back to the pure-JVM catalog solver).
 - **Using batch results**: Select photos and wait for completion → open a photo → choose layers → save the current annotations or constellation lines only. Viewing and returning does not export to your gallery.
-- **Recent Highlights (v1.5.88 – v1.5.92)**:
-  - **v1.5.92**: Individual batch photo viewing and manual export, cached solutions, and preserved batch results on return;
-  - **v1.5.91**: Unified import panel, background copy progress and cancellation, clearer offline status, solving phases and elapsed time, shared image preprocessing, thumbnail caching, and rendering buffers;
-  - **v1.5.88 – v1.5.90**: Pure black / white themes, full-row settings switches, bilingual solving messages, magnitude labels and history constellation names, plus performance and robustness improvements.
-- **APK SHA-256**: `44152A718334921791E530F852DA1113BA07FF5AAB1931BE8DF1F9E24D363347`.
+- **Recent Highlights (v1.5.97 – v1.5.105)**:
+  - **v1.5.105**: P1–P4 offline complex-sky recognition & holdout overlay refinement, `#5057` wide-field timeout fix & 8× faster triangle lookup, camera top-right icon overlap fix, and dual-mode synthetic sky selector (**Classic Sky** 18 constellations / **All-Sky Roam**);
+  - **v1.5.104**: UI/UX polish across 20 Compose files (Night Vision Red pill, spherical Moon-phase disc, frosted camera HUD & collapsible Pro drawer, adaptive result canvas & 2×2 telemetry grid, early-open batch review);
+  - **v1.5.102 – v1.5.103**: Modular architecture decomposition into 17 cohesive modules and 28 audited stability, concurrency, JNI, FITS, and WCS fixes;
+  - **v1.5.97 – v1.5.101**: Local background & compact-SNR star detection, 4-edge foreground sky recovery with whole-frame refitting, and intermediate catalog matching for trusted narrow fields.
+- **APK SHA-256**: `D14B20DE6C068C0A5E88995214D3A7F79B703DE733E23723C36B3857A026AA6A`.
 - Full version history and release notes: **[GitHub Releases](https://github.com/1437nb/starcam-astro/releases)** & [`docs/`](docs/).
 
 ---
@@ -95,8 +96,8 @@ Latest release: **[v1.5.96](https://github.com/1437nb/starcam-astro/releases/tag
 │       ├── main/assets/offline_photos/      # 12 public night-sky demo photos
 │       ├── main/jniLibs/arm64-v8a/          # libstellar_solver.so native solver (rebuildable from source via tools/build_native.py)
 │       ├── main/cpp/astro_bridge.c          # JNI bridge source
-│       └── test/java/com/starcam/astro/     # Standard suite: 52 classes / 378 tests (full local suite: 63 classes / 402 tests)
-├── docs/                   # Architecture & 120+ validation reports (through §0.143)
+│       └── test/java/com/starcam/astro/     # Standard CI suite: 56 classes / 399 tests (incl. 12 public demo photos & DemoSolver)
+├── docs/                   # Architecture & 129+ validation reports (through §0.144)
 ├── tools/                  # Catalog generators, truth calibration & release scripts
 ├── fastlane/metadata/      # F-Droid store metadata (zh-CN / en-US descriptions, changelogs, icon, screenshots)
 ├── THIRD_PARTY_NOTICES.md  # Sources and licenses of bundled third-party code, data and media

@@ -1,0 +1,4 @@
+• P1–P4 offline complex-sky solving and holdout overlay refinement with native flux-sorting fix and sky-region cropping
+• Fixed #5057 wide-field timeout via compact-primary budget ordering, cached vote tables, and flat 256×256 ring lookup
+• Added dual-mode synthetic sky selector on Offline Demo: 18 Classic Constellations or All-Sky uniform spherical roam
+• Includes app-wide UI polish, camera HUD overlap fix, modular architecture refactoring, and 28 stability fixes
