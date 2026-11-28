@@ -12,11 +12,11 @@
 
 ## 下载安装
 
-最新版本：**[v1.5.105](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.105)**（[更新说明](docs/release-notes-v1.5.105.md) · [全部历史版本](https://github.com/1437nb/starcam-astro/releases)）
+最新版本：**[v1.5.106](https://github.com/1437nb/starcam-astro/releases/tag/v1.5.106)**（[更新说明](docs/release-notes-v1.5.106.md) · [全部历史版本](https://github.com/1437nb/starcam-astro/releases)）
 
 | 安装包 | 大小 | SHA-256 |
 | :--- | :--- | :--- |
-| **[StarCam-v1.5.105-offline-complex-sky-recovery-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.105/StarCam-v1.5.105-offline-complex-sky-recovery-release.apk)** | 12.4 MiB | `D14B20DE6C068C0A5E88995214D3A7F79B703DE733E23723C36B3857A026AA6A` |
+| **[StarCam-v1.5.106-online-nova-solver-fix-release.apk](https://github.com/1437nb/starcam-astro/releases/download/v1.5.106/StarCam-v1.5.106-online-nova-solver-fix-release.apk)** | 12.46 MiB | `D5C0400E8F3E391F5E84B1071C5602AEBB923CD3385881E6BD06F2643E209786` |
 
 - **系统要求**：Android 8.0（API 26）及以上，推荐 **arm64-v8a** 真机（随包内置离线 `astrometry.net` 原生引擎；x86_64 模拟器自动回退至纯 JVM 星表引擎），官方签名包支持直接覆盖安装升级。
 
